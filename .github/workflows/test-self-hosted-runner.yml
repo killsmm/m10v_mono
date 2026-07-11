@@ -30,3 +30,21 @@ jobs:
 
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Show Docker information
+        run: |
+          docker version
+          docker info
+
+      - name: Build Docker image
+        run: docker build --tag runner-smoke-test:${{ github.run_id }} .
+
+      - name: Run Docker image
+        run: |
+          output=$(docker run --rm runner-smoke-test:${{ github.run_id }})
+          echo "$output"
+          test "$output" = "Docker build succeeded"
+
+      - name: Remove Docker image
+        if: always()
+        run: docker image rm --force runner-smoke-test:${{ github.run_id }} || true
