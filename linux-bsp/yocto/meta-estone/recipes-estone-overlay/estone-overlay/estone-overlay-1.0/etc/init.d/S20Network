@@ -1,0 +1,25 @@
+#!/bin/sh
+
+#init network
+
+source /etc/load_sysconfig.sh
+
+if [ "$ETHER_TYPE" = "usb2" ]
+then
+    insmod /lib/modules/"$(uname -r)"/kernel/drivers/usb/gadget/udc/sn_usb20_udc.ko
+    modprobe libcomposite
+    gadget_rndis.sh
+elif [ "$ETHER_TYPE" = "usb3" ]
+then
+    modprobe dwc3_sn hostmode=0
+    modprobe libcomposite
+    gadget_rndis.sh
+else 
+    net_init
+    modprobe dwc3_sn hostmode=1
+fi
+
+#start sshd
+mkdir -p /var/run/sshd
+chmod 0755 /var/run/sshd
+/usr/sbin/sshd

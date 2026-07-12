@@ -1,0 +1,6 @@
+build-*/
+.git_deprecated
+.vscode*
+vscode*
+*.pyc
+build/

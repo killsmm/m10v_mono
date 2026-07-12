@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# Send finish boot
+/usr/bin/camera_if finish_boot &
+
+exit
+
+

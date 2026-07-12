@@ -1,0 +1,657 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+	<title>Other</title>
+	<link href="../css/bootstrap.css" rel="stylesheet">
+	<style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+	</style>
+	<link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+
+<!-- parameter setting -->
+<!-- ISP Option -->
+<div class="row" style="background-color:#FFF">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> ISP Option for Video </label>
+	</font>
+	</div>
+</div>
+
+<!-- 
+Face Detection & Tracking is moved 11_fd.html 
+-->
+	<!-- Video Image Stabilization -->
+<div class="row" style="background-color:#EEE">
+	<!-- Enabled -->
+	<section id="Video Image Stabilization">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Video Image Stabilization(Enabled)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="VIDEO_IMAGE_STABILIZATION">
+	<option value="0"selected>OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Stabilization(Enabled)</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_VIDEO_IMAGE_STABILIZATION" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+	<!-- Video HDR -->
+<div class="row" style="background-color:#FFA">
+	<!-- Enabled -->
+	<section id="Video HDR">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Video HDR(Enabled)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="VIDEO_HDR">
+	<option value="0"selected>OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Video HDR(Enabled)</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_VIDEO_HDR" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+	<!-- 3DNR -->
+<div class="row" style="background-color:#EEE">
+	<!-- Enabled -->
+	<section id="3DNR">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> 3DNR(Enabled)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_3DNR">
+	<option value="0">OFF</option>
+	<option value="1"selected>ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting 3DNR(Enabled)</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_3DNR" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+	<!-- Backlight Compensation -->
+<div class="row" style="background-color:#FFA">
+	<!-- Enabled -->
+	<section id="Backlight_Compensation">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Backlight_Compensation(Enabled)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="BACKLIGHT_COMPENSATION">
+	<option value="0"selected>OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Backlight_Compensation(Enabled)</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_BACKLIGHT_COMPENSATION" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+	<!-- Defog -->
+<div class="row" style="background-color:#EEE">
+	<!-- Enabled -->
+	<section id="Defog">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Simple Defog(Enabled)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="DEFOG">
+	<option value="0"selected>OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Simple Defog(Enabled)</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_DEFOG" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+<!-- 
+Person Detection is moved 12_pd.html
+-->
+<!-- 
+Object Detection is moved 09_od.html
+-->
+
+<!-- 
+Tampering Alert is moved 10_ta.html
+-->
+
+<!-- Face detection -->
+<!--
+<div class="row" style="background-color:#FFF">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Face detection </label>
+	</font>
+	</div>
+</div>
+-->
+
+
+	<!-- Face width-->
+<!--
+<div class="row" style="background-color:#FFA">
+    <section id="Face_width">
+    <div class="form-group col-xs-12 col-sm-4 col-md-4">
+    <div style="float:left;">
+    <label> Face width</label>
+    </div>
+    <div class="col-xs-6 col-sm-6 col-md-6">
+    <input id="TXT_FACE_W" type="text" class="form-control" value="0">
+    </div>
+    </div>
+    </section>
+-->
+	<!-- Face height-->
+<!--
+    <section id="Face_height">
+    <div class="form-group col-xs-12 col-sm-4 col-md-4">
+    <div style="float:left;">
+    <label> Face height</label>
+    </div>
+    <div class="col-xs-6 col-sm-6 col-md-6">
+    <input id="TXT_FACE_H" type="text" class="form-control" value="0">
+    </div>
+    </div>
+    </section>
+-->
+	<!-- Face count-->
+<!--
+    <section id="Face_count">
+    <div class="form-group col-xs-12 col-sm-4 col-md-4">
+    <div style="float:left;">
+    <label> Face count</label>
+    </div>
+    <div class="col-xs-6 col-sm-6 col-md-6">
+    <input id="TXT_FACE_COUNT" type="text" class="form-control" value="1">
+    <label> 1~20</label>
+    </div>
+    </div>
+    </section>
+-->
+	<!-- SET BUTTON -->
+<!--
+    <div class="form-group col-xs-12 col-sm-12 col-md-12">
+    <div>
+    <label>Please push, after setting Face detection</label>
+    </div>
+    <div class="col-xs-12 col-sm-12 col-md-12">
+    <button id="Btn_UPDATE_FACE_DET" class="btn btn-primary" >Update</button>
+    <br><br>
+    </div>
+    </div>
+</div>
+-->
+<!-- Start FW Update -->
+<div class="row" style="background-color:#FFF">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Start FW Update </label>
+	</font>
+	</div>
+</div>
+
+	<!-- FW Update-->
+<div class="row" style="background-color:#FFA">
+	<!-- Type-->
+	<section id="FW_Update_type">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Type</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_FW_UP_TYPE">
+<!--	<option value="0">Update from SD Card</option>-->
+	<option value="1">Update from Memory(Fixed)</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- address -->
+        <section id="FW_Update_adr">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Address(address of update data.)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_FW_UPDATE_AD" type="text" class="form-control" value="0">
+        </div>
+        </div>
+        </section>
+	<!-- size -->
+        <section id="FW_Update_size">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Size(update file size)(for "Update from Memory")</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_FW_UPDATE_SZ" type="text" class="form-control" value="0">
+        </div>
+        </div>
+        </section>
+	<!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Start FW Update</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_UPDATE_FW" class="btn btn-primary" >Update</button>
+        </div>
+        </div>
+</div>
+
+
+
+<!-- Simple Tool-->
+<!--
+<div class="row" style="background-color:#FFF">
+    <div class="form-group col-xs-12 col-sm-12 col-md-12">
+    <font size="5">
+    <label> Simple Tool</label>
+    </font>
+    </div>
+</div>
+-->
+
+
+	<!-- Update -->
+<!--
+<div class="row" style="background-color:#FFA">
+	<section id="Update">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Update</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_ST_UPDATE">
+	<option value="1">video update(Fixed)</option>
+	</select>
+	</div>
+	</div>
+	</section>
+-->
+	<!-- iq type -->
+<!--
+	<section id="iq type">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> iq type</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_ST_IQ_TYPE">
+	<option value="0"selected>IQ</option>
+	<option value="1">AE</option>
+	<option value="2">AWB</option>
+	</select>
+	</div>
+	</div>
+	</section>
+-->
+	<!-- iq id -->
+<!--
+	<section id="iq id">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> iq id </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_ST_IQ_ID">
+	<option value="0"selected>common</option>
+	<option value="1">bin0</option>
+	<option value="2">bin1</option>
+	<option value="3">bin2</option>
+	<option value="4">bin3</option>
+	<option value="5">bin4</option>
+	<option value="6">bin5</option>
+	<option value="7">bin6</option>
+	<option value="8">bin7</option>
+	<option value="9">bin8</option>
+	</select>
+	</div>
+	</div>
+	</section>
+-->
+	<!-- SET BUTTON -->
+<!--
+    <div class="form-group col-xs-12 col-sm-12 col-md-12">
+    <div>
+    <button id="Btn_SAVE_NAND" class="btn btn-primary" >Save NAND</button>
+    <br><br>
+    </div>
+    </div>
+-->
+	<!-- SET BUTTON -->
+<!--
+    <div class="form-group col-xs-12 col-sm-12 col-md-12">
+    <div>
+    <button id="Btn_SAVE_SD" class="btn btn-primary" >Save SD</button>
+    <br><br>
+    </div>
+    </div>
+-->
+	<!-- SET BUTTON -->
+<!--
+    <div class="form-group col-xs-12 col-sm-12 col-md-12">
+    <div>
+    <button id="Btn_READ_SD" class="btn btn-primary" >Read SD</button>
+    <br><br>
+    </div>
+    </div>
+-->
+	<!-- SET BUTTON -->
+<!--
+    <div class="form-group col-xs-12 col-sm-12 col-md-12">
+    <div>
+    <button id="Btn_START" class="btn btn-primary" >Start</button>
+    <br><br>
+    </div>
+    </div>
+-->
+	<!-- SET BUTTON -->
+<!--
+    <div class="form-group col-xs-12 col-sm-12 col-md-12">
+    <div>
+    <button id="Btn_STOP" class="btn btn-primary" >Stop</button>
+    <br><br>
+    </div>
+    </div>
+</div>
+-->
+
+
+
+
+<!-- Display -->
+<div class="row" style="background-color:#FFF">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Display Configuration</label>
+	</font>
+	</div>
+</div>
+
+	<!-- Display -->
+<div class="row" style="background-color:#FFA">
+	<!-- Enable(HDMI,LCD),Camera Select -->
+	<section id="Display">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Display</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_DISPLAY">
+	<option value="0">OFF</option>
+	<option value="1">HDMI - Front or Stitched Image</option>
+	<option value="2">HDMI - Rear</option>
+	<option value="3">HDMI - Left</option>
+	<option value="4">HDMI - Right</option>
+	<option value="5">LCD - Front or Stitched Image</option>
+	<option value="6">LCD - Rear</option>
+	<option value="7">LCD - Left</option>
+	<option value="8">LCD - Right</option>
+	</select>
+        </div>
+        <nobr><label> 4Sensor camera(4 separate):Front or Stitched Image , Rear, Left, Right select</label></nobr>
+        <nobr><label> 4Sensor camera(4Division,2panorama,1panorama+2Division):Front or Stitched Image only</label></nobr>
+        <nobr><label> Dual camera(Stitch PtnA,PtnB):Front or Stitched only</label></nobr>
+        <nobr><label> DOL Mode[Single DOL Camera](DOL,None DOL):Front or Stitched only</label></nobr>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Display</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_DISPLAY" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+<!-- Stitch Configuration -->
+<div class="row" style="background-color:#FFF">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Stitch Configuration (for 4Sensor Camera only)</label>
+	</font>
+	</div>
+</div>
+<div class="row" style="background-color:#FFA">
+        <!-- Offset Pixels -->
+        <section id="Stitch_Offset_Pixels">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Offset Pixels</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_STITCH_OFFSET_PIXELS" type="text" class="form-control" value="0">
+        </div>
+        </div>
+        </section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after Stitch Center Offset</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_STITCH_OFFSET_PIXELS" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+<!-- Change DOL Mode -->
+<div class="row" style="background-color:#FFF">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> DOL Mode(for Single DOL Camera)</label>
+	</font>
+	</div>
+</div>
+
+	<!-- DOL Mode -->
+<div class="row" style="background-color:#FFA">
+	<section id="DOL Mode">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> DOL Mode(This command is for Single DOL Camera only)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="CHANGE_DOL_MODE">
+	<option value="0">DOL</option>
+	<option value="1">NoneDOL/NoneHDR None3DNR 60fps</option>
+	<option value="2">NoneDOL/NoneHDR With3DNR 30fps</option>
+	<option value="3">None DOL</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting DOL Mode</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_DOL_MODE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+<!-- Storage -->
+<div class="row" style="background-color:#FFF">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Storage Configuration</label>
+	</font>
+	</div>
+</div>
+
+<!-- SD Save -->
+<div class="row" style="background-color:#FFA">
+	<section id="SDsave">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> SD Save(Enabled) Save</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_SDSAVE">
+	<option value="0">OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	<nobr><label> SD save target  is Main stream only.</label></nobr>
+	<nobr><label> While SD recording, Sub_1 and Sub_2 will be streaming.</label></nobr>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting SD Save</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_SDSAVE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+<!-- Crop Stream -->
+<div class="row" style="background-color:#FFF">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Crop Stream Configuration(for Single Camera only)</label>
+	</font>
+	</div>
+</div>
+
+
+
+<!-- Crop Stream -->
+<div class="row" style="background-color:#FFA">
+	<section id="Corp_Stream">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Stream Select</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_CROPSTREAM">
+	<option value="1"selected>Crop Stream1</option>
+	<option value="2">Crop Stream2</option>
+	<option value="3">Crop Stream3</option>
+	<option value="4">Crop Stream4</option>
+	</select>
+	</div>
+	</div>
+	</section>
+
+	<!-- X Coordnate -->
+        <section id="Crop_Stream_X">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> X Coordinate</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_CROP_STREAM_X" type="text" class="form-control" value="0">
+        </div>
+        </div>
+        </section>
+	<!-- Y Coordnate -->
+        <section id="Crop_Stream_Y">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Y Coordinate</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_CROP_STREAM_Y" type="text" class="form-control" value="0">
+        </div>
+        </div>
+        </section>
+	<!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Crop Steream</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_UPDATE_CROP_STREAM" class="btn btn-primary" >Update</button>
+        </div>
+        </div>
+</div>
+	
+
+
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/99_m10v.js"></script>
+<script src="/webui/js/99_m10v_r.js"></script>
+
+</body>
+</html>

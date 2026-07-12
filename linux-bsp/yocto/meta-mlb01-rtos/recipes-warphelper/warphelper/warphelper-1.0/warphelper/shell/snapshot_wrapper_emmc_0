@@ -1,0 +1,3 @@
+#!/bin/sh
+
+/tmp/snapshot -c1 -s1

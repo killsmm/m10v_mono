@@ -1,0 +1,22 @@
+diff --git a/a/server/server.cpp b/b/server/server.cpp
+index 77a1533..20cac13 100644
+--- a/server/server.cpp
++++ b/server/server.cpp
+@@ -74,7 +74,7 @@ private:
+             storageID,
+             path,
+             name,
+-            1024 * 1024 * 100,  /* 100 MB reserved space, to avoid filling the disk */
++            0,  /* 0 MB reserved space, to avoid filling the disk */
+             true,
+             1024 * 1024 * 1024 * 4  /* 4GB arbitrary max file size */);
+ 
+@@ -211,7 +211,7 @@ public:
+             MTP_STORAGE_FIXED_RAM,
+             userdata->pw_dir,
+ 	    "exported_storage",
+-            1024 * 1024 * 100,  /* 100 MB reserved space, to avoid filling the disk */
++            0,  /* 0 MB reserved space, to avoid filling the disk */
+             false,
+             1024 * 1024 * 1024 * 2  /* 2GB arbitrary max file size */);
+ 

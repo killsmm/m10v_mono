@@ -1,0 +1,183 @@
+#
+# Warp!! snapshot script  Rev. 5.0.0
+#
+
+do_snapshot=1
+param_error=0
+
+echo 0 > /proc/warp/error
+echo 0 > /proc/warp/canceled
+saveno_sav=`cat /proc/warp/saveno`
+loadno_sav=`cat /proc/warp/loadno`
+compress_sav=`cat /proc/warp/compress`
+shrink_sav=`cat /proc/warp/shrink`
+separate_sav=`cat /proc/warp/separate`
+division_sav=`cat /proc/warp/division`
+oneshot_sav=`cat /proc/warp/oneshot`
+halt_sav=`cat /proc/warp/halt`
+silent_sav=`cat /proc/warp/silent`
+
+separate_delay=10
+separate_command=""
+
+for arg in $*
+do
+#  cmd=`echo $arg | cut -c1-2`
+#  param=`echo $arg | cut -c3-`
+  cmd=${arg:0:2}
+  param=${arg:2}
+  case $cmd in
+  -s)
+    if [ "$param" != "" ]; then
+      echo $param > /proc/warp/saveno
+    else
+      param_error=1
+      break
+    fi
+    ;;
+  -l)
+    if [ "$param" != "" ]; then
+      echo $param > /proc/warp/loadno
+    else
+      param_error=1
+      break
+    fi
+    ;;
+  -w)
+    if [ "$param" = "" ]; then
+      param="1"
+    fi
+    echo $param > /proc/warp/switch
+    ;;
+  -c)
+    if [ "$param" = "" ]; then
+      param="1"
+    fi
+    echo $param > /proc/warp/compress
+    ;;
+  -r)
+    if [ "$param" = "" ]; then
+      param="1"
+    fi
+    echo $param > /proc/warp/shrink
+    ;;
+  -p)
+    if [ "$param" = "" ]; then
+      param="1"
+    fi
+    echo $param > /proc/warp/separate
+    ;;
+  -v)
+    if [ "$param" = "" ]; then
+      param_error=1
+      break
+    fi
+    echo $param > /proc/warp/division
+    ;;
+  -d)
+    if [ "$param" = "" ]; then
+      param_error=1
+      break
+    fi
+    separate_delay=$param
+    ;;
+  -t)
+    if [ "$param" = "" ]; then
+      param_error=1
+      break
+    fi
+    separate_command=$param
+    ;;
+  -o)
+    if [ "$param" = "" ]; then
+      param="1"
+    fi
+    echo $param > /proc/warp/oneshot
+    ;;
+  -a)
+    if [ "$param" = "" ]; then
+      param="1"
+    fi
+    echo $param > /proc/warp/halt
+    ;;
+  -i)
+    if [ "$param" = "" ]; then
+      param="3"
+    fi
+    echo $param > /proc/warp/silent
+    ;;
+  -h)
+    echo "Lineo Warp!! Snapshot save"
+    echo "snapshot [<options>]"
+    echo " -sN   : snapshot save to no N (N=0-)"
+    echo " -lN   : snapshot load from no N (N=0-)"
+    echo " -w[N] : snapshot switch (N=0/1/2)"
+    echo " -c[N] : compress (N=0/1/2)"
+    echo " -r[N] : shrink (N=0/1/2/3)"
+    echo " -p[N] : separate (N=0/1/2)"
+    echo " -v[N] : division (N=0-100,0-100,...)"
+    echo " -dN   : separate delay second"
+    echo " -tCMD : separate interval command"
+    echo " -o[N] : oneshot (N=0/1)"
+    echo " -a[N] : halt (N=0/1)"
+    echo " -i[N] : silent (N=0-3)"
+    echo " -h    : print help"
+    do_snapshot=0
+    break
+    ;;
+  *)
+    param_error=1
+    break
+    ;;
+  esac
+  if [ $? -ne 0 ]; then
+    echo "parameter write error '$arg'"
+    echo -5 > /proc/warp/error          # -EIO
+    do_snapshot=0
+    break
+  fi
+done
+
+if [ $param_error -eq 1 ]; then
+  echo "parameter error '$arg'"
+  echo -22 > /proc/warp/error           # -EINVAL
+  do_snapshot=0
+fi
+
+if [ $do_snapshot -eq 1 ]; then
+  if [ "`cat /proc/warp/separate`" = "2" ]; then
+    echo disk > /sys/power/state
+    if [ "`cat /proc/warp/canceled`" = "0" ]; then
+      if [ "$separate_command" = "" ]; then
+        count=1
+        while [ $count -le $separate_delay ]
+        do
+          if [ "`cat /proc/warp/canceled`" != "0" ]; then
+            break
+          fi
+          sleep 1
+#          count=`expr $count + 1`
+           let count++
+        done
+      else
+        $separate_command
+      fi
+    fi
+  fi
+  if [ "`cat /proc/warp/canceled`" = "0" ]; then
+    echo disk > /sys/power/state
+  fi
+fi
+
+echo $saveno_sav > /proc/warp/saveno
+echo $loadno_sav > /proc/warp/loadno
+echo $compress_sav > /proc/warp/compress
+echo $shrink_sav > /proc/warp/shrink
+echo $separate_sav > /proc/warp/separate
+echo $division_sav > /proc/warp/division
+echo $oneshot_sav > /proc/warp/oneshot
+echo $halt_sav > /proc/warp/halt
+echo $silent_sav > /proc/warp/silent
+echo 0 > /proc/warp/switch
+
+exit `cat /proc/warp/stat`

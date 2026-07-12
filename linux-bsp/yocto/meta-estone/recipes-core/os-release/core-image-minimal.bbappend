@@ -1,0 +1,1 @@
+DEPENDS += "camera-server estone-overlay m10v-multimedia-server"

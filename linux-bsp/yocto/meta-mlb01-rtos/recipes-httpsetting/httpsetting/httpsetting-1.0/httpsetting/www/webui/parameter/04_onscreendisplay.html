@@ -1,0 +1,215 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+	<title>OSD</title>
+	<link href="../css/bootstrap.css" rel="stylesheet">
+	<style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+	</style>
+	<link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+
+<!-- parameter setting -->
+<!-- OSD Configuration -->
+<div class="row" style="background-color:#FFF">
+	<section id="OSD_Configuration">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> OSD Configuration</label>
+	</font>
+	</div>
+	</section>
+</div>
+
+
+<div class="row" style="background-color:#FFA">
+	<!-- OSD -->
+	<section id="OSD">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label> OSD Enable</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_OSD">
+	<option value="0" selected>Off</option>
+	<option value="1">On</option>
+	</select>
+	</div>
+	</div>
+	</section>
+</div>
+<div class="row" style="background-color:#EEE">
+	<label>Only OSD is valid but only 10 from younger OSD ID per stream.</label>
+	<!-- OSD ID -->
+	<section id="OSDARG1">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label> OSD ID </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_OSDARG1">
+	<option value="0"> 0(Camera 0 ID) </option>
+	<option value="1"> 1(Camera 0 IPaddress) </option>
+	<option value="2"> 2(Camera 0 Date & Time) </option>
+	<option value="3"> 3(Camera 1 ID) </option>
+	<option value="4"> 4(Camera 1 IPaddress) </option>
+	<option value="5"> 5(Camera 1 Date & Time) </option>
+	<option value="6"> 6(Camera 2 ID) </option>
+	<option value="7"> 7(Camera 2 IPaddress) </option>
+	<option value="8"> 8(Camera 2 Date & Time) </option>
+	<option value="9"> 9(Camera 3 ID) </option>
+	<option value="10">10(Camera 3 IPaddress) </option>
+	<option value="11">11(Camera 3 Date & Time) </option>
+	<option value="12"> 12 </option>
+	<option value="13"> 13 </option>
+	<option value="14"> 14 </option>
+	<option value="15"> 15 </option>
+	<option value="12"> 16 </option>
+	<option value="13"> 17 </option>
+	<option value="14"> 18 </option>
+	<option value="15"> 19 </option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- Camera Number(ID) -->
+	<section id="OSDARG2">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div>
+	<div style="float:left;">
+	<label> Camera ID </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_OSDARG2">
+	<option value="0"> 0 </option>
+	<option value="1"> 1 </option>
+	<option value="2"> 2 </option>
+	<option value="3"> 3 </option>
+	<option value="2147483647"> OFF </option>
+	</select>
+	</div>
+	</div>
+	<nobr><small>"0", "1", "2" and "3" are valid only when</small></nobr><br>
+	<nobr><small>OSD ID is between "12" to "19".</small></nobr>
+	</div>
+	</section>
+	<!-- X -->
+	<section id="OSDARG3">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div>
+	<div style="float:left;">
+	<label>x-pos(pixels)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_OSDARG3" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	<nobr><small>Setting unit : 2 (pixels)</small></nobr><br>.
+	</div>
+	</section>
+	<!-- Y -->
+	<section id="OSDARG4">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div>
+	<div style="float:left;">
+	<label>y-pos(pixels)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_OSDARG4" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	<nobr><small>Setting unit : 2 (pixels)</small></nobr><br>.
+	</div>
+	</section>
+	<!-- fontcolor -->
+	<br><br>
+	<section id="OSDARG5">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label>fontcolor</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_OSDARG5">
+	<option value="0">White</option>
+	<option value="1">Black</option>
+	<option value="2">Green</option>
+	<option value="3">Blue</option>
+	<option value="4">Peach</option>
+	<option value="5">Yellow</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- transparence -->
+	<section id="OSDARG6">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label>font back-ground type</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_OSDARG6">
+	<option value="0">Single color</option>
+	<option value="1">Skelton</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- Free Text -->
+	<section id="OSDARG7">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div>
+	<div style="float:left;">
+	<label>Free Text</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_OSDARG7" type="text" class="form-control" value="freetext">
+	</div>
+	</div>
+	<small><nobr>This is valid only when</small><br>
+	<small>OSD ID is between "12" to "19".</small></label>
+	</div>
+	</section>
+	<!-- font size -->
+	<section id="OSDARG8">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label> Font Size </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_OSDARG8">
+	<option value="0"> small </option>
+	<option value="1"> middle </option>
+	<option value="2"> large </option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Parameter Update</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_OSD1" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/04_onscreendisplay.js"></script>
+<script src="/webui/js/04_onscreendisplay_r.js"></script>
+
+</body>
+</html>

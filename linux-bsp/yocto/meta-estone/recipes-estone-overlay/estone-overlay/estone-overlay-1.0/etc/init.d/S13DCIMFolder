@@ -1,0 +1,7 @@
+#!/bin/sh
+
+source /etc/load_sysconfig.sh
+
+mkdir -p "$RAM_DCIM"
+ln -s "$RAM_DCIM" /var/www/RAM_DCIM
+ln -s /run/SD/mmcblk0p1 /media/SD

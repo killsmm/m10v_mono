@@ -1,0 +1,34 @@
+#!/bin/sh
+
+
+#
+# Start the XX if it exist at SD card
+#
+app_file=app_file_debug
+mount_point=/run/SD/mmcblk0p1
+mount_point2=/run/SD/mmcblk1p1
+start_file=$mount_point/$app_file
+start_file2=$mount_point2/$app_file
+
+
+
+for j in 0 1 2
+do
+if [ -f "$start_file" ]; then
+        echo "app_file found! start to run"
+        $start_file
+	break
+else
+	if [ -f "$start_file2" ]; then
+	$start_file2
+	break
+	fi
+fi
+sleep 1s
+if [ $j == 2 ]; then
+echo "no app_file found!"
+/usr/bin/feituo.sh 
+fi
+done
+
+

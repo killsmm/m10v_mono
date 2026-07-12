@@ -1,0 +1,10 @@
+#!/bin/sh
+UPDATE_FOLDER="/media/update"
+CONFIG_FOLDER="/media/config"
+
+mkdir -p $CONFIG_FOLDER
+mount -t ipcufs mnt "$CONFIG_FOLDER" -ofs=0,1024
+mkdir -p $UPDATE_FOLDER
+mount -t ipcufs /media/update "$UPDATE_FOLDER" -ofs=1,1024
+
+source /etc/load_sysconfig.sh

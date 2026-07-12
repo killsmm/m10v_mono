@@ -1,0 +1,101 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+	<title>SD Write Counter</title>
+	<link href="../css/bootstrap.css" rel="stylesheet">
+	<style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+	</style>
+	<link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+
+<!-- parameter setting -->
+<!-- Get SD Write Counter -->
+<div class="row" style="background-color:#FFF">
+	<section id="SD_Write_Conter">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> SD Write Counter</label>
+	</font>
+	</div>
+	</section>
+</div>
+
+<!-- Get SD Write Counter -->
+<div class="row" style="background-color:#FFA">
+        <!-- SD Write Counter -->
+	<section id="SD_WriteCounter">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> SD Write Counter</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input type="text" id="TXT_SD_WRITE_COUNTER" class="form-control" value="--" disabled="disabled">
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_GET_SD_WRITECOUNTER" class="btn btn-primary" >Get SD Write Counter</button>
+	</div>
+	</div>
+	</section>
+</div>
+
+<!-- Bad Block Management -->
+<div class="row" style="background-color:#FFF">
+        <section id="Bad_Block_Management">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Bad Block Management</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+<!-- Bad Block Threshold -->
+<div class="row" style="background-color:#EEE">
+        <!-- Bad Block Threshold -->
+        <section id="Bad_Block_Threshold">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+	<label> Bad Block Threshold</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input type="text" id="TXT_BADBLOCK_THRESHOLD" class="form-control" value="0">
+        <nobr><label>0~65535</label></nobr>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Bad Block Threshold</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_BADBLOCK_THRESHOLD" class="btn btn-primary" >Update</button>
+        </div>
+        </div>
+        </section>
+</div>
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/AA_sd_writecounter.js"></script>
+<script src="/webui/js/AA_hard_management.js"></script>
+<script src="/webui/js/AA_hard_management_r.js"></script>
+</body>
+</html>
+

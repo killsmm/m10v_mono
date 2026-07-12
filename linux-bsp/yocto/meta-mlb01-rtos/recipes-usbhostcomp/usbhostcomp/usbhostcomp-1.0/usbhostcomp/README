@@ -1,0 +1,30 @@
+This folder contains the script files with SNI MLB01 board for the next items of "Embedded Host High Speed Electrical Test Procedure for Embedded host compliance.
+
+1) PID(0x0102) : TEST_J
+2) PID(0x0103) : TEST_K
+3) PID(0x0101) : TEST_SE0_NAK
+4) PID(0x0104) : TEST_PACKET
+
+How to Use
+----------
+- set CONFIG_DYNAMIC_DEBUG=y at kernel configuration such as milbeaut_p3_tiny_defconfig(*1).
+  (*1) This file is sample. please chose your right kernel configuration file in your system.
+
+- build new kernel and burn to rom and boot it
+
+- [xhci case]
+    If you want to test with xhci host connected to 2.0 device(*2), call the script file "cn9hdc_host.sh".
+    (*2) xhci host connected to 3.0 device is not supported.
+    
+  [ehci case]
+    If you want to test with ehci host, call the script file "cn10hdc_host.sh".
+
+- you can select pattern 1)~4) from menu.
+
+Remarks
+-------
+- If you want to test other pattern of Electrical test such as next items,
+  -- SINGLE SETP GET DEV DESC
+  -- SINGLE SETP SET FEATURE
+  you should CONFIG_USB_EHSET_TEST_FIXTURE=y at kernel configuration.
+

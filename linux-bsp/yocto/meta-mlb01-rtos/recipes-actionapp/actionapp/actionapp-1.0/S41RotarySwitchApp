@@ -1,0 +1,164 @@
+#!/bin/sh
+
+#echo "sample program start" > /dev/ttyUSI0
+
+#mount -t vfat /dev/mmcblk0p1 /mnt
+#cp /mnt/rotary_switch /usr/bin
+#cp /mnt/sample_linux_app /usr/bin
+#cp /mnt/make_app_file_wifi /usr/bin
+#cp /mnt/make_app_file_ether /usr/bin
+#cp /mnt/rtp_gstreamer_app_ether /usr/bin
+mkdir /.cache
+mkdir /.cache/gstreamer-1.0
+cp registry.arm.bin /.cache/gstreamer-1.0
+
+echo 284 > /sys/class/gpio/export
+echo 285 > /sys/class/gpio/export
+echo 286 > /sys/class/gpio/export
+echo 287 > /sys/class/gpio/export
+
+rs_number=$(rotary_switch)
+
+#echo "rs_number=$rs_number" > /dev/ttyUSI0
+
+# 0
+if [ $rs_number -eq 0 ]
+ then
+   :
+
+# 1
+elif [ $rs_number -eq 1 ]
+ then
+   echo "Linux APP Single/Dual (Wi-Fi AP Mode)" > /dev/ttyUSI0
+   insmod /home/ssc/bin_sd8xxx/mlan.ko
+   insmod /home/ssc/bin_sd8xxx/sd8xxx.ko drv_mode=2 fw_name=mrvl/sd8887_uapsta_a2.bin cal_data_cfg=none
+   busybox rfkill unblock 0
+   busybox rfkill unblock 1
+   busybox rfkill list all
+   sleep 1
+   hostapd /etc/hostapd.conf &
+   ifconfig uap0 192.168.2.1 netmask 255.255.255.0
+   busybox udhcpd -f /etc/udhcpd.conf &
+   gst-launch-1.0 ipcusrc extend=TRUE ! ipcudemux format=256 stream=1 ! h264parse ! rtph264pay ! udpsink host=192.168.2.13 port=5004 &
+   camera_if sensor_number 1        # modify sensor (1:single  2:dual)
+   camera_if chg_camera_mode 1
+   camera_if s_v_frame_size 0 2 0   # modify video parameter
+   camera_if s_i_capture_size 1     # modify still parameter
+   camera_if chg_camera_mode 2
+   sample_linux_app
+
+# 2
+elif [ $rs_number -eq 2 ]
+ then
+   echo "not support" > /dev/ttyUSI0
+
+# 3
+elif [ $rs_number -eq 3 ]
+ then
+   echo "Linux APP Single (Wi-Fi AP Mode)" > /dev/ttyUSI0
+   insmod /home/ssc/bin_sd8xxx/mlan.ko
+   insmod /home/ssc/bin_sd8xxx/sd8xxx.ko drv_mode=2 fw_name=mrvl/sd8887_uapsta_a2.bin cal_data_cfg=none
+   busybox rfkill unblock 0
+   busybox rfkill unblock 1
+   busybox rfkill list all
+   sleep 1
+   hostapd /etc/hostapd.conf &
+   ifconfig uap0 192.168.2.1 netmask 255.255.255.0
+   busybox udhcpd -f /etc/udhcpd.conf &
+   gst-launch-1.0 ipcusrc extend=TRUE ! ipcudemux format=256 stream=1 ! h264parse ! rtph264pay ! udpsink host=192.168.2.13 port=5004 &
+   camera_if sensor_number 1        # single sensor only
+   camera_if chg_camera_mode 1
+   camera_if s_v_frame_size 0 2 0   # modify video parameter
+   camera_if s_i_capture_size 1     # modify still parameter
+   camera_if chg_camera_mode 2
+   sample_linux_app
+
+# 4
+elif [ $rs_number -eq 4 ]
+ then
+   echo "not support"
+
+# 5
+elif [ $rs_number -eq 5 ]
+ then
+   echo "Smart Setting Tool (Wi-Fi AP Mode)" > /dev/ttyUSI0
+   make_app_file_wifi
+   sh /tmp/app_file_wifi.sh
+
+# 6
+elif [ $rs_number -eq 6 ]
+ then
+   echo "Smart Setting Tool (Ether Mode)" > /dev/ttyUSI0
+   make_app_file_ether
+   sh /tmp/app_file_ether.sh
+
+# 9
+elif [ $rs_number -eq 9 ]
+ then
+   echo "UVC App (USB3.0)" > /dev/ttyUSI0
+   sh /usr/bin/uvc_ipcu.sh -usb3
+   camera_if sensor_number 1
+   camera_if chg_camera_mode 1
+   camera_if s_v_frame_size 1 5 0
+   camera_if chg_camera_mode 2
+
+# 10
+elif [ $rs_number -eq 10 ]
+ then
+   echo "UVC App (USB2.0)" > /dev/ttyUSI0
+   sh /usr/bin/uvc_ipcu.sh -usb2
+   camera_if sensor_number 1
+   camera_if chg_camera_mode 1
+   camera_if s_v_frame_size 1 5 0
+   camera_if chg_camera_mode 2
+
+# 11
+elif [ $rs_number -eq 11 ]
+ then
+   echo "MTP App" > /dev/ttyUSI0
+   mount -t ipcufs mnt /media/root/test_mtp_sd -ofs=8
+   sh /home/root/usb_test/usb30dev_mtp_func.sh
+
+# 12
+elif [ $rs_number -eq 12 ]
+ then
+   echo "RTP Gstreamer App Ether" > /dev/ttyUSI0
+   net_init
+   ifconfig eth0 192.168.2.1
+   sed s/uap0/eth0/ /etc/udhcpd.conf > /etc/udhcpd2.conf
+   busybox udhcpd -f /etc/udhcpd2.conf &
+   gst-launch-1.0 ipcusrc extend=TRUE ! ipcudemux format=256 stream=1 ! h264parse ! rtph264pay ! udpsink host=192.168.2.13 port=5004 &
+   camera_if sensor_number 1
+   camera_if chg_camera_mode 1
+   camera_if s_v_bitrate 2 1500000 1500000 0
+   camera_if s_v_frame_size 16 5 0
+   camera_if chg_camera_mode 2
+
+# 13
+elif [ $rs_number -eq 13 ]
+ then
+   echo "RTP Gstreamer App Wi-Fi AP Mode" > /dev/ttyUSI0
+   insmod /home/ssc/bin_sd8xxx/mlan.ko
+   insmod /home/ssc/bin_sd8xxx/sd8xxx.ko drv_mode=2 fw_name=mrvl/sd8887_uapsta_a2.bin cal_data_cfg=none
+   busybox rfkill unblock 0
+   busybox rfkill unblock 1
+   busybox rfkill list all
+   sleep 1
+   hostapd /etc/hostapd.conf &
+   ifconfig uap0 192.168.2.1 netmask 255.255.255.0
+   busybox udhcpd -f /etc/udhcpd.conf &
+   gst-launch-1.0 ipcusrc extend=TRUE ! ipcudemux format=256 stream=1 ! h264parse ! rtph264pay ! udpsink host=192.168.2.13 port=5004 &
+   camera_if sensor_number 1        # modify sensor (1:single  2:dual)
+   camera_if chg_camera_mode 1
+   camera_if s_v_frame_size 0 2 0   # modify video parameter
+   camera_if s_i_capture_size 1     # modify still parameter
+   camera_if chg_camera_mode 2
+
+# 14
+elif [ $rs_number -eq 14 ]
+ then
+   echo "not support" > /dev/ttyUSI0
+
+else
+   :
+fi

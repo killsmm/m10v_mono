@@ -1,0 +1,257 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+	<title>Privasy Mask</title>
+	<link href="../css/bootstrap.css" rel="stylesheet">
+	<style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+	</style>
+	<link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+
+<!-- parameter setting -->
+<!-- Privacy Mask -->
+<div class="row" style="background-color:#FFF">
+	<section id="Privacy_Mask">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Privacy Mask Configuration</label>
+	</font>
+	</div>
+	</section>
+</div>
+
+
+<!-- Privacy Mask ON/OFF -->
+<div class="row" style="background-color:#FFA">
+        <!-- Enabled -->
+	<section id="privacyenable">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Privacy Mask Enable</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_PRIVACYENABLE">
+	<option value="0" selected>OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+</div>
+
+<!-- AreaSelect -->
+<div class="row" style="background-color:#EEE">
+        <!-- Sensor -->
+	<section id="PAreaselect">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Area Select</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_AREASELECT">
+	<option value="0" selected>Front / Stitched</option>
+	<option value="1">Rear</option>
+	<option value="2">Left</option>
+	<option value="3">Right</option>
+	</select>
+	</div>
+        <nobr><label> 4sensor Camera(4separate):Front / Stitched,Rear,Left,Right select</label></nobr>
+        <nobr><label> 4sensor Camera(4Division,2panorama,1panorama+2division):Front / Stitched only</label></nobr>
+        <nobr><label> Dual Camera(Stitch PtnA,PtnB):Front / Stitched only</label></nobr>
+        <nobr><label> DOL Mode[Single DOL Camera](DOL,None DOL):Front / Stitched only</label></nobr>
+	</div>
+	</section>
+	<!-- Area No -->
+	<section id="PAreaselecteno">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Area no</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_AREASELECTNO">
+	<option value="1" selected>1</option>
+	<option value="2">2</option>
+	<option value="3">3</option>
+	<option value="4">4</option>
+	<option value="5">5</option>
+	<option value="6">6</option>
+	<option value="7">7</option>
+	<option value="8">8</option>
+	<option value="9">9</option>
+	<option value="10">10</option>
+	<option value="11">11</option>
+	<option value="12">12</option>
+	<option value="13">13</option>
+	<option value="14">14</option>
+	<option value="15">15</option>
+	<option value="16">16</option>
+	<option value="17">17</option>
+	<option value="18">18</option>
+	<option value="19">19</option>
+	<option value="20">20</option>
+	<option value="21">21</option>
+	<option value="22">22</option>
+	<option value="23">23</option>
+	<option value="24">24</option>
+	<option value="25">25</option>
+	<option value="26">26</option>
+	<option value="27">27</option>
+	<option value="28">28</option>
+	<option value="29">29</option>
+	<option value="30">30</option>
+	<option value="31">31</option>
+	<option value="32">32</option>
+	<option value="33">33</option>
+	<option value="34">34</option>
+	<option value="35">35</option>
+	<option value="36">36</option>
+	<option value="37">37</option>
+	<option value="38">38</option>
+	<option value="39">39</option>
+	<option value="40">40</option>
+	</select>
+        <nobr><label>*Maximum number of areas</label></nobr>
+        <nobr><label>  Front / Stitched Image : 40 Areas</label></nobr>
+        <nobr><label>  Others : 10 Areas</label></nobr>
+	</div>
+	</div>
+	</section>
+	<!-- Enabled -->
+	<section id="PAreaselectenable">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Enabled</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_AREASELECTENABLE">
+	<option value="0" selected>OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Area select Update</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_AREAUPDATE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Disp Position -->
+<div class="row" style="background-color:#FFA">
+        <!-- X coordinate -->
+	<section id="privacyx">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label>X：</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_PRIVACYX" type="text" class="form-control" value="0">
+	<nobr><label>0~65535 (Setting unit : 8 (pixels))</label></nobr>
+	</div>
+	</div>
+	</section>
+        <!-- Y coordinate -->
+	<section id="privacyy">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label>Y：</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_PRIVACYY" type="text" class="form-control" value="0">
+	<nobr><label>0~65535 (Setting unit : 8 (pixels))</label></nobr>
+	</div>
+	</div>
+	</section>
+        <!-- Width  -->
+	<section id="privacy_width">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label>Width(pixels)：</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_PRIVACYWIDTH" type="text" class="form-control" value="0">
+	<nobr><label>0~65535 (Setting unit : 8 (pixels))</label></nobr>
+	</div>
+	</div>
+	</section>
+        <!-- Lines  -->
+	<section id="privacy_height">
+	<div class="form-group col-xs-12 col-sm-3 col-md-3">
+	<div style="float:left;">
+	<label>Lines(pixels)：</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_PRIVACYHEIGHT" type="text" class="form-control" value="0">
+	<nobr><label>0~65535 (Setting unit : 8 (pixels))</label></nobr>
+	</div>
+	</div>
+	</section>
+        <!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting x, h, width and Lines</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Color -->
+<div class="row" style="background-color:#EEE">
+        <!-- Color -->
+	<section id="privacy_color">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Color</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_PRIVACYCOLOR">
+	<option value="0" selected>non (not supported)</option>
+	<option value="1">Grey</option>
+	<option value="2">Red</option>
+	<option value="3">Blue</option>
+	<option value="4">Yellow</option>
+	<option value="5">Green</option>
+	<option value="6">Cyan</option>
+	<option value="7">Magenta</option>
+	<option value="8">White</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting  Color</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_PM_COLOR" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/03_privacymask.js"></script>
+<script src="/webui/js/03_privacymask_r.js"></script>
+
+</body>
+</html>

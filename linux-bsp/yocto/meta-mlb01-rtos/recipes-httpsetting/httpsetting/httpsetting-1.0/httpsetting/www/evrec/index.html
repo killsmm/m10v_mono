@@ -1,0 +1,44 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+	<title>Event notification confirmation</title>
+	<meta charset="utf-8" />
+	<link rel="stylesheet" href="css/main.css" />
+</head>
+<body class="is-preload">
+
+	<!-- Wrapper -->
+	<div id="wrapper" class="divided">
+		<!-- main -->
+		<section class="wrapper style1 align-center">
+		<div class="inner">
+			<h2>Event notification confirmation</h2>
+			<p>It becomes a page to check fault information by an event from RTOS.</p>
+
+			<div class="items style1 medium onscroll-fade-in">
+
+				<section>
+				<p id=bad_block>event notify not happened.</p>
+				<h3>Bad block information</h3>
+				<p>Notification when bad block threshold is exceeded.</p>
+				</section>
+
+				<section>
+				<p id=sen_stat>event notify not happened.</p>
+				<h3>4 Sensor status</h3>
+				<p>Notify sensor that anomaly occurred.</p>
+				</section>
+
+			</div>
+
+		</div>
+		</section>
+
+	</div>
+
+	<!-- Scripts -->
+	<script src="/js/jquery-1.11.3.min.js"></script>
+	<script type="text/javascript" src="./js/exec_get_cgi.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+
+<body>
+<!-- HEADER -->
+<header class="jumbotron subhead" id="overview">
+    <meta charset="utf-8">
+    <div class="container">
+        <div class="row">
+            <div class="col-xs-12 col-sm-12 col-md-12">
+                <h2>WebUI</h2>
+            </div>
+	    <section id="NavButton02">
+        	<div class="row-fluid col-xs-12 col-sm-6 col-md-6">
+                	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+                            <div>
+                    		<label>Initial Setting</label>
+               	            </div>
+                            <div class="col-xs-12 col-sm-8 col-md-4">
+                             	<!-- TEXTBOX Arrange -->
+                            	<label>1. M10V IP add：</label>
+                           	<input id="M10V_IPadd" type="text" class="form-control" value="192.168.10.16">
+	                    </div>
+                            <div class="col-xs-12 col-sm-8 col-md-4">
+                             	<!-- TEXTBOX Arrange -->
+                            	<label>2. PC MAC add：</label>
+                           	<input id="PC_MAC" type="text" class="form-control" value="xx-xx-xx-xx-xx-xx">
+	                    </div>
+                            <div class="col-xs-12 col-sm-8 col-md-4">
+                             	<!-- TEXTBOX Arrange -->
+                            	<label>3. PC IP add：</label>
+                           	<input id="PC_IPadd" type="text" class="form-control" value="192.168.10.7">
+	                    </div>
+            		</div>
+        	</div>
+             </section>
+       </div>
+    <!-- CONTENTS -->
+    <div class="container">
+    <section id="NavButton01">
+    <div class="row-fluid col-xs-12 col-sm-6 col-md-6">
+    <div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<!-- change mode -->
+	<section id="attachedboard">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<label>4. Sensor board</label>
+	<select class="form-control" id="SEL_ATTACHEDBOARD">
+	<option value="0" selected> -- none -- </option>
+	<option value="4" >4 Sensor</option>
+	<option value="2" >2 Sensor</option>
+	<option value="3" >1 Sensor 8M</option>
+	<option value="1" >1 Sensor 5M</option>
+	</select>
+	</div>
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<label>*Do not select "Sensor board" if Parameter Management saves any setting values.</label>
+	<label>When "Sensor board" is selected, some parameters are overwritten with default values.</label>
+	</div>
+	</section>
+	<!-- BootStrap BUTTON Class Arrange -->
+        <div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <label>5.</label>
+        <button id="BtnBOOT" class="btn btn-primary" >Start Server</button>
+        </div>
+        </div>
+        </div>
+    </div>
+    </section>
+    </div>
+<div class="row" style="background-color:#EEE">
+<!-- Parameter -->
+<!-- change mode -->
+	<section id="changemode">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<label> Change mode</label>
+	<select class="form-control" id="SEL_CHANGEMODE">
+	<option value="0" selected> non</option>
+	<option value="1" >IDLE mode</option>
+	<option value="2" >Preview Mode</option>
+	<option value="7" >Time Lapse Video Mode</option>
+	<option value="8" >Video Capture Mode</option>
+	</select>
+	</div>
+	</section>
+<!-- stitching type -->
+	<section id="stitchingtype">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<label> Stitching Type</label>
+	<select class="form-control" id="SEL_STITCHING">
+	<option value="0" selected>4Sensor - 4 Separate</option>
+	<option value="1" >4Sensor - 4 Division</option>
+	<option value="2" >4Sensor - 2 Panorama</option>
+	<option value="3" >4Sensor - 1 Panorama + 2 Division</option>
+	<option value="4" >2Sensor - Stitch PtnA</option>
+	<option value="5" >2Sensor - Stitch PtnB</option>
+<!-- Stitch PtnC(Fish Eye) is not uesd -->
+<!--	<option value="6" >2Sensor - Stitch PtnC(Fish Eye)</option> -->
+	<option value="7" >2Sensor - Stitch PtnD</option>
+	</select>
+	</div>
+	</section>
+<!-- Set Time Lapse Video Configuration -->
+	<section id="stitchingtype">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<label> Interval for Time Lapse</label>
+	<select class="form-control" id="SEL_INTERVAL">
+	<option value="0" >0.5 sec</option>
+	<option value="1" selected>1 sec</option>
+	<option value="2" >2 sec</option>
+	<option value="3" >5 sec</option>
+	<option value="4" >10 sec</option>
+	<option value="5" >30 sec</option>
+	<option value="6" >60 sec</option>
+	</select>
+	</div>
+	</section>
+
+</div>
+
+<!-- Parameter Management -->
+<div class="row" style="background-color:#FFF">
+	<!-- SET BUTTON -->
+        <section id = Parameter_Management>
+        <h2>Parameter Management</h2>
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<div style="float:left;">
+	</div>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="BtnSAVE" class="btn btn-primary" >Save</button>
+	<button id="BtnERASE" class="btn btn-primary" >Erase</button>
+	</div>
+	</div>
+	</section>
+</div>
+
+<!-- Software Reset -->
+<div class="row" style="background-color:#FFF">
+	<!-- SET BUTTON -->
+        <section id = Software_Reset>
+        <h2>Software Reset</h2>
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<div style="float:left;">
+	</div>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE_SOFTWARE_RESET" class="btn btn-primary" >Reset</button>
+	</div>
+	</div>
+	</section>
+</div>
+
+
+
+</header>
+</body>
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/settool.js"></script>
+
+
+</html>

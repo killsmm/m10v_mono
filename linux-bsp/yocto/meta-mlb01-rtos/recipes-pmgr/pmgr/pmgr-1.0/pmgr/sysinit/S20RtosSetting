@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# Set the setting values to RTOS
+/usr/bin/pmgr.sh set &
+
+exit

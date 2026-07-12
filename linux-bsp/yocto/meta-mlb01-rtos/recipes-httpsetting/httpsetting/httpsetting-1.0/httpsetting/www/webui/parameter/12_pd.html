@@ -1,0 +1,134 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+        <title>PD</title>
+        <link href="../css/bootstrap.css" rel="stylesheet">
+        <style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+        </style>
+        <link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+<!-- parameter setting -->
+<!-- Set Person Detection Enable -->
+<div class="row" style="background-color:#FFF">
+        <section id="Person Detection Enable">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Person Detection Enable</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+        <!-- Person Detection -->
+<div class="row" style="background-color:#FFA">
+        <!-- Enabled -->
+        <section id="Person_Detection">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Person_Detection(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="PERSON_DETECTION">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Person_Detection(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_PERSON_DETECTION" class="btn btn-primary" >Update</button>
+        </div>
+        </div>
+</div>
+
+<!-- Set Person Detection Configuration for Surv -->
+<div class="row" style="background-color:#FFF">
+        <section id="Person Detection Configuration for Surv">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Person Detection Configuration for Surv</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+        <!-- Meta -->
+<div class="row" style="background-color:#EEE">
+        <!-- Meta -->
+        <section id="Meta">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Meta(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_PD_META">
+        <option value="0">OFF</option>
+        <option value="1"selected>ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Meta(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_PD_META" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+        </section>
+</div>
+
+        <!-- Draw Frame -->
+<div class="row" style="background-color:#FFA">
+        <!-- Draw Frame -->
+        <section id="Draw_Frame">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Draw_Frame(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_PD_DRAW_FRAME">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Draw_Frame(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_PD_DRAW_FRAME" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+        </section>
+</div>
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/12_pd.js"></script>
+<script src="/webui/js/12_pd_r.js"></script>
+
+
+</body>
+</html>

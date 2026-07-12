@@ -1,0 +1,16 @@
+﻿#!/bin/sh
+
+export COUNTRY=US
+cd /home/ssc/bin_sd8xxx
+insmod mlan.ko
+insmod sd8xxx.ko drv_mode=2 fw_name=mrvl/sd8887_uapsta_a2.bin cal_data_cfg=none
+sleep 1
+busybox rfkill unblock 0
+busybox rfkill unblock 1
+sleep 1
+iw dev uap0  interface add uap0  type __ap
+
+hostapd_azureware -dd /etc/hostapd_azureware_5g.conf -B
+ifconfig uap0 192.168.2.1 netmask 255.255.255.0
+busybox udhcpd
+

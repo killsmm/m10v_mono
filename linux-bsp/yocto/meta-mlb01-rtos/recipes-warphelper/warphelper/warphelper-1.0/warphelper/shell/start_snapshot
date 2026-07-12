@@ -1,0 +1,21 @@
+#!/bin/sh
+
+#LD_LIBRARY_PATH=/usr/lib/warphelper /usr/bin/warpd $1
+
+# Add the required application. proc_num Use 3 or later
+#xxxID=`ps | grep "xxxapl" | head -n 1 | awk '{ print $1 }'`
+#kill -USR1 $xxxID
+
+# stop server for easy tuning tool
+S40ID=`ps | grep "S40StartServer" | head -n 1 | awk '{ print $1 }'`
+kill $S40ID > /dev/null 2>&1
+
+# start RTOS snapshot support application
+save_snapshot start
+
+# finish boot called for hibernation boot
+camera_if finish_boot > /dev/null 2>&1
+
+# restart server for easy tuning tool
+/etc/init.d/S40StartServer > /dev/null 2>&1 &
+

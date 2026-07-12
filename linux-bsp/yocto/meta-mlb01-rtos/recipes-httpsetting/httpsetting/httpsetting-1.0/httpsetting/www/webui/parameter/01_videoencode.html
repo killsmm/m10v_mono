@@ -1,0 +1,996 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+	<title>Video Encode</title>
+	<link href="../css/bootstrap.css" rel="stylesheet">
+	<style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+	</style>
+	<link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+
+<!-- parameter setting -->
+<!-- Video Capture Configuration -->
+<div class="row" style="background-color:#FFF">
+	<section id="Image_Configuration">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Video Capture Configuration</label>
+	</font>
+	</div>
+	</section>
+</div>
+
+	<!-- Sensor Type & Framerate -->
+<div class="row" style="background-color:#EEE">
+        <!-- Sensor Type -->
+	<section id="VSensorType">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Sensor Type</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_SENSORTYPE">
+	<option value="0">4 Sensor</option>
+	<option value="1">Dual</option>
+	<option value="2">Single DOL 8M</option>
+	<option value="3">Signle DOL 5M</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- Video Channel -->
+	<section id="VideoChannel">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Video Channel </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_VIDEOCHANNELS">
+	<option value="0">Main</option>
+	<option value="1">Sub1</option>
+	<option value="2">Sub2</option>
+	<option value="3">Sub3</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- Frame rate -->
+	<section id="FrameRate">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Frame Rate</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_FRAMERATE">
+	<option value="2">60 fps</option>
+	<option value="5" selected>30 fps</option>
+	<option value="7">24 fps</option>
+	<option value="8">20 fps</option>
+	<option value="9">15 fps</option>
+	<option value="10">12 fps</option>
+	<option value="11">10 fps</option>
+<!-- Note:When Frame rate is 6fps,camera IF Setting value is 0x0F(15)  -->
+	<option value="15">6 fps</option>
+<!-- Note:When Frame rate is 3fps,camera IF Setting value is 0x0E(14)  -->
+	<option value="14">3 fps</option>
+	<option value="12">2 fps</option>
+	<option value="13">1 fps</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- Codec Type -->
+	<section id="CodecType">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Codec Type</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_CODECTYPE">
+	<option value="0">HEVC</option>
+	<option value="1" selected>H.264</option>
+	<option value="2">MPEG</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Parameter Update</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_SENSORTYPE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+	<!-- Bit Rate -->
+<div class="row" style="background-color:#FFA">
+        <!-- Video Channel -->
+	<section id="VideoChannel">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Video Channel </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_BR_VIDEOCHANNELS">
+	<option value="0">Main</option>
+	<option value="1">Sub1</option>
+	<option value="2">Sub2</option>
+	<option value="3">Sub3</option>
+	</select>
+	</div>
+	</div>
+	</section>
+
+	<!-- Average Bitrate -->
+	<section id="AverageBitrate">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label>Average Bitrate[bps]</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_AVEBITRATE" type="text" class="form-control" value="10800000">
+	</div>
+	</section>
+	<!-- Bitrate -->
+	<section id="Bitrate">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label>Bitrate[bps]</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_BITRATE" type="text" class="form-control" value="12000000">
+	</div>
+	</section>
+	<!-- Bitrate Algolithm-->
+	<section id="BitrateAlgorithm">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Bitrate Algorithm </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_BITRATEALGORITHM">
+	<option value="0">CBR</option>
+	<option value="1">VBR</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Parameter Update</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_BITRATE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+	<!-- GOP -->
+<div class="row" style="background-color:#EEE">
+        <!-- Video Channel -->
+	<section id="VideoChannel">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Video Channel </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_GOP_VIDEOCHANNELS">
+	<option value="0">Main</option>
+	<option value="1">Sub1</option>
+	<option value="2">Sub2</option>
+	<option value="3">Sub3</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- GOP Struct -->
+	<section id="GOPStructure">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> GOP </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_GOPSTRUCT">
+	<option value="0">IPPP</option>
+	<option value="1">IBBP</option>
+	<option value="2">I Frame Only</option>
+	</select>
+	</div>
+	</div>
+	</section>
+
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Parameter Update</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_GOP" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+	<!-- Image Size Variation -->
+<div class="row" style="background-color:#FFA">
+        <!-- Video Channel -->
+	<section id="VideoChannel">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Video Channel </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_SZ_VIDEOCHANNELS">
+	<option value="0">Main</option>
+	<option value="1">Sub1</option>
+	<option value="2">Sub2</option>
+	<option value="3">Sub3</option>
+	</select>
+	</div>
+	</div>
+	</section>
+        <!-- Image Size -->
+	<section id="ImageSize">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Image Size </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_IMAGESIZE">
+	<option value="0">None</option>
+	<option value="1">4K/8M 3840x2160</option>
+	<option value="2">5M 3072x1728</option>
+	<option value="3">3M 2304x1296</option>
+	<option value="4">FHD 1920x1080</option>
+	<option value="5">HD 1280x720</option>
+	<option value="6">480p 720x480</option>
+	<option value="7">VGA 640x360</option>
+	<option value="8">QVGA 320x180</option>
+	<option value="9">CropVGA 640x360</option>
+	<option value="10">4K(2:1) 3840x1920</option>
+	<option value="11">FHD(2:1) 1920x960</option>
+	<option value="12">HD(2:1) 1280x640</option>
+	<option value="13">VGA(2:1) 640x320</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Parameter Update</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_VARIATION" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+	<!-- Profile for H264 -->
+<div class="row" style="background-color:#EEE">
+	<section id="Profile Notice">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<label> for H264 Stream only </label>
+	</select>
+        </div>
+        </div>
+	</section>
+        <!-- Video Channel -->
+<div class="row" style="background-color:#EEE">
+	<section id="VideoChannel">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Video Channel </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_PF_VIDEOCHANNELS">
+	<option value="0">Main</option>
+	<option value="1">Sub1</option>
+	<option value="2">Sub2</option>
+	<option value="3">Sub3</option>
+	</select>
+	</div>
+	</div>
+	</section>
+        <!-- Profile -->
+	<section id="Profile">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Profile </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_PROFILE">
+	<option value="0" selected>High</option>
+	<option value="1">Main</option>
+	<option value="2">Constrained Baseline</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Parameter Update</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_PROFILE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+	<!-- Quality -->
+<div class="row" style="background-color:#FFA">
+	<section id="Profile Notice">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<label> for MJPEG stream </label>
+	</select>
+        </div>
+        </div>
+	</section>
+<div class="row" style="background-color:#FFA">
+	<!-- Q Value -->
+	<section id="Quality">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Q Value</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_Q_VALUE" type="text" class="form-control" value="60">
+	<label> 1~100</label>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Parameter Update</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_QUALITY" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+	<!-- Video strage format -->
+<!--
+	<section id="Video strage format">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Video strage format </label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_STRAGE_FORMAT">
+	<option value="0">MP4(Fixed)</option>
+	</select>
+	</div>
+	</div>
+	</section>
+-->
+
+<!-- Image Effect Configuration -->
+<div class="row" style="background-color:#FFF">
+	<section id="Image_Effect_Configuration">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Image Effect Configuration</label>
+	</font>
+	</div>
+	</section>
+</div>
+
+
+	<!-- Enabled -->
+<div class="row" style="background-color:#EEE">
+	<!-- Rotate Degree (clock wise)-->
+        <section id="Rotate_Degree">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Rotate Degree (clock wise)(This command is for Single DOL Camera only)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROTATE_DEGREE">
+        <option value="0" selected>OFF</option>
+        <option value="1">90</option>
+        <option value="2">180</option>
+        <option value="3">270</option>
+        </select>
+        <nobr><label> 3DNR option must be OFF to set 90 and 270 degree.</label></nobr>
+        <nobr><label> Image size is up to 3M size. (not work in 4K/8M/5M size)</label></nobr>
+        </div>
+        </div>
+        </section>
+
+	<!-- Mirror-->
+        <section id="Mirror">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Mirror</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_MIRROR">
+        <option value="0" selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Image Effect Enabled</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE_IMAGE_EFFECT_EN" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+	<!-- Image Select -->
+<div class="row" style="background-color:#FFA">
+	<!-- Image-->
+        <section id="Image_Select">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Image(Use for Cropping only)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_IMAGE_SELECT">
+        <option value="0" selected>Front / Stitched Image</option>
+        <option value="1">Rear</option>
+        <option value="2">Left</option>
+        <option value="3">Right</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- Enabled -->
+        <section id="Image_Select_Enable">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Enabled</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_IMAGE_SELECT_EN">
+        <option value="0" selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Image Select</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE_IMAGE_SELECT" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+	<!-- Crop Position -->
+<div class="row" style="background-color:#EEE">
+	<!-- X Coordinate -->
+	<section id="X_Coordinate">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> X Coordinate</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_X_COORDINATE" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	</section>
+
+	<!-- Y Coordinate -->
+	<section id="Y_Coordinate">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Y Coordinate</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_Y_COORDINATE" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	</section>
+
+
+	<!-- width -->
+	<section id="Crop_width">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> width(Bytes)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_CROP_W" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	</section>
+
+
+	<!-- Lines -->
+	<section id="Crop_Lines">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Lines(Bytes)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_CROP_LINES" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	</section>
+
+
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Crop Position</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE_CROP_POS" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+<!-- ROI Configuration -->
+<div class="row" style="background-color:#FFF">
+	<section id="ROI_Configuration">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> ROI Configuration</label>
+	</font>
+	</div>
+	</section>
+</div>
+
+	<!-- Mode -->
+<div class="row" style="background-color:#FFA">
+	<!-- Mode -->
+        <section id="ROI_MODE">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Mode</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_MODE">
+        <option value="0" selected>OFF</option>
+        <option value="1">Coordinate</option>
+        <option value="2">Auto(FD interlock)</option>
+        </select>
+        </div>
+        </div>
+        </section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting ROI Mode</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE_ROI_MODE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+	<!-- Operation -->
+<div class="row" style="background-color:#EEE">
+	<!-- Operation-->
+        <section id="ROI_OPERATION">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Operation</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_OPERATION">
+        <option value="0" selected>Stop</option>
+        <option value="1">Start</option>
+        <option value="2">Map Refresh</option>
+        </select>
+        </div>
+        </div>
+        </section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting ROI Operation</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE_ROI_OPERATION" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+	<!-- Area Control -->
+<div class="row" style="background-color:#FFA">
+	<!-- Stream No-->
+	<section id="ROI_STREAM_NO">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Stream No</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_STREAM_NO">
+        <option value="0" selected>0</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+        <option value="9">9</option>
+        <option value="10">10</option>
+        <option value="11">11</option>
+        <option value="12">12</option>
+        <option value="13">13</option>
+        <option value="14">14</option>
+        <option value="15">15</option>
+        </select>
+        <nobr><label>0~7 : H264 Stream</label></nobr>
+        <nobr><label>8~15 : HEVC Stream</label></nobr>
+        </div>
+        </div>
+	</section>
+	<!-- Area No-->
+        <section id="ROI_AREA_NO">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Area No</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_AREA_NO">
+        <option value="0" selected>0</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+        <option value="9">9</option>
+        <option value="10">10</option>
+        <option value="11">11</option>
+        <option value="12">12</option>
+        <option value="13">13</option>
+        <option value="14">14</option>
+        <option value="15">15</option>
+        </select>
+        <nobr><label>*Maximum number of areas</label></nobr>
+        <nobr><label>  HEVC : 16 Areas/Stream</label></nobr>
+        <nobr><label>  H264 : 2 Areas/Stream</label></nobr>
+        </div>
+        </div>
+        </section>
+	<!-- Area Enabled-->
+        <section id="ROI_AREA_ENABLED">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Area Enabled</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_AREA_ENABLED">
+        <option value="0" selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+</div>
+
+
+	<!-- Coordinate -->
+<div class="row" style="background-color:#FFA">
+	<section id="ROI_COORDINATE_NOTICE">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <nobr><label>Coordinate mode only</label></nobr>
+	<nobr><label> *Scale of coordinates depends on target stream size.</label></nobr>
+	<nobr><label> Please set the coordinates matching the stream size.</label></nobr>
+	</div>
+	</section>
+</div>
+<div class="row" style="background-color:#FFA">
+	<!-- Start X-->
+	<section id="ROI_START_X">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Start X</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_START_X" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	</section>
+	<!-- Start Y-->
+	<section id="ROI_START_Y">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Start Y</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_START_Y" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	</section>
+	<!-- End X-->
+	<section id="ROI_END_Y">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> End X</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_END_X" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	</section>
+	<!-- End Y-->
+	<section id="ROI_END_Y">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> End Y</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_END_Y" type="text" class="form-control" value="0">
+	</div>
+	</div>
+	</section>
+</div>
+
+
+<div class="row" style="background-color:#FFA">
+	<!-- Select Stream-->
+        <section id="ROI_SelectStream1">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Select Stream</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_SELECT_STREAM1" disabled="disabled">
+        <option value="0" selected>HEVC</option>
+        <option value="1">H264</option>
+        </select>
+        </div>
+        </div>
+        </section>
+</div>
+
+
+
+	<!-- Important Level for HEVC -->
+<div class="row" style="background-color:#FFA">
+	<section id="ROI_IMPORTANT_LEVEL_FOR_HEVC_NOTICE">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <nobr><label>for HEVC Stream only</label></nobr>
+	</div>
+	</section>
+</div>
+<div class="row" style="background-color:#FFA">
+	<!-- Important Level-->
+        <section id="ROI_IMPORTANT_LEVEL">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Important Level</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_IMPORTANT_LEVEL">
+        <option value="0" selected>0 (Not Important)</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7 (Important)</option>
+        </select>
+        </div>
+        </div>
+        </section>
+</div>
+
+
+
+	<!-- QP Value for H264 -->
+<div class="row" style="background-color:#FFA">
+	<section id="ROI_QP_VALUE_FOR_H264_NOTICE">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <nobr><label>for H264 Stream only</label></nobr>
+	</div>
+	</section>
+</div>
+<div class="row" style="background-color:#FFA">
+	<!-- QP Down Range-->
+	<section id="ROI_QP_DOWN_RANGE">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> QP Down Range</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_QP_DOWN_RANGE" type="text" class="form-control" value="10">
+        <nobr><label>0~51</label></nobr>
+	</div>
+	</div>
+	</section>
+	<!-- QP Min-->
+	<section id="ROI_QP_Min">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> QP Min</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_QP_MIN" type="text" class="form-control" value="0">
+        <nobr><label>0~51</label></nobr>
+	</div>
+	</div>
+	</section>
+</div>
+<div class="row" style="background-color:#FFA">
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting ROI Area Control,Coordinate,Important Level(for HEVC) or QP Value(for H264)</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE_ROI_COMMAND1" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<div class="row" style="background-color:#EEE">
+	<!-- Select Stream-->
+        <section id="ROI_SelectStream2">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Select Stream</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_SELECT_STREAM2" disabled="disabled">
+        <option value="0" selected>HEVC</option>
+        <option value="1">H264</option>
+        </select>
+        </div>
+        </div>
+        </section>
+</div>
+
+	<!-- Quality Settings for HEVC -->
+<div class="row" style="background-color:#EEE">
+	<section id="ROI_QUALITY_SETTING_FOR_HEVC_NOTICE">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <nobr><label>for HEVC Stream only</label></nobr>
+	</div>
+	</section>
+</div>
+<div class="row" style="background-color:#EEE">
+	<!-- DeltaQP -->
+	<section id="ROI_DELTAQP">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> DeltaQP</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_DELTAQP" type="text" class="form-control" value="3">
+        <nobr><label>1~51</label></nobr>
+	</div>
+	</div>
+        </section>
+	<!-- Base Important Level-->
+        <section id="ROI_BASE_IMPORTANT_LEVEL">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Base Important Level</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_BASE_IMPORTANT_LEVEL">
+        <option value="0" selected>0 (Not Important)</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7 (Important)</option>
+        </select>
+        </div>
+        </div>
+        </section>
+</div>
+
+	<!-- Outrange Settimg for H264 -->
+<div class="row" style="background-color:#EEE">
+	<section id="ROI_OUTRANGE_SETTING_FOR_HEVC_NOTICE">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <nobr><label>for H264 Stream only</label></nobr>
+	</div>
+	</section>
+</div>
+<div class="row" style="background-color:#EEE">
+	<!-- Outside Partical Coding Enabled-->
+        <section id="ROI_OUTSIDE_PARTICAL_CODIND_ENABLED">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Outside Partical Coding Enabled</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_ROI_OUTSIDE_PARTICAL_CODIND_ENABLED">
+        <option value="0">Disable</option>
+        <option value="1" selected>Enable</option>
+        </select>
+        </div>
+        </div>
+        </section>
+	<!-- QP Up Range -->
+	<section id="ROI_QP_UP_RANGE">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> QP Up Range</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_QP_UP_RANGE" type="text" class="form-control" value="10">
+        <nobr><label>0~51</label></nobr>
+	</div>
+	</div>
+        </section>
+	<!-- QP Max -->
+	<section id="ROI_QP_MAX">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> QP Max</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<input id="TXT_ROI_QP_MAX" type="text" class="form-control" value="51">
+        <nobr><label>0~51</label></nobr>
+	</div>
+	</div>
+        </section>
+</div>
+<div class="row" style="background-color:#EEE">
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting ROI Quality Settings(for HEVC) or Outrange Settimg(for H264)</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_UPDATE_ROI_COMMAND2" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/01_videoencode.js"></script>
+<script src="/webui/js/01_videoencode_r.js"></script>
+
+</body>
+</html>
+
+

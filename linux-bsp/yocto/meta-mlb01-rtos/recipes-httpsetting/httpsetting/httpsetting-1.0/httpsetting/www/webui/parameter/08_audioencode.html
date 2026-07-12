@@ -1,0 +1,436 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+	<title>Audio Encode</title>
+	<link href="../css/bootstrap.css" rel="stylesheet">
+	<style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+	</style>
+	<link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+
+<!-- parameter setting -->
+<!-- Audio Configuration -->
+<div class="row" style="background-color:#FFF">
+	<section id="Audio_Configuration">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Audio Configuration</label>
+	</font>
+	</div>
+	</section>
+</div>
+
+<!-- CodecMode -->
+<div class="row" style="background-color:#FFA">
+	<!-- CodecMode -->
+	<section id="ACodecMode">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Codec Mode</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_CODECMODE">
+	<option value="0">PCM</option>
+	<option value="1" selected>AAC-LC</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Codec Mode</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_ACODECMODE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Audio Sampling Rate -->
+<div class="row" style="background-color:#EEE">
+	<!-- Audio Sampling Rate -->
+	<section id="ASamplingRate">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Sampling Rate</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_ASAMPLINGRATE">
+	<option value="0">8KHz</option>
+	<option value="1">12KHz</option>
+	<option value="2">16KHz</option>
+	<option value="3">24KHz</option>
+	<option value="4">32KHz</option>
+	<option value="6" selected>48KHz</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Sampling Rate</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_SAMPLINGRATE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Audio Bit Rate -->
+<div class="row" style="background-color:#FFA">
+	<!-- Audio Bit Rate -->
+	<section id="ABitRate">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Bit Rate</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_ABITRATE">
+	<option value="0">32Kbps</option>
+	<option value="1">40Kbps</option>
+	<option value="2">48Kbps</option>
+	<option value="3">64Kbps</option>
+	<option value="4">96Kbps</option>
+	<option value="5">112Kbps</option>
+	<option value="6">160Kbps</option>
+	<option value="7" selected>192Kbps</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Bit Rate</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_BITRATE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Channel Type -->
+<div class="row" style="background-color:#EEE">
+	<!-- Channel Type -->
+	<section id="AChannelType">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Channel Type</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_ACHANNELTYPE">
+	<option value="0" selected>Stereo</option>
+	<option value="1">Mono</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Channel Type</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_CHANNELTYPE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+<!-- Audio Enable -->
+<div class="row" style="background-color:#FFA">
+	<!-- Audio Enable -->
+	<section id="AEnable">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Audio Enable</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_AUDIOENABLE">
+	<option value="0">OFF</option>
+	<option value="1" selected>ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Audio Enable</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_AUDIOENABLE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+<!-- Mic Selection -->
+<div class="row" style="background-color:#EEE">
+	<!-- Mic Selection -->
+	<section id="Mic Selection">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Mic Selection</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_MICSEL">
+	<option value="0">AudioCodec</option>
+	</select>
+	</div>
+	</div>
+	</section>
+</div>
+
+
+
+
+<!-- Input Control -->
+<div class="row" style="background-color:#FFA">
+	<!-- Input Control -->
+	<section id="Input Control">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Input Control</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_INPUT_CTRL">
+	<option value="0" selected>Auto</option>
+	<option value="1">Manual</option>
+	<option value="2">Mute</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Input Control</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_INPUT_CTRL" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Input Volume -->
+<div class="row" style="background-color:#EEE">
+	<!-- Input Volume -->
+	<section id="Input Volume">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Input Volume(Use only for Manual)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_INPUT_VOL">
+	<option value="1">vol 1</option>
+	<option value="2">vol 2</option>
+	<option value="3">vol 3</option>
+	<option value="4">vol 4</option>
+	<option value="5">vol 5</option>
+	<option value="6">vol 6</option>
+	<option value="7" selected>vol 7</option>
+	<option value="8">vol 8</option>
+	<option value="9">vol 9</option>
+	<option value="10">vol 10</option>
+	<option value="11">vol 11</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Input Volume</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_INPUT_VOL" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Output Control -->
+<div class="row" style="background-color:#FFA">
+	<!-- Output Control -->
+	<section id="Output Control">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Output Control</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_OUTPUT_CTRL">
+	<option value="1" selected>Manual</option>
+	<option value="2">Mute</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Output Control</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_OUTPUT_CTRL" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Output Volume -->
+<div class="row" style="background-color:#EEE">
+	<!-- Output Volume -->
+	<section id="Output Volume">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Output Volume(Use only for Manual)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_OUTPUT_VOL">
+	<option value="1">vol 1</option>
+	<option value="2">vol 2</option>
+	<option value="3">vol 3</option>
+	<option value="4">vol 4</option>
+	<option value="5">vol 5</option>
+	<option value="6">vol 6</option>
+	<option value="7" selected>vol 7</option>
+	<option value="8">vol 8</option>
+	<option value="9">vol 9</option>
+	<option value="10">vol 10</option>
+	<option value="11">vol 11</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Output Volume</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_OUTPUT_VOL" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Audio LtoR Configuration -->
+<div class="row" style="background-color:#FFF">
+	<section id="Audio_LR_Configuration">
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<font size="5">
+	<label> Audio LtoR Configuration</label>
+	</font>
+	</div>
+	</section>
+</div>
+
+<!-- Audio LtoR Enable -->
+<div class="row" style="background-color:#FFA">
+	<!-- Audio LtoR Enable -->
+	<section id="LtoR_Enable">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Audio LtoR Enable</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_LtoR_Enable">
+	<option value="0" selected>OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Audio LtoR Enable</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_AUDIO_LR_ENABLE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+<!-- Audio LtoR Sampling Rate -->
+<div class="row" style="background-color:#EEE">
+<!-- Audio LtoR Sampling Rate -->
+	<section id="LtoR_Enable">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Sampling Rate</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_LtoR_SAMPLINGRATE">
+	<option value="0"> 8KHz</option>
+	<option value="1"> 12KHz</option>
+	<option value="2"> 16KHz</option>
+	<option value="3"> 24KHz</option>
+	<option value="4"> 32KHz</option>
+	<option value="6" selected>48KHz</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Audio LtoR Sampling rate</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_AUDIO_LR_SAMPLINGRATE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Audio LtoR Channel Type -->
+<div class="row" style="background-color:#FFA">
+<!-- Audio LtoR Channel Type -->
+	<section id="BitRate">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Channel Type</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="SEL_LtoR_CHANNELTYPE">
+	<option value="0" selected>Stereo</option>
+	<option value="1" >Mono</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Pease push,after setting Channel Type</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_LR_CHANNELTYPE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/08_audioencode.js"></script>
+<script src="/webui/js/08_audioencode_r.js"></script>
+
+</body>
+</html>

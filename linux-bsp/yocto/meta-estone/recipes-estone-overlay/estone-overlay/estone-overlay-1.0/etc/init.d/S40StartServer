@@ -1,0 +1,83 @@
+#!/bin/sh
+
+#start camera_if_direct_server multi-media server and camera server
+#camera_if_direct_server and camera_server
+#config folder is used to restore the non-volatile information which should be a db file
+
+source /etc/load_sysconfig.sh
+
+
+#2024 1009 config_shutter_io ,enable OE，443（PH3）
+echo 443 >/sys/class/gpio/export
+echo out >/sys/class/gpio/gpio443/direction
+echo 1 >/sys/class/gpio/gpio443/value
+
+
+#if $NO_APPS is 1, then don't start any apps
+if [ "$NO_APPS" -eq 1 ]; then
+	echo "NO_APPS is 1, don't start any apps"
+else
+	#start syslogd if LOG_LEVEL = 1 - 8
+	if [ "$LOG_LEVEL" -gt 0 ] && [ "$LOG_LEVEL" -lt 9 ]; then
+		echo "start syslogd"
+		# check if $LOG_FILE is empty 
+		if [ -z "$LOG_FILE" ]; then
+			LOG_FILE="/var/log/messages"
+		fi
+		syslogd -l "$LOG_LEVEL" -O "$LOG_FILE"
+	fi
+
+	#start camera_if_direct_server
+	camera_if_direct_server > /dev/null &
+
+	#start camera_server
+	#todo make camera_server use db file to restore the non-volatile information
+	camera_server -c "$CONFIG_FOLDER" -b "$GPS_BAUDRATE" -p "$GPS_PROTOCOL" > /dev/null &
+
+	#start video_recorder(multimedia server)
+	video_recorder -s test -b "http://${IP}:${HTTP_PORT}/RAM_DCIM" -j "$RAM_DCIM" -v "$RAM_DCIM" -o "$GPS_OFFSET"> /dev/null &
+
+	#start ui
+	sleep 1s
+	start_ui.sh 2 &
+	sleep 1s
+fi
+
+if [ "$ENABLE_RTSP" -eq 1 ]; then
+	echo "enable RTSP"
+	sleep 5s
+	camera_if_direct 0x0 0xb 0x8
+fi
+
+#check if eth0 or usb0 is exist, if so, define ETH_DEV as eth0 or usb0
+if [ -e /sys/class/net/eth0 ]; then
+	ETH_DEV="eth0"
+elif [ -e /sys/class/net/usb0 ]; then
+	ETH_DEV="usb0"
+else
+	echo "no eth0 or usb0"
+	exit 1
+fi
+
+
+if [ "$DYNAMIC_IP" -eq 0 ]; then
+	###static ip###
+	ifconfig "$ETH_DEV" "$IP"
+	route add default gw "$GATEWAY" "$ETH_DEV"
+	echo "nameserver ${GATEWAY}" >/etc/resolv.conf
+else
+	###dynamic ip###
+	mkdir /usr/share/udhcpc/
+	cp /etc/udhcpc.d/50default /usr/share/udhcpc/default.script
+	
+	if ! udhcpc -i "$ETH_DEV" -t 3 -n; then
+		echo "failed to get ip from dhcp, set ip to ${IP}"
+		ifconfig "$ETH_DEV" "$IP"
+		route add default gw "$GATEWAY" "$ETH_DEV"
+		echo "nameserver $IP" >/etc/resolv.conf
+	else
+		echo "obtain ip successfully"
+	fi
+fi
+
+

@@ -1,0 +1,74 @@
+Howto rebuild the mlb01 softfloat rootfs
+======================================
+
+1) source oe-init-build-env
+
+2) (you are in poky/build/ now)
+
+Edit ./conf/local.conf to set this
+
+MACHINE ?= "mlb01-sdk"
+
+3) Make your ./conf/bblayers.conf look like this
+
+# LAYER_CONF_VERSION is increased each time build/conf/bblayers.conf
+# changes incompatibly
+LCONF_VERSION = "6"
+
+BBPATH = "${TOPDIR}"
+BBFILES ?= ""
+
+BBLAYERS ?= " \
+  /home/.../poky/meta \
+  /home/.../poky/meta-yocto \
+  /home/.../poky/meta-yocto-bsp \
+  /home/.../poky/meta-openembedded/meta-oe \
+  /home/.../poky/meta-openembedded/meta-filesystems \
+  /home/.../poky/meta-mlb01-rtos \
+  "
+
+4) bitbake core-image-base
+
+This is the big BSP rootfs.
+
+After a while, it will complete and you will get something like this in
+poky/build
+
+./tmp/deploy/images/mlb01-sdk/core-image-base-mlb01-20160826053116.rootfs.tar.bz2 
+
+5) To build a minimal rootfs without all the features in the SDK one,
+
+MACHINE=mlb01-tiny bitbake core-image-minimal
+
+6) In the case of mlb01-tiny, 1) ~ 4) can be run in a shell script
+
+./build_poky.sh rtos 8 8 -tiny
+Usage:
+      build_poky.sh <Param1> <Param2> <Param3> <Param4>
+      Parameter1: linux / rtos
+      Parameter2: Number threads 1~16
+      Parameter3: Parallel make  1~16
+      Parameter4: To specify when necessary Tiny-rootfs
+                  In the case of Tiny -tiny
+
+
+Writing the ubifs image
+-----------------------
+
+1) ubiformat /dev/mtd1 -q
+
+2) ubiattach -p /dev/mtd1
+UBI device number 0, total 7992 LEBs (1014792192 bytes, 967.8 MiB), available 118 LEBs (14983168 bytes, 14.3 MiB), LEB size 126976 bytes (124.0 KiB)
+
+3) ubimkvol /dev/ubi0 -N mlb01-rootfs -s 950MiB
+
+Volume ID 0, size 7721 LEBs (996194304 bytes, 950.0 MiB), LEB size 129024 bytes (126.0 KiB), dynamic, name "mlb01-rootfs", alignment 1
+
+4) ubiupdatevol /dev/ubi0_0 /core-image-base-mlb01-20160826053116.rootfs.
+ubifs
+
+5) subsequently, you can mount the populated volume
+
+mount -t ubifs ubi0:mlb01-rootfs /mnt
+
+

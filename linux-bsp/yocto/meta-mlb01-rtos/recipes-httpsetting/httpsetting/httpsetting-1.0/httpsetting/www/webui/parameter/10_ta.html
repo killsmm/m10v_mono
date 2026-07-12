@@ -1,0 +1,161 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+        <title>TA</title>
+        <link href="../css/bootstrap.css" rel="stylesheet">
+        <style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+        </style>
+        <link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+<!-- parameter setting -->
+<!-- Set Tampering Alert Enable -->
+<div class="row" style="background-color:#FFF">
+        <section id="Tampering Alert Enable">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Tampering Alert Enable</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+	<!-- Tampering Alert -->
+<div class="row" style="background-color:#FFA">
+	<!-- Enabled -->
+	<section id="Tampering_Alert">
+	<div class="form-group col-xs-12 col-sm-4 col-md-4">
+	<div style="float:left;">
+	<label> Tampering_Alert(Enabled)</label>
+	</div>
+	<div class="col-xs-6 col-sm-6 col-md-6">
+	<select class="form-control" id="TAMPERING_ALERT">
+	<option value="0"selected>OFF</option>
+	<option value="1">ON</option>
+	</select>
+	</div>
+	</div>
+	</section>
+	<!-- SET BUTTON -->
+	<div class="form-group col-xs-12 col-sm-12 col-md-12">
+	<div>
+	<label>Please push, after setting Tampering_Alert(Enabled)</label>
+	</div>
+	<div class="col-xs-12 col-sm-12 col-md-12">
+	<button id="Btn_TAMPERING_ALERT" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+<!-- Set Tampering Alert Configuration for Surv -->
+<div class="row" style="background-color:#FFF">
+        <section id="Tampering Alert Configuration for Surv">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Tampering Alert Configuration for Surv</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+        <!-- Meta -->
+<div class="row" style="background-color:#EEE">
+        <!-- Meta -->
+        <section id="Meta">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Meta(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_TA_META">
+        <option value="0">OFF</option>
+        <option value="1"selected>ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Meta(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_TA_META" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+        </section>
+</div>
+
+        <!-- Draw Alarm -->
+<div class="row" style="background-color:#FFA">
+        <!-- Draw Alarm -->
+        <section id="Draw_Alarm">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Draw_Alarm(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_TA_DRAW_ALARM">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Draw_Alarm(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_TA_DRAW_ALARM" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+        </section>
+</div>
+
+        <!-- GCD Threshold -->
+<div class="row" style="background-color:#EEE">
+        <!-- GCD Threshold -->
+        <section id="GCD_Threshold">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> GCD Threshold</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_GCD_THRESHOLD" type="text" class="form-control" value="12">
+        <label> 0~4294967295</label>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting GCD Threshold</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_GCD_THRESHOLD" class="btn btn-primary" >Update</button>
+    </div>
+    </div>
+        </section>
+</div>
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/10_ta.js"></script>
+<script src="/webui/js/10_ta_r.js"></script>
+
+
+</body>
+</html>
+

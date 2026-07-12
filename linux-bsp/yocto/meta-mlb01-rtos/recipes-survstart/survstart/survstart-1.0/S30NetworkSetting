@@ -1,0 +1,18 @@
+#! /bin/sh
+# Check netset device exist
+device=/dev/netsec0
+if [ -e $device ]; then
+# connect
+	net_init
+	sleep 1
+	if [ $? -ne 0 ]; then
+		echo "Ethernet not found"
+	else
+		ifconfig eth0 192.168.10.16
+		busybox httpd -h /var/www
+		echo "Start WebServer 192.168.10.16"
+	fi
+else
+	echo No ether device
+fi
+exit

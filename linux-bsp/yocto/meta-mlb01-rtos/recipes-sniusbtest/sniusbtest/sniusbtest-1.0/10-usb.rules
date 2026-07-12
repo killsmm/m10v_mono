@@ -1,0 +1,3 @@
+KERNEL=="android0", SUBSYSTEM=="android_usb", ATTR{state}=="CONNECTED", RUN+="/tmp/insert_fsg.sh"
+KERNEL=="android0", SUBSYSTEM=="android_usb", ATTR{state}=="CONFIGURED", RUN+="/usr/bin/insert_mtp.sh"
+KERNEL=="android0", SUBSYSTEM=="android_usb", ATTR{state}=="DISCONNECTED", RUN+="/usr/bin/eject_usb.sh"

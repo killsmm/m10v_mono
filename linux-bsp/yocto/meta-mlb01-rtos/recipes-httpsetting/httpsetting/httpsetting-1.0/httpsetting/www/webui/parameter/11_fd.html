@@ -1,0 +1,175 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+        <title>FD</title>
+        <link href="../css/bootstrap.css" rel="stylesheet">
+        <style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+        </style>
+        <link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+<!-- parameter setting -->
+
+<!-- Set Face Detection Enable -->
+<div class="row" style="background-color:#FFF">
+        <section id="Face Detection Enable">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Face Detection Enable</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+        <!-- Face Detection & Tracking -->
+<div class="row" style="background-color:#FFA">
+        <!-- Enabled -->
+        <section id="Face Detection & Tracking">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Face Detection & Tracking(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="FACE_DETECTION_TRACKING">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Detection & Tracking(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_FACE_DETECTION_TRACKING" class="btn btn-primary" >Update</button>
+        </div>
+        </div>
+</div>
+
+
+
+<!-- Set Face Detection Configuration -->
+<div class="row" style="background-color:#FFF">
+        <section id="Face Detection Configuration">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Face Detection Configuration</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+        <!-- Face Count -->
+<div class="row" style="background-color:#EEE">
+        <!-- Face Count -->
+        <section id="FaceCount">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Face Count</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_FACECOUNT" type="text" class="form-control" value="64">
+        <label> 1~64</label>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Face Count</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_FACECOUNT" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+        </section>
+</div>
+
+
+<!-- Set Face Detection Configuration for Surv -->
+<div class="row" style="background-color:#FFF">
+        <section id="Face Detection Configuration for Surv">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Face Detection Configuration for Surv</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+        <!-- Meta -->
+<div class="row" style="background-color:#FFA">
+        <!-- Meta -->
+        <section id="Meta">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Meta(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_FD_META">
+        <option value="0">OFF</option>
+        <option value="1"selected>ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Meta(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_FD_META" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+        </section>
+</div>
+
+        <!-- Draw Frame -->
+<div class="row" style="background-color:#EEE">
+        <!-- Draw Frame -->
+        <section id="Draw_Frame">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Draw_Frame(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_FD_DRAW_FRAME">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Draw_Frame(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_FD_DRAW_FRAME" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+        </section>
+</div>
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/11_fd.js"></script>
+<script src="/webui/js/11_fd_r.js"></script>
+
+
+</body>
+</html>

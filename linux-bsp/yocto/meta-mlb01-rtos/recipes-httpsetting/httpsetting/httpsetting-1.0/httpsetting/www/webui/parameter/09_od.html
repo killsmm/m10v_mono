@@ -1,0 +1,486 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">
+<html>
+<head>
+        <meta charset="utf-8">
+        <title>OD</title>
+        <link href="../css/bootstrap.css" rel="stylesheet">
+        <style type="text/css">
+            .text_center {
+            }
+            .textcenter {
+            }
+        </style>
+        <link href="../css/jquery-ui.css" rel="stylesheet">
+</head>
+
+<body>
+<!-- parameter setting -->
+<!-- Set Object Detection Enable -->
+<div class="row" style="background-color:#FFF">
+        <section id="Object Detection Enable">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Object Detection Enable</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+        <!-- Object Detection -->
+<div class="row" style="background-color:#FFA">
+        <!-- Enabled -->
+        <section id="Object_Detection">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Object_Detection(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="OBJECT_DETECTION">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Object_Detection(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OBJECT_DETECTION" class="btn btn-primary" >Update</button>
+        </div>
+        </div>
+</div>
+
+<!-- Set Object Detection Configuration for Surv -->
+<div class="row" style="background-color:#FFF">
+        <section id="Object Detection Configuration for Surv">
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <font size="5">
+        <label> Object Detection Configuration for Surv</label>
+        </font>
+        </div>
+        </section>
+</div>
+
+        <!-- Meta -->
+<div class="row" style="background-color:#EEE">
+        <!-- Meta -->
+        <section id="Meta">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Meta(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_META">
+        <option value="0">OFF</option>
+        <option value="1"selected>ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Meta(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_META" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+        <!-- Draw Frame -->
+<div class="row" style="background-color:#FFA">
+        <!-- Draw Frame -->
+        <section id="Draw_Frame">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Draw_Frame(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_DRAW_FRAME">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Draw_Frame(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_DRAW_FRAME" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+        <!-- Intrusion -->
+<div class="row" style="background-color:#EEE">
+        <!-- Intrusion -->
+        <section id="Intrusion">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Intrusion(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_INTRUSION">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Intrusion(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_INTRUSION" class="btn btn-primary" >Update</button>
+    </div>
+    </div>
+</div>
+
+        <!-- Crossline -->
+<div class="row" style="background-color:#FFA">
+        <!-- Crossline -->
+        <section id="Crossline">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Crossline(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_CROSSLINE">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Crossline(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_CROSSLINE" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+        <!-- Abandoned -->
+<div class="row" style="background-color:#EEE">
+        <!-- Abandoned -->
+        <section id="Abandoned">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Abandoned(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_ABANDONED">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Abandoned(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_ABANDONED" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+        <!-- Theft -->
+<div class="row" style="background-color:#FFA">
+        <!-- Theft -->
+        <section id="Theft">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Theft(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_THEFT">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Theft(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_THEFT" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+        <!-- Leaving -->
+<div class="row" style="background-color:#EEE">
+        <!-- Leaving -->
+        <section id="Leaving">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Leaving(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_LEAVING">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Leaving(Enabled)</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_LEAVING" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+        <!-- Function Area Conf -->
+<div class="row" style="background-color:#FFA">
+        <!-- Function Area Conf -->
+        <!-- Function -->
+        <section id="Function">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Function</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_FUNCTION">
+        <option value="0"selected>Mask</option>
+        <option value="1">Intrusion / Leaving</option>
+        <option value="2">Crossline</option>
+        <option value="3">Abandoned</option>
+        <option value="4">Theft</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- CH -->
+        <section id="CH">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>CH</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_CH" type="text" class="form-control" value="0">
+        <nobr><label>0~3</label></nobr>
+        </div>
+        </section>
+        <!-- Area No -->
+        <section id="AreaNo">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>Area No</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_AREANO" type="text" class="form-control" value="0">
+        <nobr><label>0~3</label></nobr>
+        </div>
+        </section>
+        <!-- Enabled -->
+        <section id="Enabled">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Function Area Conf(Enabled)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_FUNCTION_AREA_CONF">
+        <option value="0"selected>OFF</option>
+        <option value="1">ON</option>
+        </select>
+        </div>
+        </div>
+        </section>
+</div>
+
+        <!-- Area Conf -->
+<div class="row" style="background-color:#FFA">
+        <!-- Num of Vertex -->
+        <section id="NumofVertex">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>Num of Vertex</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_NUM_OF_VERTEX" type="text" class="form-control" value="2">
+        <nobr><label>Crossline 2~8, others 3~8</label></nobr>
+        </div>
+        </section>
+</div>
+
+        <!-- Threshold Conf -->
+<div class="row" style="background-color:#FFA">
+        <!-- Threshold -->
+        <section id="Threshold">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>Threshold (only for Abandoned and Theft)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_THRESHOLD" type="text" class="form-control" value="0">
+        <nobr><label>0-65535</label></nobr>
+        </div>
+        </section>
+</div>
+
+        <!-- Vertex Conf -->
+<div class="row" style="background-color:#FFA">
+        <!-- Vertex No -->
+        <section id="Vertex No">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label> Vertex No</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_VERTEX_NO">
+        <option value="0"selected>Vertex0</option>
+        <option value="1">Vertex1</option>
+        <option value="2">Vertex2</option>
+        <option value="3">Vertex3</option>
+        <option value="4">Vertex4</option>
+        <option value="5">Vertex5</option>
+        <option value="6">Vertex6</option>
+        <option value="7">Vertex7</option>
+        </select>
+        </div>
+        </div>
+        </section>
+        <!-- X Coordinate -->
+        <section id="X Coordinate">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>X Coordinate</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_X" type="text" class="form-control" value="0">
+        <nobr><label>0~7678</label></nobr>
+        </div>
+        </section>
+        <!-- Y Coordinate -->
+        <section id="Y Coordinate">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>Y Coordinate</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_Y" type="text" class="form-control" value="0">
+        <nobr><label>0~2159</label></nobr>
+        </div>
+        </section>
+</div>
+
+<div class="row" style="background-color:#FFA">
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Function Area Conf, Area Conf, Threshold Conf, Vertex Conf</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_FUNCTION" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+        <!-- Unmoving Conf for Abandoned -->
+<div class="row" style="background-color:#EEE">
+        <!-- CH -->
+        <section id="CH">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>CH</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_UNMOVING_CH" type="text" class="form-control" value="0">
+        <nobr><label>0~3</label></nobr>
+        </div>
+        </section>
+        <!-- Unmoving -->
+        <section id="Unmoving">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>Unmoving (only for Abandoned)</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_UNMOVING" type="text" class="form-control" value="0">
+        <nobr><label>0~65535</label></nobr>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Unmoving Conf</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_UNMOVING" class="btn btn-primary" >Update</button>
+	</div>
+	</div>
+</div>
+
+        <!-- Detection Size Conf -->
+<div class="row" style="background-color:#FFA">
+        <!-- CH -->
+        <section id="CH">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>CH</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <input id="TXT_DETECTION_SIZE_CH" type="text" class="form-control" value="0">
+        <nobr><label>0~3</label></nobr>
+        </div>
+        </section>
+        <!-- Min Pixel -->
+        <section id="Min_Pixel">
+        <div class="form-group col-xs-12 col-sm-4 col-md-4">
+        <div style="float:left;">
+        <label>Min Pixel</label>
+        </div>
+        <div class="col-xs-6 col-sm-6 col-md-6">
+        <select class="form-control" id="SEL_OD_MIN_PIXEL">
+        <option value="0">2 pixel</option>
+        <option value="1"selected>6 pixel</option>
+        </select>
+        </div>
+        </section>
+        <!-- SET BUTTON -->
+        <div class="form-group col-xs-12 col-sm-12 col-md-12">
+        <div>
+        <label>Please push, after setting Detection Size Conf</label>
+        </div>
+        <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="Btn_OD_DETECTION_SIZE" class="btn btn-primary" >Update</button>
+        </div>
+        </div>
+</div>
+
+<!-- Java Script Registration ------------------------------------------ -->
+<script src="/js/jquery-1.11.3.min.js"></script>
+<script src="/js/bootstrap.js"></script>
+<script src="/js/jquery-ui.min.js"></script>
+<script src="/webui/js/jquery.blockUI.js"></script>
+<script src="/webui/js/json2.js"></script>
+<script src="/webui/js/common.js"></script>
+<script src="/webui/js/09_od.js"></script>
+<script src="/webui/js/09_od_r.js"></script>
+
+
+</body>
+</html>

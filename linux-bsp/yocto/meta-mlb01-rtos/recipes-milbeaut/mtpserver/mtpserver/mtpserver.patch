@@ -1,0 +1,642 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f6c5709..5dca4bc 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -8,7 +8,7 @@ include(GNUInstallDirs)
+ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+ SET(CMAKE_INSTALL_PREFIX "./install")
+ 
+-add_definitions(-DMTP_DEVICE -DMTP_HOST)
++add_definitions(-DMTP_DEVICE -DMTP_HOST -D_FILE_OFFSET_BITS=64)
+ 
+ set(MTP_VERSION_MAJOR 1)
+ set(MTP_VERSION_MINOR 0)
+diff --git a/include/MtpDatabase.h b/include/MtpDatabase.h
+index c72964c..a278633 100644
+--- a/include/MtpDatabase.h
++++ b/include/MtpDatabase.h
+@@ -30,6 +30,8 @@ class MtpDatabase {
+ public:
+     virtual ~MtpDatabase() {}
+ 
++	virtual int is_first_associ_found(void) = 0;
++
+     // called to add a path to include in the database.
+     virtual void                    addStoragePath(const MtpString& path,
+                                                    const MtpString& displayName,
+diff --git a/include/MtpServer.h b/include/MtpServer.h
+index 4fd4c65..d8c3cde 100644
+--- a/include/MtpServer.h
++++ b/include/MtpServer.h
+@@ -92,6 +92,11 @@ private:
+     };
+     Vector<ObjectEdit*>  mObjectEditList;
+ 
++	// last handle about doGetPartialObject()
++	MtpObjectHandle mGetPartialObjectLastHandle;
++	int             mGetPartialObjectLastFD;
++	loff_t          mGetPartialObjectLastOffset;
++
+ public:
+                         MtpServer(int fd, MtpDatabase* database, bool ptp,
+                                     int fileGroup, int filePerm, int directoryPerm);
+diff --git a/include/MtpTypes.h b/include/MtpTypes.h
+index abce3fa..67d019a 100644
+--- a/include/MtpTypes.h
++++ b/include/MtpTypes.h
+@@ -49,6 +49,7 @@ typedef uint32_t MtpObjectHandle;
+ 
+ // Special values
+ #define MTP_PARENT_ROOT         0xFFFFFFFF       // parent is root of the storage
++#define MTP_PARENT_UNUSED       0x00000000       // parent parameter is unused by getObjectList
+ #define kInvalidObjectHandle    0xFFFFFFFF
+ 
+ class MtpStorage;
+diff --git a/server/CMakeLists.txt b/server/CMakeLists.txt
+index 9acb974..a718ed1 100644
+--- a/server/CMakeLists.txt
++++ b/server/CMakeLists.txt
+@@ -1,4 +1,4 @@
+-add_definitions(-DMTP_DEVICE -DMTP_HOST)
++add_definitions(-DMTP_DEVICE -DMTP_HOST -D_FILE_OFFSET_BITS=64)
+ 
+ add_executable(
+     mtp-server
+diff --git a/server/UbuntuMtpDatabase.h b/server/UbuntuMtpDatabase.h
+index 8e1d345..2a0be25 100644
+--- a/server/UbuntuMtpDatabase.h
++++ b/server/UbuntuMtpDatabase.h
+@@ -51,6 +51,21 @@
+ 
+ #define ALL_PROPERTIES 0xffffffff
+ 
++// suffix name of ASSOCIATION(directory)
++// mtpserver main routine will wait untill first association object 
++//  is added to mtpdatabase.
++// If found object count in crease more than DB_MAKE_WAIT_LIMIT,
++//  mtpserver main routine will also go ahead.
++#define DB_MAKE_ASSOCIATION_CHECK "SOCIO"
++#define DB_MAKE_WAIT_LIMIT (100)
++
++// These are just test value to check if these informations is shown 
++//  in property at windows explorer.
++#define SAMPLE_PROP_WIDTH	(0000)
++#define SAMPLE_PROP_HEIGHT	(0000)
++#define SAMPLE_PROP_IMAGE_DEPTH	(32)
++
++
+ namespace asio = boost::asio;
+ using namespace boost::filesystem;
+ 
+@@ -77,6 +92,7 @@ private:
+         (".gif", MTP_FORMAT_GIF)
+         (".png", MTP_FORMAT_PNG)
+         (".jpeg", MTP_FORMAT_JFIF)
++        (".jpg", MTP_FORMAT_EXIF_JPEG)
+         (".tiff", MTP_FORMAT_TIFF)
+         (".ogg", MTP_FORMAT_OGG)
+         (".mp3", MTP_FORMAT_MP3)
+@@ -94,6 +110,8 @@ private:
+     asio::streambuf buf;
+     int inotify_fd;
+ 
++    int first_associ_found;
++
+     MtpObjectFormat guess_object_format(std::string extension)
+     {
+         std::map<std::string, MtpObjectFormat>::iterator it;
+@@ -103,7 +121,11 @@ private:
+             boost::to_upper(extension);
+             it = formats.find(extension);
+             if (it == formats.end()) {
+-                return MTP_FORMAT_UNDEFINED;
++	            boost::to_lower(extension);
++	            it = formats.find(extension);
++    	        if (it == formats.end()) {
++        	        return MTP_FORMAT_UNDEFINED;
++            	}
+             }
+ 	}
+ 
+@@ -117,7 +139,6 @@ private:
+                                  IN_MODIFY | IN_CREATE | IN_DELETE);
+     }
+ 
+-    
+     void add_file_entry(path p, MtpObjectHandle parent, MtpStorageID storage)
+     {
+         MtpObjectHandle handle = counter;
+@@ -140,6 +161,17 @@ private:
+             if (local_server)
+                 local_server->sendObjectAdded(handle);
+ 
++            if( first_associ_found == 0 ) {
++			    int rc = std::strncmp(entry.display_name.c_str()+3 , DB_MAKE_ASSOCIATION_CHECK, 5);
++			    if(rc == 0) {
++				    VLOG(1) << "specified Association is found";
++                    first_associ_found = 1;
++				}
++				if( counter > DB_MAKE_WAIT_LIMIT ) {
++                    first_associ_found = 1;
++                }
++		    }
++
+             parse_directory (p, handle, storage);
+         } else {
+             try {
+@@ -158,6 +190,12 @@ private:
+                 if (local_server)
+                     local_server->sendObjectAdded(handle);
+ 
++                if( first_associ_found == 0 ) {
++	                if( counter > DB_MAKE_WAIT_LIMIT ) {
++                        first_associ_found = 1;
++                    }
++                }
++
+             } catch (const filesystem_error& ex) {
+                 PLOG(WARNING) << "There was an error reading file properties";
+             }
+@@ -231,6 +269,9 @@ private:
+             LOG(ERROR) << ex.what();
+         }
+ 
++        if( first_associ_found == 0 )
++            first_associ_found = 1;
++
+     }
+ 
+     void read_more_notify()
+@@ -347,6 +388,8 @@ public:
+             PLOG(FATAL) << "Invalid file descriptor to inotify";
+         VLOG(1) << "using inotify fd " << inotify_fd << " for database";
+ 
++        first_associ_found = 0;
++
+         stream_desc.assign(inotify_fd);
+ 
+ 	db = std::map<MtpObjectHandle, DbEntry>();
+@@ -364,12 +407,19 @@ public:
+         close(inotify_fd);
+     }
+ 
++    virtual int is_first_associ_found(void) {
++       	return first_associ_found;
++    }
++
+     virtual void addStoragePath(const MtpString& path,
+                                 const MtpString& displayName,
+                                 MtpStorageID storage,
+                                 bool hidden)
+     {
+-	readFiles(path, displayName, storage, hidden);
++        VLOG(1) << __PRETTY_FUNCTION__ << ": " << path << " - "
++         << displayName << " ID: " << storage << "(" << hidden << ")";
++
++		readFiles(path, displayName, storage, hidden);
+     }
+ 
+     virtual void removeStorage(MtpStorageID storage)
+@@ -452,17 +502,23 @@ public:
+         VLOG(1) << __PRETTY_FUNCTION__ << ": " << storageID << ", " << format << ", " << parent;
+         MtpObjectHandleList* list = nullptr;
+ 
++        int parent_no_check = 0;
++
+         if (parent == MTP_PARENT_ROOT)
+             parent = 0;
++        else if (parent == MTP_PARENT_UNUSED)
++            parent_no_check = 1;
+ 
+         try
+         {
+             std::vector<MtpObjectHandle> keys;
+ 
+             BOOST_FOREACH(MtpObjectHandle i, db | boost::adaptors::map_keys) {
+-                if (db.at(i).storage_id == storageID && db.at(i).parent == parent)
+-                    if (format == 0 || db.at(i).object_format == format)
+-                        keys.push_back(i);
++                if (db.at(i).storage_id == storageID)
++                    if (parent_no_check || db.at(i).parent == parent) { ////
++                      if (format == 0 || db.at(i).object_format == format)
++                          keys.push_back(i);
++                    }
+             }
+ 
+             list = new MtpObjectHandleList(keys);
+@@ -563,6 +619,9 @@ public:
+             MTP_PROPERTY_OBJECT_FORMAT,
+             MTP_PROPERTY_OBJECT_SIZE,
+             MTP_PROPERTY_OBJECT_FILE_NAME,
++            MTP_PROPERTY_WIDTH,
++            MTP_PROPERTY_HEIGHT,
++            MTP_PROPERTY_IMAGE_BIT_DEPTH,
+             MTP_PROPERTY_DISPLAY_NAME,
+             MTP_PROPERTY_PERSISTENT_UID,
+             MTP_PROPERTY_ASSOCIATION_TYPE,
+@@ -609,6 +668,9 @@ public:
+                 case MTP_PROPERTY_PARENT_OBJECT: packet.putUInt32(db.at(handle).parent); break;            
+                 case MTP_PROPERTY_OBJECT_FORMAT: packet.putUInt16(db.at(handle).object_format); break;
+                 case MTP_PROPERTY_OBJECT_SIZE: packet.putUInt32(db.at(handle).object_size); break;
++                case MTP_PROPERTY_WIDTH: packet.putUInt32( SAMPLE_PROP_WIDTH ); break;
++				case MTP_PROPERTY_HEIGHT: packet.putUInt32( SAMPLE_PROP_HEIGHT ); break;
++				case MTP_PROPERTY_IMAGE_BIT_DEPTH: packet.putUInt32( SAMPLE_PROP_IMAGE_DEPTH ); break;
+                 case MTP_PROPERTY_DISPLAY_NAME: packet.putString(db.at(handle).display_name.c_str()); break;
+                 case MTP_PROPERTY_OBJECT_FILE_NAME: packet.putString(db.at(handle).display_name.c_str()); break;
+                 case MTP_PROPERTY_PERSISTENT_UID: packet.putUInt128(handle); break;
+@@ -798,7 +860,7 @@ public:
+          */
+ 
+         if (property == ALL_PROPERTIES)
+-             packet.putUInt32(6 * handles.size());
++             packet.putUInt32(17 * handles.size());
+         else
+              packet.putUInt32(1 * handles.size());
+ 
+@@ -861,6 +923,28 @@ public:
+                 packet.putString(entry.display_name.c_str());
+             }
+ 
++	        // Width
++            if (property == ALL_PROPERTIES || property == MTP_PROPERTY_WIDTH) {
++                packet.putUInt32(i);
++                packet.putUInt16(MTP_PROPERTY_WIDTH);
++                packet.putUInt16(MTP_TYPE_UINT32);
++                packet.putUInt32( SAMPLE_PROP_WIDTH );
++            }
++	        // Height
++            if (property == ALL_PROPERTIES || property == MTP_PROPERTY_HEIGHT) {
++                packet.putUInt32(i);
++                packet.putUInt16(MTP_PROPERTY_HEIGHT);
++                packet.putUInt16(MTP_TYPE_UINT32);
++                packet.putUInt32( SAMPLE_PROP_HEIGHT );
++            }
++	        // ImageDepth
++            if (property == ALL_PROPERTIES || property == MTP_PROPERTY_IMAGE_BIT_DEPTH) {
++                packet.putUInt32(i);
++                packet.putUInt16(MTP_PROPERTY_IMAGE_BIT_DEPTH);
++                packet.putUInt16(MTP_TYPE_UINT32);
++                packet.putUInt32( SAMPLE_PROP_IMAGE_DEPTH );
++            }
++
+             // Association Type
+             if (property == ALL_PROPERTIES || property == MTP_PROPERTY_ASSOCIATION_TYPE) {
+                 packet.putUInt32(i);
+@@ -949,9 +1033,9 @@ public:
+             info.mFormat = db.at(handle).object_format;
+             info.mProtectionStatus = 0x0;
+             info.mCompressedSize = db.at(handle).object_size;
+-            info.mImagePixWidth = 0;
+-            info.mImagePixHeight = 0;
+-            info.mImagePixDepth = 0;
++            info.mImagePixWidth = SAMPLE_PROP_WIDTH;
++            info.mImagePixHeight = SAMPLE_PROP_HEIGHT;
++            info.mImagePixDepth = SAMPLE_PROP_IMAGE_DEPTH;
+             info.mParent = db.at(handle).parent;
+             info.mAssociationType
+                 = info.mFormat == MTP_FORMAT_ASSOCIATION
+diff --git a/server/server.cpp b/server/server.cpp
+index 9d93e57..6eafb63 100644
+--- a/server/server.cpp
++++ b/server/server.cpp
+@@ -71,25 +71,34 @@ private:
+         static int storageID = MTP_STORAGE_REMOVABLE_RAM;
+ 
+         MtpStorage *removable = new MtpStorage(
+-            storageID, 
++            storageID,
+             path,
+             name,
+             1024 * 1024 * 100,  /* 100 MB reserved space, to avoid filling the disk */
+             true,
+-            1024 * 1024 * 1024 * 2  /* 2GB arbitrary max file size */);
++            1024 * 1024 * 1024 * 4  /* 4GB arbitrary max file size */);
+ 
+         storageID++;
+ 
+-            mtp_database->addStoragePath(path,
+-                                         std::string(),
+-                                         removable->getStorageID(),
+-                                         true);
+-            server->addStorage(removable);
++		boost::thread(&MtpDaemon::add_storage_path, this,
++                                      removable->getPath(),
++                                      removable->getStorageID());
++
++        server->addStorage(removable);
+ 
+         removables.insert(std::pair<std::string, std::tuple<MtpStorage*, bool> >
+                               (name, std::make_tuple(removable, true)));
+     }
+ 
++	void add_storage_path(const char  *path, int storage_id)
++	{
++        VLOG(1) << "add_storage_path " << path << ", id=" << storage_id;
++		mtp_database->addStoragePath(path,
++                                     std::string(),
++                                     storage_id,
++                                     true);
++	}
++
+     void add_mountpoint_watch(const std::string& path)
+     {
+         VLOG(1) << "Adding notify watch for " << path;
+@@ -113,15 +122,15 @@ private:
+                          std::size_t transferred)
+     {
+         size_t processed = 0;
+- 
++
+         while(transferred - processed >= sizeof(inotify_event))
+         {
+             const char* cdata = processed + asio::buffer_cast<const char*>(buf.data());
+             const inotify_event* ievent = reinterpret_cast<const inotify_event*>(cdata);
+             path storage_path ("/media");
+-     
++
+             processed += sizeof(inotify_event) + ievent->len;
+-     
++
+             storage_path /= userdata->pw_name;
+ 
+             if (ievent->len > 0 && ievent->mask & IN_CREATE)
+@@ -182,12 +191,14 @@ public:
+ 
+         // MTP server
+         server = new MtpServer(
+-                fd, 
++                fd,
+                 mtp_database,
+-                false, 
+-                userdata->pw_gid, 
++                false,
++                userdata->pw_gid,
+ 		0664,
+ 		0755);
++
++
+     }
+ 
+     void run()
+@@ -197,7 +208,7 @@ public:
+         std::string token;
+ 
+         home_storage = new MtpStorage(
+-            MTP_STORAGE_FIXED_RAM, 
++            MTP_STORAGE_FIXED_RAM,
+             userdata->pw_dir,
+ 	    "exported_storage",
+             1024 * 1024 * 100,  /* 100 MB reserved space, to avoid filling the disk */
+@@ -239,8 +250,6 @@ public:
+                                          IN_CREATE | IN_DELETE);
+         }
+ 
+-        if (home_storage)
+-            server->addStorage(home_storage);
+ 
+         BOOST_FOREACH(std::string name, removables | boost::adaptors::map_keys) {
+             auto t = removables.at(name);
+@@ -255,12 +264,17 @@ public:
+             }
+         }
+ 
++        while( mtp_database->is_first_associ_found() == 0 ) {
++            usleep(100000);
++        }
++
+         // start the MtpServer main loop
+         server->run();
+     }
+ 
+     ~MtpDaemon()
+     {
++		VLOG(1) << __PRETTY_FUNCTION__ << ": start";
+         // Cleanup
+         inotify_rm_watch(inotify_fd, watch_fd);
+         io_svc.stop();
+@@ -489,7 +503,7 @@ int main(int argc, char** argv)
+         LOG(ERROR) << "Error opening /dev/mtp_usb, aborting now...";
+         return 1;
+     }
+- 
++
+     try {
+         MtpDaemon *d = new MtpDaemon(fd);
+ 
+diff --git a/src/MtpDevice.cpp b/src/MtpDevice.cpp
+index 64cab56..2c0a8ae 100644
+--- a/src/MtpDevice.cpp
++++ b/src/MtpDevice.cpp
+@@ -671,7 +671,7 @@ fail:
+ // reads the object's data and writes it to the specified file path
+ bool MtpDevice::readObject(MtpObjectHandle handle, const char* destPath, int group, int perm) {
+     VLOG(2) << "readObject: " << destPath;
+-    int fd = ::open(destPath, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
++    int fd = ::open(destPath, O_RDWR | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR);
+     if (fd < 0) {
+         LOG(ERROR) << "open failed for " << destPath;
+         return false;
+diff --git a/src/MtpEventPacket.cpp b/src/MtpEventPacket.cpp
+index 9bcaaab..55868e5 100644
+--- a/src/MtpEventPacket.cpp
++++ b/src/MtpEventPacket.cpp
+@@ -34,7 +34,7 @@
+ namespace android {
+ 
+ MtpEventPacket::MtpEventPacket()
+-    :   MtpPacket(512)
++    :   MtpPacket(1024)
+ {
+ }
+ 
+diff --git a/src/MtpRequestPacket.cpp b/src/MtpRequestPacket.cpp
+index 6cc9b07..401498f 100644
+--- a/src/MtpRequestPacket.cpp
++++ b/src/MtpRequestPacket.cpp
+@@ -28,7 +28,7 @@
+ namespace android {
+ 
+ MtpRequestPacket::MtpRequestPacket()
+-    :   MtpPacket(512)
++    :   MtpPacket(1024)
+ {
+ }
+ 
+diff --git a/src/MtpResponsePacket.cpp b/src/MtpResponsePacket.cpp
+index 110aea9..a08fb2b 100644
+--- a/src/MtpResponsePacket.cpp
++++ b/src/MtpResponsePacket.cpp
+@@ -28,7 +28,7 @@
+ namespace android {
+ 
+ MtpResponsePacket::MtpResponsePacket()
+-    :   MtpPacket(512)
++    :   MtpPacket(1024)
+ {
+ }
+ 
+diff --git a/src/MtpServer.cpp b/src/MtpServer.cpp
+index c5f1ca4..3722d4e 100644
+--- a/src/MtpServer.cpp
++++ b/src/MtpServer.cpp
+@@ -113,11 +113,17 @@ MtpServer::MtpServer(int fd, MtpDatabase* database, bool ptp,
+         mSessionOpen(false),
+         mSendObjectHandle(kInvalidObjectHandle),
+         mSendObjectFormat(0),
+-        mSendObjectFileSize(0)
++        mSendObjectFileSize(0),
++        mGetPartialObjectLastHandle(0),
++        mGetPartialObjectLastFD(0),
++        mGetPartialObjectLastOffset(0)
+ {
+ }
+ 
+ MtpServer::~MtpServer() {
++        if(mGetPartialObjectLastFD != 0) {
++            close(mGetPartialObjectLastFD);
++        }
+ }
+ 
+ void MtpServer::addStorage(MtpStorage* storage) {
+@@ -487,7 +493,7 @@ MtpResponseCode MtpServer::doGetDeviceInfo() {
+     string.set("Socionext");
+     mData.putString(string);   // Manufacturer
+ 
+-    string.set("M8M");
++    string.set("MLB01");
+     mData.putString(string);   // Model
+     string.set("1.0");
+     mData.putString(string);   // Device Version
+@@ -757,7 +763,7 @@ MtpResponseCode MtpServer::doGetObject() {
+         return result;
+ 
+     mtp_file_range  mfr;
+-    mfr.fd = open(pathBuf.c_str(), O_RDONLY);
++    mfr.fd = open(pathBuf.c_str(), O_RDONLY | O_DIRECT);
+     if (mfr.fd < 0) {
+         return MTP_RESPONSE_GENERAL_ERROR;
+     }
+@@ -801,6 +807,7 @@ MtpResponseCode MtpServer::doGetPartialObject(MtpOperationCode operation) {
+     MtpObjectHandle handle = mRequest.getParameter(1);
+     uint64_t offset;
+     uint32_t length;
++    int close_flag=0;
+     offset = mRequest.getParameter(2);
+     if (operation == MTP_OPERATION_GET_PARTIAL_OBJECT_64) {
+         // android extension with 64 bit offset
+@@ -817,13 +824,28 @@ MtpResponseCode MtpServer::doGetPartialObject(MtpOperationCode operation) {
+     int result = mDatabase->getObjectFilePath(handle, pathBuf, fileLength, format);
+     if (result != MTP_RESPONSE_OK)
+         return result;
+-    if (offset + length > fileLength)
++    if (offset + length >= fileLength) {
+         length = fileLength - offset;
++        close_flag = 1;
++    }
+ 
+     mtp_file_range  mfr;
+-    mfr.fd = open(pathBuf.c_str(), O_RDONLY);
+-    if (mfr.fd < 0) {
+-        return MTP_RESPONSE_GENERAL_ERROR;
++    if(mGetPartialObjectLastHandle == handle && mGetPartialObjectLastOffset == offset) {
++		mfr.fd = mGetPartialObjectLastFD;
++    } else {
++        if(mGetPartialObjectLastHandle != 0) {
++            close(mGetPartialObjectLastFD);
++        }
++        mfr.fd = open(pathBuf.c_str(), O_RDONLY | O_DIRECT);
++        if (mfr.fd < 0) {
++            mGetPartialObjectLastHandle = 0;
++            mGetPartialObjectLastFD = 0;
++            mGetPartialObjectLastOffset = 0;
++            return MTP_RESPONSE_GENERAL_ERROR;
++        }
++        mGetPartialObjectLastHandle = handle;
++        mGetPartialObjectLastFD = mfr.fd;
++        mGetPartialObjectLastOffset = 0;
+     }
+     mfr.offset = offset;
+     mfr.length = length;
+@@ -833,14 +855,30 @@ MtpResponseCode MtpServer::doGetPartialObject(MtpOperationCode operation) {
+ 
+     // transfer the file
+     int ret = ioctl(mFD, MTP_SEND_FILE_WITH_HEADER, (unsigned long)&mfr);
+-    VLOG(2) << "MTP_SEND_FILE_WITH_HEADER returned " << ret;
+-    close(mfr.fd);
++    VLOG(2) << "MTP_SEND_FILE_WITH_HEADER returned " << ret << ",offset=" << mfr.offset << ",length=" << mfr.length;
+     if (ret < 0) {
+-        if (errno == ECANCELED)
++        if (errno == ECANCELED) {
++            close(mfr.fd);
++            mGetPartialObjectLastHandle = 0;
++            mGetPartialObjectLastFD = 0;
+             return MTP_RESPONSE_TRANSACTION_CANCELLED;
+-        else
++        } else {
++            close(mfr.fd);
++            mGetPartialObjectLastHandle = 0;
++            mGetPartialObjectLastFD = 0;
+             return MTP_RESPONSE_GENERAL_ERROR;
++        }
+     }
++
++	mGetPartialObjectLastOffset = offset + length;
++
++    if(close_flag == 1) {
++        close(mfr.fd);
++        mGetPartialObjectLastHandle = 0;
++        mGetPartialObjectLastFD = 0;
++        mGetPartialObjectLastOffset = 0;
++    }
++
+     return MTP_RESPONSE_OK;
+ }
+ 
+@@ -964,7 +1002,7 @@ MtpResponseCode MtpServer::doSendObject() {
+     initialData = ret - MTP_CONTAINER_HEADER_SIZE;
+ 
+     mtp_file_range  mfr;
+-    mfr.fd = open(mSendObjectFilePath.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
++    mfr.fd = open(mSendObjectFilePath.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR);
+     if (mfr.fd < 0) {
+         result = MTP_RESPONSE_GENERAL_ERROR;
+         goto done;
+@@ -1128,6 +1166,15 @@ MtpResponseCode MtpServer::doGetObjectPropDesc() {
+     MtpProperty* property = mDatabase->getObjectPropertyDesc(propCode, format);
+     if (!property)
+         return MTP_RESPONSE_OBJECT_PROP_NOT_SUPPORTED;
++	if( propCode == MTP_PROPERTY_WIDTH ) {
++		property->setFormRange(0,10000,1);
++	}
++	if( propCode == MTP_PROPERTY_HEIGHT ) {
++		property->setFormRange(0,10000,1);
++	}
++	if( propCode == MTP_PROPERTY_IMAGE_BIT_DEPTH ) {
++		property->setFormRange(8,32,1);
++	}
+     property->write(mData);
+     delete property;
+     return MTP_RESPONSE_OK;
+@@ -1243,7 +1290,7 @@ MtpResponseCode MtpServer::doBeginEditObject() {
+     if (result != MTP_RESPONSE_OK)
+         return result;
+ 
+-    int fd = open(path.c_str(), O_RDWR | O_EXCL);
++    int fd = open(path.c_str(), O_RDWR | O_EXCL | O_DIRECT);
+     if (fd < 0) {
+         PLOG(ERROR) << "open failed for " << path.c_str() << " in doBeginEditObject";
+         return MTP_RESPONSE_GENERAL_ERROR;
+diff --git a/tests/MockMtpDatabase.h b/tests/MockMtpDatabase.h
+index 1a10857..453037b 100644
+--- a/tests/MockMtpDatabase.h
++++ b/tests/MockMtpDatabase.h
+@@ -74,6 +74,9 @@ public:
+ 
+     virtual ~MockMtpDatabase() {}
+ 
++    virtual int is_first_associ_found(void) {
++    }
++
+     virtual void addStoragePath(const MtpString& path, const MtpString& displayName, MtpStorageID storage, bool hidden)
+     {
+     }

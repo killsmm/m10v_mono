@@ -1,0 +1,4 @@
+ENV{DEVNAME}=="/dev/mmcblk*", ENV{DEVTYPE}=="partition", PROGRAM="/lib/udev/storage.sh mountpoint", ENV{MOUNTPOINT}="$result"
+ENV{MOUNTPOINT}!="", ACTION=="add", RUN+="/lib/udev/storage.sh add $env{MOUNTPOINT}"
+ENV{MOUNTPOINT}!="", ACTION=="remove", RUN+="/lib/udev/storage.sh remove $env{MOUNTPOINT}"
+
