@@ -1,0 +1,14 @@
+<RCC>
+    <qresource prefix="/imgs"/>
+    <qresource prefix="/res"/>
+    <qresource prefix="/">
+        <file>res/cunchuka_sd-card.png</file>
+        <file>res/sdcard_state_exist.png</file>
+        <file>res/sdcard_state_nonexist.png</file>
+        <file>res/shipinmulushipin.png</file>
+        <file>res/zhaoxiangji.png</file>
+        <file>res/zhaoxiangji_1.png</file>
+        <file>res/feituo_with_text.png</file>
+        <file>res/feituo.png</file>
+    </qresource>
+</RCC>
