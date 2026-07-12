@@ -1,0 +1,38 @@
+name: Build linux-bsp
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build linux-bsp in Docker
+    runs-on: self-hosted
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build linux-bsp
+        working-directory: linux-bsp
+        env:
+          COMPILER_IMAGE: m10v-compiler:${{ github.run_id }}
+          BUILD_VERSION: 1.0.0-${{ github.sha }}
+        run: |
+          docker build --tag "$COMPILER_IMAGE" docker
+
+          docker run --rm \
+            --user m10v \
+            --workdir /workspace \
+            --volume "$PWD:/workspace" \
+            --env BB_ENV_EXTRAWHITE="BUILD_VERSION BUILD_DATE" \
+            --env BUILD_VERSION \
+            --env BUILD_DATE="$(date)" \
+            "$COMPILER_IMAGE" \
+            ./make.sh 2g2c
+
+      - name: Remove compiler image
+        if: always()
+        run: docker image rm --force m10v-compiler:${{ github.run_id }} || true

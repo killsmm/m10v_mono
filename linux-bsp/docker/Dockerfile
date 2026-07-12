@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y openssh-server \
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y locales
 
-RUN wget http://releases.linaro.org/components/toolchain/binaries/5.3-2016.05/arm-linux-gnueabihf/gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabihf.tar.xz
+RUN wget https://developer.arm.com/-/cdn-downloads/permalink/legacy-linaro-gnu-toolchains/5.3-2016.05/gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabihf.tar.xz
 
 RUN sudo cp gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabihf.tar.xz /opt && cd /opt && sudo tar xf gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabihf.tar.xz && sudo rm gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabihf.tar.xz
 
@@ -40,13 +40,13 @@ ENV GOPATH=/home/m10v/go
 
 ENV PATH=$PATH:/opt/gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabihf/bin:/usr/local/go/bin:$GOPATH/bin
 
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0
 
-RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
 
 # RUN go install github.com/grpc-ecosystem/grpc-gateway/protoc-gen-openapi@latest
 
-RUN go install github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway@latest
+RUN go install github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway@v1.16.0
 
 RUN chown -R m10v /home/m10v
 
@@ -60,9 +60,9 @@ RUN chown -R m10v /home/m10v
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
     locale-gen
-ENV LANG en_US.UTF-8  
-ENV LANGUAGE en_US:en  
-ENV LC_ALL en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
 
 # RUN wget https://deb.nodesource.com/setup_16.x && sudo bash setup_16.x && sudo apt-get install -y nodejs
 
