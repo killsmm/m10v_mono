@@ -1,0 +1,642 @@
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+                0x0000000000000800                IRQ_STACK_SIZE = 0x800
+                0x0000000000000080                FIQ_STACK_SIZE = 0x80
+                0x0000000000000800                SVC_STACK_SIZE = 0x800
+                0x0000000000000800                SYS_STACK_SIZE = 0x800
+                0x0000000000000080                ABT_STACK_SIZE = 0x80
+                0x0000000000000080                UND_STACK_SIZE = 0x80
+                0x0000000000000000                . = 0x0
+                0x0000000000000000                stubby_start = .
+
+.text           0x0000000000000000     0x2dd0
+ *(.initialtext)
+ .initialtext   0x0000000000000000       0xb0 ../sc2000-rtos/boot.o
+                0x0000000000000000                reset
+                0x0000000000000100                . = ALIGN (0x100)
+ *fill*         0x00000000000000b0       0x50 
+ *(._secure.text)
+ *(.got.plt)
+ .got.plt       0x0000000000000100        0xc ../sc2000-rtos/cache-cp15.o
+                0x0000000000000100                _GLOBAL_OFFSET_TABLE_
+ *(.got)
+ .got           0x000000000000010c       0x4c ../sc2000-rtos/cache-cp15.o
+ *(.igot.plt)
+ .igot.plt      0x0000000000000158        0x0 ../sc2000-rtos/cache-cp15.o
+ *(.igot)
+ *(.text)
+ .text          0x0000000000000158      0x110 ../sc2000-rtos/cache-cp15.o
+                0x0000000000000170                icache_enable
+                0x0000000000000184                icache_disable
+                0x0000000000000198                icache_status
+                0x00000000000001a2                dcache_enable
+                0x0000000000000240                dcache_disable
+                0x000000000000025c                dcache_status
+ .text          0x0000000000000268        0x0 ../sc2000-rtos/cache-pl310.o
+ .text          0x0000000000000268      0x1c0 ../sc2000-rtos/cache_v7.o
+                0x000000000000031e                invalidate_icache_all
+                0x0000000000000332                __v7_outer_cache_enable
+                0x0000000000000332                v7_outer_cache_enable
+                0x0000000000000334                v7_outer_cache_disable
+                0x0000000000000334                __v7_outer_cache_disable
+                0x0000000000000336                __v7_outer_cache_flush_all
+                0x0000000000000336                v7_outer_cache_flush_all
+                0x0000000000000338                flush_dcache_all
+                0x0000000000000348                v7_outer_cache_inval_all
+                0x0000000000000348                __v7_outer_cache_inval_all
+                0x000000000000034a                invalidate_dcache_all
+                0x000000000000035a                arm_init_before_mmu
+                0x000000000000037c                v7_outer_cache_flush_range
+                0x000000000000037c                __v7_outer_cache_flush_range
+                0x000000000000037e                flush_dcache_range
+                0x00000000000003a6                flush_cache
+                0x00000000000003ac                __v7_outer_cache_inval_range
+                0x00000000000003ac                v7_outer_cache_inval_range
+                0x00000000000003ae                invalidate_dcache_range
+                0x00000000000003f4                cleanup_before_linux
+ .text          0x0000000000000428      0x46c ../sc2000-rtos/lib1funcs.o
+                0x0000000000000428                __udivsi3
+                0x0000000000000428                __aeabi_uidiv
+                0x0000000000000564                __aeabi_idiv
+                0x00000000000006e8                __aeabi_uidivmod
+                0x0000000000000700                __aeabi_idivmod
+                0x0000000000000718                __aeabi_uldivmod
+                0x0000000000000874                __aeabi_llsl
+ .text          0x0000000000000894      0x168 ../sc2000-rtos/boot-sequence.o
+                0x0000000000000894                print_stubby_info
+                0x00000000000008bc                describe
+                0x0000000000000928                select_boot_source
+                0x0000000000000930                try_boot_source
+                0x0000000000000984                boot_sequence
+                0x00000000000009c8                jump_to_linux
+ .text          0x00000000000009fc      0x1d8 ../sc2000-rtos/load_image.o
+                0x00000000000009fc                _filesystem_read
+                0x0000000000000a68                load_from_filesystem
+ .text          0x0000000000000bd4       0x50 ../sc2000-rtos/serial.o
+                0x0000000000000bd4                getc
+                0x0000000000000bd8                putc
+                0x0000000000000bf0                puts
+                0x0000000000000c02                serial_init
+ .text          0x0000000000000c24       0x4c ../sc2000-rtos/lowlevel_init.o
+                0x0000000000000c24                lowlevel_init
+                0x0000000000000c2c                lowlevel_init_2
+ .text          0x0000000000000c70        0x0 ../sc2000-rtos/nonsec_virt.o
+ .text          0x0000000000000c70        0x0 ../sc2000-rtos/nonsec.o
+ .text          0x0000000000000c70        0x0 ../sc2000-rtos/boot.o
+ .text          0x0000000000000c70      0x230 ../sc2000-rtos/romfs.o
+                0x0000000000000dc8                romfs_filesystem_read
+                0x0000000000000e10                romfs_filesystem_get_ads
+                0x0000000000000e48                romfs_mount
+ .text          0x0000000000000ea0      0x14a ../sc2000-rtos/string.o
+                0x0000000000000ea0                strcpy
+                0x0000000000000eb0                strncpy
+                0x0000000000000ec8                strcat
+                0x0000000000000ee2                strcmp
+                0x0000000000000ef8                strncmp
+                0x0000000000000f1a                strchr
+                0x0000000000000f32                strlen
+                0x0000000000000f42                memset
+                0x0000000000000f88                memcmp
+                0x0000000000000fa6                findstr
+ .text          0x0000000000000fea        0x0 ../sc2000-rtos/ctype.o
+ *fill*         0x0000000000000fea        0x2 
+ .text          0x0000000000000fec      0x1c4 ../sc2000-rtos/utils.o
+                0x0000000000000fec                pic_dereference
+                0x000000000000100c                __div0
+                0x0000000000001018                udelay
+                0x000000000000103e                printnybble
+                0x000000000000105a                _print8
+                0x0000000000001074                print8
+                0x0000000000001088                _print32
+                0x00000000000010c4                print32
+                0x00000000000010d8                print32_noleading
+                0x00000000000010ec                printdec
+                0x0000000000001130                raise
+                0x0000000000001134                __aeabi_unwind_cpp_pr0
+                0x0000000000001136                replay_dump
+                0x000000000000114c                malloc
+                0x0000000000001174                uaw_be32
+                0x0000000000001184                __swap32
+                0x000000000000119a                memcpy
+ .text          0x00000000000011b0      0x714 ../sc2000-rtos/sdhci.o
+                0x0000000000001294                sdhci_send_command
+                0x00000000000014f0                sdhci_set_signal_voltage
+                0x0000000000001534                sdhci_execute_tuning
+                0x00000000000015ec                sdhci_set_ios
+                0x00000000000016b8                sdhci_sw_reset
+                0x00000000000016c6                sdhci_init
+                0x00000000000017ac                add_sdhci
+ .text          0x00000000000018c4       0x24 ../sc2000-rtos/f_sdh30_sdhci.o
+                0x00000000000018c4                f_sdh30_init
+ .text          0x00000000000018e8      0x968 ../sc2000-rtos/mmc.o
+                0x0000000000001918                mmc_bread
+                0x0000000000001ae4                mmc_go_idle
+                0x0000000000001b12                mmc_set_clock
+                0x000000000000207c                mmc_init
+                0x000000000000224c                print_mmc_devices
+ .text          0x0000000000002250      0x14c ../sc2000-rtos/part_dos.o
+                0x0000000000002250                partition_read_table
+                0x000000000000229c                parse_partition
+ .text          0x000000000000239c      0x1bc ../sc2000-rtos/dtb.o
+                0x000000000000239c                fdt_set_prop_size
+                0x0000000000002448                fdt_find_path
+                0x0000000000002536                update_dtb
+ .text          0x0000000000002558      0x388 ../sc2000-rtos/dtb-cfg.o
+                0x0000000000002582                process_dtb_config
+ .text          0x00000000000028e0       0x84 ../sc2000-rtos/serial-usio.o
+                0x00000000000028e0                uart_init
+                0x0000000000002928                _putc
+                0x0000000000002944                _getc
+ *(.text.unlikely)
+                0x0000000000002964                . = ALIGN (0x4)
+ *(.rodata)
+ .rodata        0x0000000000002964      0x100 ../sc2000-rtos/ctype.o
+                0x0000000000002964                _ctype
+ .rodata        0x0000000000002a64       0x2c ../sc2000-rtos/utils.o
+ .rodata        0x0000000000002a90       0x50 ../sc2000-rtos/mmc.o
+ *(.rodata.str1.1)
+ .rodata.str1.1
+                0x0000000000002ae0       0x47 ../sc2000-rtos/boot-sequence.o
+ .rodata.str1.1
+                0x0000000000002b27       0xec ../sc2000-rtos/load_image.o
+ .rodata.str1.1
+                0x0000000000002c13       0x5f ../sc2000-rtos/serial.o
+                                         0x61 (size before relaxing)
+ .rodata.str1.1
+                0x0000000000002c72        0xa ../sc2000-rtos/utils.o
+ .rodata.str1.1
+                0x0000000000002c7c       0x80 ../sc2000-rtos/sdhci.o
+ .rodata.str1.1
+                0x0000000000002cfc        0xc ../sc2000-rtos/mmc.o
+ .rodata.str1.1
+                0x0000000000002d08       0x10 ../sc2000-rtos/part_dos.o
+ .rodata.str1.1
+                0x0000000000002d18        0xc ../sc2000-rtos/dtb.o
+ .rodata.str1.1
+                0x0000000000002d24       0x26 ../sc2000-rtos/dtb-cfg.o
+                                         0x28 (size before relaxing)
+                0x0000000000002d4c                . = ALIGN (0x4)
+ *fill*         0x0000000000002d4a        0x2 
+ *(.data*)
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/cache-cp15.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/cache-pl310.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/cache_v7.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/lib1funcs.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/boot-sequence.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/load_image.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/serial.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/lowlevel_init.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/nonsec_virt.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/nonsec.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/boot.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/romfs.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/string.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/ctype.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/utils.o
+ .data          0x0000000000002d4c        0x0 ../sc2000-rtos/sdhci.o
+ *fill*         0x0000000000002d4c        0x4 
+ .data          0x0000000000002d50       0x80 ../sc2000-rtos/f_sdh30_sdhci.o
+ .data          0x0000000000002dd0        0x0 ../sc2000-rtos/mmc.o
+ .data          0x0000000000002dd0        0x0 ../sc2000-rtos/part_dos.o
+ .data          0x0000000000002dd0        0x0 ../sc2000-rtos/dtb.o
+ .data          0x0000000000002dd0        0x0 ../sc2000-rtos/dtb-cfg.o
+ .data          0x0000000000002dd0        0x0 ../sc2000-rtos/serial-usio.o
+
+.glue_7         0x0000000000002dd0        0x0
+ .glue_7        0x0000000000002dd0        0x0 linker stubs
+
+.glue_7t        0x0000000000002dd0        0x0
+ .glue_7t       0x0000000000002dd0        0x0 linker stubs
+
+.vfp11_veneer   0x0000000000002dd0        0x0
+ .vfp11_veneer  0x0000000000002dd0        0x0 linker stubs
+
+.v4_bx          0x0000000000002dd0        0x0
+ .v4_bx         0x0000000000002dd0        0x0 linker stubs
+
+.iplt           0x0000000000002dd0        0x0
+ .iplt          0x0000000000002dd0        0x0 ../sc2000-rtos/cache-cp15.o
+
+.rel.dyn        0x0000000000002dd0        0x0
+ .rel.iplt      0x0000000000002dd0        0x0 ../sc2000-rtos/cache-cp15.o
+ .rel.got       0x0000000000002dd0        0x0 ../sc2000-rtos/cache-cp15.o
+
+.exidx
+ *(.ARM.exidx)
+                0x0000000000002dd0                stubby_end = .
+                0x0000000040004000                . = 0x40004000
+                0x0000000040004000                __bss_start = .
+
+.bss            0x0000000040004000      0x42c
+ *(.bss)
+ .bss           0x0000000040004000        0x0 ../sc2000-rtos/cache-cp15.o
+ .bss           0x0000000040004000        0x0 ../sc2000-rtos/cache-pl310.o
+ .bss           0x0000000040004000        0x0 ../sc2000-rtos/cache_v7.o
+ .bss           0x0000000040004000        0x0 ../sc2000-rtos/lib1funcs.o
+ .bss           0x0000000040004000        0x4 ../sc2000-rtos/boot-sequence.o
+                0x0000000040004000                rootfstype
+ .bss           0x0000000040004004        0x0 ../sc2000-rtos/load_image.o
+ .bss           0x0000000040004004        0x0 ../sc2000-rtos/serial.o
+ .bss           0x0000000040004004        0x0 ../sc2000-rtos/lowlevel_init.o
+ .bss           0x0000000040004004        0x0 ../sc2000-rtos/nonsec_virt.o
+ .bss           0x0000000040004004        0x0 ../sc2000-rtos/nonsec.o
+ .bss           0x0000000040004004        0x0 ../sc2000-rtos/boot.o
+ .bss           0x0000000040004004        0x4 ../sc2000-rtos/romfs.o
+                0x0000000040004004                romfs
+ .bss           0x0000000040004008        0x0 ../sc2000-rtos/string.o
+ .bss           0x0000000040004008        0x0 ../sc2000-rtos/ctype.o
+ .bss           0x0000000040004008        0x8 ../sc2000-rtos/utils.o
+                0x0000000040004008                malloc_pointer
+                0x000000004000400c                start_ads
+ .bss           0x0000000040004010        0x0 ../sc2000-rtos/sdhci.o
+ .bss           0x0000000040004010        0x0 ../sc2000-rtos/f_sdh30_sdhci.o
+ .bss           0x0000000040004010        0xc ../sc2000-rtos/mmc.o
+                0x0000000040004014                blksz
+                0x0000000040004018                lba
+ .bss           0x000000004000401c      0x410 ../sc2000-rtos/part_dos.o
+                0x000000004000401c                table
+                0x000000004000441c                filesystem_read
+                0x0000000040004420                bread
+                0x0000000040004424                partition_length_blocks
+                0x0000000040004428                partition_offset_blocks
+ .bss           0x000000004000442c        0x0 ../sc2000-rtos/dtb.o
+ .bss           0x000000004000442c        0x0 ../sc2000-rtos/dtb-cfg.o
+ .bss           0x000000004000442c        0x0 ../sc2000-rtos/serial-usio.o
+                0x000000004000442c                . = ALIGN (0x4)
+ *(.COMMON)
+                0x000000004000442c                . = ALIGN (0x4)
+                0x000000004000442c                __bss_end = .
+
+.sdram          0x000000004000442c     0x200c
+ *(.sdram_data)
+ .sdram_data    0x000000004000442c     0x100c ../sc2000-rtos/load_image.o
+                0x000000004000442c                load_ads_initramfs
+                0x0000000040004430                load_ads_dtb
+                0x0000000040004434                load_ads_kernel
+                0x0000000040004438                dtb_config
+ .sdram_data    0x0000000040005438     0x1000 ../sc2000-rtos/dtb-cfg.o
+                0x0000000040005438                append_file
+
+.stack          0x0000000040006438     0x2208
+                0x0000000040006438                __stack_start__ = .
+                0x0000000040006438                STACK_AREA = .
+ *(.USER_STACK_AREA)
+                0x00000000400064b8                . = (. + 0x80)
+ *fill*         0x0000000040006438       0x80 
+                0x00000000400064c0                . = ALIGN (0x40)
+ *fill*         0x00000000400064b8        0x8 
+                0x00000000400064c0                STACK_AREA_UNDEF = .
+                0x0000000040006540                . = (. + 0x80)
+ *fill*         0x00000000400064c0       0x80 
+                0x0000000040006540                . = ALIGN (0x40)
+                0x0000000040006540                STACK_AREA_ABT = .
+                0x0000000040006d40                . = (. + 0x800)
+ *fill*         0x0000000040006540      0x800 
+                0x0000000040006d40                . = ALIGN (0x40)
+                0x0000000040006d40                STACK_AREA_SVC_CPU0 = .
+                0x0000000040007540                . = (. + 0x800)
+ *fill*         0x0000000040006d40      0x800 
+                0x0000000040007540                STACK_AREA_SVC_CPU1 = .
+                0x00000000400075c0                . = (. + 0x80)
+ *fill*         0x0000000040007540       0x80 
+                0x00000000400075c0                STACK_AREA_SVC_CPU2 = .
+                0x0000000040007dc0                . = (. + 0x800)
+ *fill*         0x00000000400075c0      0x800 
+                0x0000000040007dc0                STACK_AREA_SVC_CPU3 = .
+                0x0000000040007dc0                . = ALIGN (0x40)
+                0x0000000040007dc0                STACK_AREA_FIQ = .
+                0x00000000400085c0                . = (. + 0x800)
+ *fill*         0x0000000040007dc0      0x800 
+                0x00000000400085c0                . = ALIGN (0x40)
+                0x00000000400085c0                STACK_AREA_IRQ = .
+                0x0000000040008640                . = (. + 0x80)
+ *fill*         0x00000000400085c0       0x80 
+                0x0000000040008640                . = ALIGN (0x40)
+                0x0000000040008640                STACK_AREA_IDLE = .
+                0x0000000040008640                __stack_end__ = .
+                0x0000000040008640                malloc_pool = ALIGN (0x4)
+LOAD ../sc2000-rtos/cache-cp15.o
+LOAD ../sc2000-rtos/cache-pl310.o
+LOAD ../sc2000-rtos/cache_v7.o
+LOAD ../sc2000-rtos/lib1funcs.o
+LOAD ../sc2000-rtos/boot-sequence.o
+LOAD ../sc2000-rtos/load_image.o
+LOAD ../sc2000-rtos/serial.o
+LOAD ../sc2000-rtos/lowlevel_init.o
+LOAD ../sc2000-rtos/nonsec_virt.o
+LOAD ../sc2000-rtos/nonsec.o
+LOAD ../sc2000-rtos/boot.o
+LOAD ../sc2000-rtos/romfs.o
+LOAD ../sc2000-rtos/string.o
+LOAD ../sc2000-rtos/ctype.o
+LOAD ../sc2000-rtos/utils.o
+LOAD ../sc2000-rtos/sdhci.o
+LOAD ../sc2000-rtos/f_sdh30_sdhci.o
+LOAD ../sc2000-rtos/mmc.o
+LOAD ../sc2000-rtos/part_dos.o
+LOAD ../sc2000-rtos/dtb.o
+LOAD ../sc2000-rtos/dtb-cfg.o
+LOAD ../sc2000-rtos/serial-usio.o
+OUTPUT(../sc2000-rtos/stubby.elf elf32-littlearm)
+
+.debug_info     0x0000000000000000     0x704c
+ .debug_info    0x0000000000000000      0x532 ../sc2000-rtos/cache-cp15.o
+ .debug_info    0x0000000000000532       0x64 ../sc2000-rtos/cache-pl310.o
+ .debug_info    0x0000000000000596      0x882 ../sc2000-rtos/cache_v7.o
+ .debug_info    0x0000000000000e18       0x89 ../sc2000-rtos/lib1funcs.o
+ .debug_info    0x0000000000000ea1      0x52d ../sc2000-rtos/boot-sequence.o
+ .debug_info    0x00000000000013ce      0x4e7 ../sc2000-rtos/load_image.o
+ .debug_info    0x00000000000018b5      0x15e ../sc2000-rtos/serial.o
+ .debug_info    0x0000000000001a13       0x8d ../sc2000-rtos/lowlevel_init.o
+ .debug_info    0x0000000000001aa0       0x84 ../sc2000-rtos/boot.o
+ .debug_info    0x0000000000001b24      0x4f0 ../sc2000-rtos/romfs.o
+ .debug_info    0x0000000000002014      0x410 ../sc2000-rtos/string.o
+ .debug_info    0x0000000000002424       0x57 ../sc2000-rtos/ctype.o
+ .debug_info    0x000000000000247b      0x603 ../sc2000-rtos/utils.o
+ .debug_info    0x0000000000002a7e     0x1c32 ../sc2000-rtos/sdhci.o
+ .debug_info    0x00000000000046b0      0x300 ../sc2000-rtos/f_sdh30_sdhci.o
+ .debug_info    0x00000000000049b0     0x1993 ../sc2000-rtos/mmc.o
+ .debug_info    0x0000000000006343      0x1c6 ../sc2000-rtos/part_dos.o
+ .debug_info    0x0000000000006509      0x444 ../sc2000-rtos/dtb.o
+ .debug_info    0x000000000000694d      0x4d4 ../sc2000-rtos/dtb-cfg.o
+ .debug_info    0x0000000000006e21      0x22b ../sc2000-rtos/serial-usio.o
+
+.debug_abbrev   0x0000000000000000     0x1e31
+ .debug_abbrev  0x0000000000000000      0x1ad ../sc2000-rtos/cache-cp15.o
+ .debug_abbrev  0x00000000000001ad       0x26 ../sc2000-rtos/cache-pl310.o
+ .debug_abbrev  0x00000000000001d3      0x2ad ../sc2000-rtos/cache_v7.o
+ .debug_abbrev  0x0000000000000480       0x14 ../sc2000-rtos/lib1funcs.o
+ .debug_abbrev  0x0000000000000494      0x282 ../sc2000-rtos/boot-sequence.o
+ .debug_abbrev  0x0000000000000716      0x226 ../sc2000-rtos/load_image.o
+ .debug_abbrev  0x000000000000093c       0xc2 ../sc2000-rtos/serial.o
+ .debug_abbrev  0x00000000000009fe       0x14 ../sc2000-rtos/lowlevel_init.o
+ .debug_abbrev  0x0000000000000a12       0x14 ../sc2000-rtos/boot.o
+ .debug_abbrev  0x0000000000000a26      0x183 ../sc2000-rtos/romfs.o
+ .debug_abbrev  0x0000000000000ba9      0x123 ../sc2000-rtos/string.o
+ .debug_abbrev  0x0000000000000ccc       0x45 ../sc2000-rtos/ctype.o
+ .debug_abbrev  0x0000000000000d11      0x200 ../sc2000-rtos/utils.o
+ .debug_abbrev  0x0000000000000f11      0x462 ../sc2000-rtos/sdhci.o
+ .debug_abbrev  0x0000000000001373      0x17a ../sc2000-rtos/f_sdh30_sdhci.o
+ .debug_abbrev  0x00000000000014ed      0x49e ../sc2000-rtos/mmc.o
+ .debug_abbrev  0x000000000000198b       0xfd ../sc2000-rtos/part_dos.o
+ .debug_abbrev  0x0000000000001a88      0x158 ../sc2000-rtos/dtb.o
+ .debug_abbrev  0x0000000000001be0      0x178 ../sc2000-rtos/dtb-cfg.o
+ .debug_abbrev  0x0000000000001d58       0xd9 ../sc2000-rtos/serial-usio.o
+
+.debug_loc      0x0000000000000000     0x54f7
+ .debug_loc     0x0000000000000000      0x13f ../sc2000-rtos/cache-cp15.o
+ .debug_loc     0x000000000000013f      0x4fe ../sc2000-rtos/cache_v7.o
+ .debug_loc     0x000000000000063d      0x24b ../sc2000-rtos/boot-sequence.o
+ .debug_loc     0x0000000000000888      0x351 ../sc2000-rtos/load_image.o
+ .debug_loc     0x0000000000000bd9       0x64 ../sc2000-rtos/serial.o
+ .debug_loc     0x0000000000000c3d      0x43a ../sc2000-rtos/romfs.o
+ .debug_loc     0x0000000000001077      0x5cd ../sc2000-rtos/string.o
+ .debug_loc     0x0000000000001644      0x3f0 ../sc2000-rtos/utils.o
+ .debug_loc     0x0000000000001a34     0x1d89 ../sc2000-rtos/sdhci.o
+ .debug_loc     0x00000000000037bd       0x5c ../sc2000-rtos/f_sdh30_sdhci.o
+ .debug_loc     0x0000000000003819     0x1058 ../sc2000-rtos/mmc.o
+ .debug_loc     0x0000000000004871      0x13c ../sc2000-rtos/part_dos.o
+ .debug_loc     0x00000000000049ad      0x56c ../sc2000-rtos/dtb.o
+ .debug_loc     0x0000000000004f19      0x543 ../sc2000-rtos/dtb-cfg.o
+ .debug_loc     0x000000000000545c       0x9b ../sc2000-rtos/serial-usio.o
+
+.debug_aranges  0x0000000000000000      0x270
+ .debug_aranges
+                0x0000000000000000       0x20 ../sc2000-rtos/cache-cp15.o
+ .debug_aranges
+                0x0000000000000020       0x18 ../sc2000-rtos/cache-pl310.o
+ .debug_aranges
+                0x0000000000000038       0x20 ../sc2000-rtos/cache_v7.o
+ .debug_aranges
+                0x0000000000000058       0x20 ../sc2000-rtos/lib1funcs.o
+ .debug_aranges
+                0x0000000000000078       0x20 ../sc2000-rtos/boot-sequence.o
+ .debug_aranges
+                0x0000000000000098       0x20 ../sc2000-rtos/load_image.o
+ .debug_aranges
+                0x00000000000000b8       0x20 ../sc2000-rtos/serial.o
+ .debug_aranges
+                0x00000000000000d8       0x20 ../sc2000-rtos/lowlevel_init.o
+ .debug_aranges
+                0x00000000000000f8       0x20 ../sc2000-rtos/boot.o
+ .debug_aranges
+                0x0000000000000118       0x20 ../sc2000-rtos/romfs.o
+ .debug_aranges
+                0x0000000000000138       0x20 ../sc2000-rtos/string.o
+ .debug_aranges
+                0x0000000000000158       0x18 ../sc2000-rtos/ctype.o
+ .debug_aranges
+                0x0000000000000170       0x20 ../sc2000-rtos/utils.o
+ .debug_aranges
+                0x0000000000000190       0x20 ../sc2000-rtos/sdhci.o
+ .debug_aranges
+                0x00000000000001b0       0x20 ../sc2000-rtos/f_sdh30_sdhci.o
+ .debug_aranges
+                0x00000000000001d0       0x20 ../sc2000-rtos/mmc.o
+ .debug_aranges
+                0x00000000000001f0       0x20 ../sc2000-rtos/part_dos.o
+ .debug_aranges
+                0x0000000000000210       0x20 ../sc2000-rtos/dtb.o
+ .debug_aranges
+                0x0000000000000230       0x20 ../sc2000-rtos/dtb-cfg.o
+ .debug_aranges
+                0x0000000000000250       0x20 ../sc2000-rtos/serial-usio.o
+
+.debug_ranges   0x0000000000000000      0x690
+ .debug_ranges  0x0000000000000000       0x18 ../sc2000-rtos/cache-cp15.o
+ .debug_ranges  0x0000000000000018       0x48 ../sc2000-rtos/cache_v7.o
+ .debug_ranges  0x0000000000000060       0x18 ../sc2000-rtos/boot-sequence.o
+ .debug_ranges  0x0000000000000078       0x18 ../sc2000-rtos/utils.o
+ .debug_ranges  0x0000000000000090      0x1e0 ../sc2000-rtos/sdhci.o
+ .debug_ranges  0x0000000000000270      0x420 ../sc2000-rtos/mmc.o
+
+.debug_line     0x0000000000000000     0x19dd
+ .debug_line    0x0000000000000000      0x177 ../sc2000-rtos/cache-cp15.o
+ .debug_line    0x0000000000000177       0x1d ../sc2000-rtos/cache-pl310.o
+ .debug_line    0x0000000000000194      0x154 ../sc2000-rtos/cache_v7.o
+ .debug_line    0x00000000000002e8      0x10c ../sc2000-rtos/lib1funcs.o
+ .debug_line    0x00000000000003f4      0x127 ../sc2000-rtos/boot-sequence.o
+ .debug_line    0x000000000000051b      0x11c ../sc2000-rtos/load_image.o
+ .debug_line    0x0000000000000637       0x70 ../sc2000-rtos/serial.o
+ .debug_line    0x00000000000006a7       0x6f ../sc2000-rtos/lowlevel_init.o
+ .debug_line    0x0000000000000716        0x0 ../sc2000-rtos/nonsec.o
+ .debug_line    0x0000000000000716       0x6f ../sc2000-rtos/boot.o
+ .debug_line    0x0000000000000785      0x134 ../sc2000-rtos/romfs.o
+ .debug_line    0x00000000000008b9       0xe9 ../sc2000-rtos/string.o
+ .debug_line    0x00000000000009a2       0x3e ../sc2000-rtos/ctype.o
+ .debug_line    0x00000000000009e0      0x126 ../sc2000-rtos/utils.o
+ .debug_line    0x0000000000000b06      0x4e2 ../sc2000-rtos/sdhci.o
+ .debug_line    0x0000000000000fe8       0x83 ../sc2000-rtos/f_sdh30_sdhci.o
+ .debug_line    0x000000000000106b      0x524 ../sc2000-rtos/mmc.o
+ .debug_line    0x000000000000158f       0xf2 ../sc2000-rtos/part_dos.o
+ .debug_line    0x0000000000001681      0x153 ../sc2000-rtos/dtb.o
+ .debug_line    0x00000000000017d4      0x177 ../sc2000-rtos/dtb-cfg.o
+ .debug_line    0x000000000000194b       0x92 ../sc2000-rtos/serial-usio.o
+
+.debug_str      0x0000000000000000     0x11bf
+ .debug_str     0x0000000000000000      0x297 ../sc2000-rtos/cache-cp15.o
+                                        0x2f5 (size before relaxing)
+ .debug_str     0x0000000000000297       0x24 ../sc2000-rtos/cache-pl310.o
+                                        0x1ed (size before relaxing)
+ .debug_str     0x00000000000002bb      0x24f ../sc2000-rtos/cache_v7.o
+                                        0x484 (size before relaxing)
+ .debug_str     0x000000000000050a      0x1aa ../sc2000-rtos/boot-sequence.o
+                                        0x3b0 (size before relaxing)
+ .debug_str     0x00000000000006b4      0x11f ../sc2000-rtos/load_image.o
+                                        0x3b2 (size before relaxing)
+ .debug_str     0x00000000000007d3       0x41 ../sc2000-rtos/serial.o
+                                        0x21e (size before relaxing)
+ .debug_str     0x0000000000000814       0x1f ../sc2000-rtos/nonsec.o
+                                        0x164 (size before relaxing)
+ .debug_str     0x0000000000000833       0x9f ../sc2000-rtos/romfs.o
+                                        0x2d2 (size before relaxing)
+ .debug_str     0x00000000000008d2       0x97 ../sc2000-rtos/string.o
+                                        0x26c (size before relaxing)
+ .debug_str     0x0000000000000969       0x25 ../sc2000-rtos/ctype.o
+                                        0x181 (size before relaxing)
+ .debug_str     0x000000000000098e       0xc3 ../sc2000-rtos/utils.o
+                                        0x32c (size before relaxing)
+ .debug_str     0x0000000000000a51      0x2cc ../sc2000-rtos/sdhci.o
+                                        0x50b (size before relaxing)
+ .debug_str     0x0000000000000d1d       0x48 ../sc2000-rtos/f_sdh30_sdhci.o
+                                        0x2d5 (size before relaxing)
+ .debug_str     0x0000000000000d65      0x203 ../sc2000-rtos/mmc.o
+                                        0x5bc (size before relaxing)
+ .debug_str     0x0000000000000f68       0x57 ../sc2000-rtos/part_dos.o
+                                        0x295 (size before relaxing)
+ .debug_str     0x0000000000000fbf       0xae ../sc2000-rtos/dtb.o
+                                        0x328 (size before relaxing)
+ .debug_str     0x000000000000106d      0x12e ../sc2000-rtos/dtb-cfg.o
+                                        0x38a (size before relaxing)
+ .debug_str     0x000000000000119b       0x24 ../sc2000-rtos/serial-usio.o
+                                        0x208 (size before relaxing)
+
+.comment        0x0000000000000000       0x2d
+ .comment       0x0000000000000000       0x2d ../sc2000-rtos/cache-cp15.o
+                                         0x2e (size before relaxing)
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/cache-pl310.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/cache_v7.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/boot-sequence.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/load_image.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/serial.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/nonsec.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/romfs.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/string.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/ctype.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/utils.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/sdhci.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/f_sdh30_sdhci.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/mmc.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/part_dos.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/dtb.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/dtb-cfg.o
+ .comment       0x000000000000002d       0x2e ../sc2000-rtos/serial-usio.o
+
+.note.GNU-stack
+                0x0000000000000000        0x0
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/cache-cp15.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/cache-pl310.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/cache_v7.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/boot-sequence.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/load_image.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/serial.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/nonsec.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/romfs.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/string.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/ctype.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/utils.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/sdhci.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/f_sdh30_sdhci.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/mmc.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/part_dos.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/dtb.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/dtb-cfg.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-rtos/serial-usio.o
+
+.ARM.attributes
+                0x0000000000000000       0x3b
+ .ARM.attributes
+                0x0000000000000000       0x3b ../sc2000-rtos/cache-cp15.o
+ .ARM.attributes
+                0x000000000000003b       0x3b ../sc2000-rtos/cache-pl310.o
+ .ARM.attributes
+                0x0000000000000076       0x3b ../sc2000-rtos/cache_v7.o
+ .ARM.attributes
+                0x00000000000000b1       0x2b ../sc2000-rtos/lib1funcs.o
+ .ARM.attributes
+                0x00000000000000dc       0x3b ../sc2000-rtos/boot-sequence.o
+ .ARM.attributes
+                0x0000000000000117       0x3b ../sc2000-rtos/load_image.o
+ .ARM.attributes
+                0x0000000000000152       0x3b ../sc2000-rtos/serial.o
+ .ARM.attributes
+                0x000000000000018d       0x2b ../sc2000-rtos/lowlevel_init.o
+ .ARM.attributes
+                0x00000000000001b8       0x2b ../sc2000-rtos/nonsec_virt.o
+ .ARM.attributes
+                0x00000000000001e3       0x3b ../sc2000-rtos/nonsec.o
+ .ARM.attributes
+                0x000000000000021e       0x2b ../sc2000-rtos/boot.o
+ .ARM.attributes
+                0x0000000000000249       0x3b ../sc2000-rtos/romfs.o
+ .ARM.attributes
+                0x0000000000000284       0x3b ../sc2000-rtos/string.o
+ .ARM.attributes
+                0x00000000000002bf       0x3b ../sc2000-rtos/ctype.o
+ .ARM.attributes
+                0x00000000000002fa       0x3b ../sc2000-rtos/utils.o
+ .ARM.attributes
+                0x0000000000000335       0x3b ../sc2000-rtos/sdhci.o
+ .ARM.attributes
+                0x0000000000000370       0x3b ../sc2000-rtos/f_sdh30_sdhci.o
+ .ARM.attributes
+                0x00000000000003ab       0x3b ../sc2000-rtos/mmc.o
+ .ARM.attributes
+                0x00000000000003e6       0x3b ../sc2000-rtos/part_dos.o
+ .ARM.attributes
+                0x0000000000000421       0x3b ../sc2000-rtos/dtb.o
+ .ARM.attributes
+                0x000000000000045c       0x3b ../sc2000-rtos/dtb-cfg.o
+ .ARM.attributes
+                0x0000000000000497       0x3b ../sc2000-rtos/serial-usio.o
+
+.debug_frame    0x0000000000000000      0xa80
+ .debug_frame   0x0000000000000000       0xa8 ../sc2000-rtos/cache-cp15.o
+ .debug_frame   0x00000000000000a8      0x148 ../sc2000-rtos/cache_v7.o
+ .debug_frame   0x00000000000001f0       0xc0 ../sc2000-rtos/boot-sequence.o
+ .debug_frame   0x00000000000002b0       0x58 ../sc2000-rtos/load_image.o
+ .debug_frame   0x0000000000000308       0x70 ../sc2000-rtos/serial.o
+ .debug_frame   0x0000000000000378       0xa4 ../sc2000-rtos/romfs.o
+ .debug_frame   0x000000000000041c       0xe8 ../sc2000-rtos/string.o
+ .debug_frame   0x0000000000000504      0x184 ../sc2000-rtos/utils.o
+ .debug_frame   0x0000000000000688      0x13c ../sc2000-rtos/sdhci.o
+ .debug_frame   0x00000000000007c4       0x20 ../sc2000-rtos/f_sdh30_sdhci.o
+ .debug_frame   0x00000000000007e4      0x138 ../sc2000-rtos/mmc.o
+ .debug_frame   0x000000000000091c       0x48 ../sc2000-rtos/part_dos.o
+ .debug_frame   0x0000000000000964       0x8c ../sc2000-rtos/dtb.o
+ .debug_frame   0x00000000000009f0       0x50 ../sc2000-rtos/dtb-cfg.o
+ .debug_frame   0x0000000000000a40       0x40 ../sc2000-rtos/serial-usio.o

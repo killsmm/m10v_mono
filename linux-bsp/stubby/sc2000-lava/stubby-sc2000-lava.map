@@ -1,0 +1,723 @@
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+                0x0000000000000800                IRQ_STACK_SIZE = 0x800
+                0x0000000000000080                FIQ_STACK_SIZE = 0x80
+                0x0000000000000800                SVC_STACK_SIZE = 0x800
+                0x0000000000000800                SYS_STACK_SIZE = 0x800
+                0x0000000000000080                ABT_STACK_SIZE = 0x80
+                0x0000000000000080                UND_STACK_SIZE = 0x80
+                0x0000000000000000                . = 0x0
+                0x0000000000000000                stubby_start = .
+
+.text           0x0000000000000000     0x4970
+ *(.initialtext)
+ .initialtext   0x0000000000000000       0xb0 ../sc2000-lava/boot.o
+                0x0000000000000000                reset
+                0x0000000000000100                . = ALIGN (0x100)
+ *fill*         0x00000000000000b0       0x50 
+ *(._secure.text)
+ *(.got.plt)
+ .got.plt       0x0000000000000100        0xc ../sc2000-lava/cache-cp15.o
+                0x0000000000000100                _GLOBAL_OFFSET_TABLE_
+ *(.got)
+ .got           0x000000000000010c       0x9c ../sc2000-lava/cache-cp15.o
+ *(.igot.plt)
+ .igot.plt      0x00000000000001a8        0x0 ../sc2000-lava/cache-cp15.o
+ *(.igot)
+ *(.text)
+ .text          0x00000000000001a8      0x118 ../sc2000-lava/cache-cp15.o
+                0x00000000000001c0                icache_enable
+                0x00000000000001d4                icache_disable
+                0x00000000000001e8                icache_status
+                0x00000000000001f2                dcache_enable
+                0x0000000000000298                dcache_disable
+                0x00000000000002b4                dcache_status
+ .text          0x00000000000002c0        0x0 ../sc2000-lava/cache-pl310.o
+ .text          0x00000000000002c0      0x1c0 ../sc2000-lava/cache_v7.o
+                0x0000000000000376                invalidate_icache_all
+                0x000000000000038a                __v7_outer_cache_enable
+                0x000000000000038a                v7_outer_cache_enable
+                0x000000000000038c                v7_outer_cache_disable
+                0x000000000000038c                __v7_outer_cache_disable
+                0x000000000000038e                __v7_outer_cache_flush_all
+                0x000000000000038e                v7_outer_cache_flush_all
+                0x0000000000000390                flush_dcache_all
+                0x00000000000003a0                v7_outer_cache_inval_all
+                0x00000000000003a0                __v7_outer_cache_inval_all
+                0x00000000000003a2                invalidate_dcache_all
+                0x00000000000003b2                arm_init_before_mmu
+                0x00000000000003d4                v7_outer_cache_flush_range
+                0x00000000000003d4                __v7_outer_cache_flush_range
+                0x00000000000003d6                flush_dcache_range
+                0x00000000000003fe                flush_cache
+                0x0000000000000404                __v7_outer_cache_inval_range
+                0x0000000000000404                v7_outer_cache_inval_range
+                0x0000000000000406                invalidate_dcache_range
+                0x000000000000044c                cleanup_before_linux
+ .text          0x0000000000000480      0x46c ../sc2000-lava/lib1funcs.o
+                0x0000000000000480                __udivsi3
+                0x0000000000000480                __aeabi_uidiv
+                0x00000000000005bc                __aeabi_idiv
+                0x0000000000000740                __aeabi_uidivmod
+                0x0000000000000758                __aeabi_idivmod
+                0x0000000000000770                __aeabi_uldivmod
+                0x00000000000008cc                __aeabi_llsl
+ .text          0x00000000000008ec      0x324 ../sc2000-lava/boot-sequence.o
+                0x00000000000008ec                print_stubby_info
+                0x0000000000000920                check_console_key
+                0x0000000000000950                describe
+                0x00000000000009c8                select_boot_source
+                0x00000000000009f4                try_boot_source
+                0x0000000000000a74                boot_sequence
+                0x0000000000000bdc                jump_to_linux
+ .text          0x0000000000000c10      0x1b4 ../sc2000-lava/load_image.o
+                0x0000000000000c10                _filesystem_read
+                0x0000000000000c30                load_from_filesystem
+ .text          0x0000000000000dc4       0x80 ../sc2000-lava/serial.o
+                0x0000000000000dc4                getc
+                0x0000000000000dc8                putc
+                0x0000000000000de0                puts
+                0x0000000000000df2                serial_init
+ .text          0x0000000000000e44       0x4c ../sc2000-lava/lowlevel_init.o
+                0x0000000000000e44                lowlevel_init
+                0x0000000000000e4c                lowlevel_init_2
+ .text          0x0000000000000e90        0x0 ../sc2000-lava/nonsec_virt.o
+ .text          0x0000000000000e90        0x0 ../sc2000-lava/nonsec.o
+ .text          0x0000000000000e90        0x0 ../sc2000-lava/boot.o
+ .text          0x0000000000000e90      0x230 ../sc2000-lava/romfs.o
+                0x0000000000000fe8                romfs_filesystem_read
+                0x0000000000001030                romfs_filesystem_get_ads
+                0x0000000000001068                romfs_mount
+ .text          0x00000000000010c0      0x14a ../sc2000-lava/string.o
+                0x00000000000010c0                strcpy
+                0x00000000000010d0                strncpy
+                0x00000000000010e8                strcat
+                0x0000000000001102                strcmp
+                0x0000000000001118                strncmp
+                0x000000000000113a                strchr
+                0x0000000000001152                strlen
+                0x0000000000001162                memset
+                0x00000000000011a8                memcmp
+                0x00000000000011c6                findstr
+ .text          0x000000000000120a        0x0 ../sc2000-lava/ctype.o
+ *fill*         0x000000000000120a        0x2 
+ .text          0x000000000000120c      0x1c4 ../sc2000-lava/utils.o
+                0x000000000000120c                pic_dereference
+                0x000000000000122c                __div0
+                0x0000000000001238                udelay
+                0x000000000000125e                printnybble
+                0x000000000000127a                _print8
+                0x0000000000001294                print8
+                0x00000000000012a8                _print32
+                0x00000000000012e4                print32
+                0x00000000000012f8                print32_noleading
+                0x000000000000130c                printdec
+                0x0000000000001350                raise
+                0x0000000000001354                __aeabi_unwind_cpp_pr0
+                0x0000000000001356                replay_dump
+                0x000000000000136c                malloc
+                0x0000000000001394                uaw_be32
+                0x00000000000013a4                __swap32
+                0x00000000000013ba                memcpy
+ .text          0x00000000000013d0      0x89c ../sc2000-lava/sdhci.o
+                0x00000000000014b4                sdhci_send_command
+                0x000000000000186c                sdhci_set_signal_voltage
+                0x00000000000018b0                sdhci_execute_tuning
+                0x0000000000001984                sdhci_set_ios
+                0x0000000000001a50                sdhci_sw_reset
+                0x0000000000001a5e                sdhci_init
+                0x0000000000001b4c                add_sdhci
+ .text          0x0000000000001c6c       0x24 ../sc2000-lava/f_sdh30_sdhci.o
+                0x0000000000001c6c                f_sdh30_init
+ .text          0x0000000000001c90      0x968 ../sc2000-lava/mmc.o
+                0x0000000000001cc0                mmc_bread
+                0x0000000000001e8c                mmc_go_idle
+                0x0000000000001eba                mmc_set_clock
+                0x0000000000002424                mmc_init
+                0x00000000000025f4                print_mmc_devices
+ .text          0x00000000000025f8      0x14c ../sc2000-lava/part_dos.o
+                0x00000000000025f8                partition_read_table
+                0x0000000000002644                parse_partition
+ .text          0x0000000000002744      0x28c ../sc2000-lava/dtb.o
+                0x0000000000002744                fdt_set_prop_size
+                0x00000000000027f0                fdt_find_path
+                0x00000000000028de                update_dtb
+ .text          0x00000000000029d0      0x388 ../sc2000-lava/dtb-cfg.o
+                0x00000000000029fa                process_dtb_config
+ .text          0x0000000000002d58      0xa8c ../sc2000-lava/fat.o
+                0x0000000000003104                do_fat_read_at
+                0x0000000000003744                do_fat_read
+                0x000000000000374e                fat_check
+ .text          0x00000000000037e4      0xac4 ../sc2000-lava/ext2.o
+                0x00000000000037e4                ext2fs_devread
+                0x0000000000003924                ext2fs_read_file
+                0x0000000000003f18                ext2fs_find_file1
+                0x0000000000004060                ext2fs_find_file
+                0x00000000000040ac                ext2fs_close
+                0x000000000000410c                ext2fs_open
+                0x0000000000004180                ext2fs_read
+                0x00000000000041c0                do_ext2_read
+                0x00000000000041f8                ext2fs_mount
+ .text          0x00000000000042a8       0x84 ../sc2000-lava/serial-usio.o
+                0x00000000000042a8                uart_init
+                0x00000000000042f0                _putc
+                0x000000000000430c                _getc
+ *(.text.unlikely)
+                0x000000000000432c                . = ALIGN (0x4)
+ *(.rodata)
+ .rodata        0x000000000000432c      0x100 ../sc2000-lava/ctype.o
+                0x000000000000432c                _ctype
+ .rodata        0x000000000000442c       0x2c ../sc2000-lava/utils.o
+ .rodata        0x0000000000004458       0x50 ../sc2000-lava/mmc.o
+ *(.rodata.str1.1)
+ .rodata.str1.1
+                0x00000000000044a8       0xbe ../sc2000-lava/boot-sequence.o
+                                         0xc3 (size before relaxing)
+ .rodata.str1.1
+                0x0000000000004566      0x10f ../sc2000-lava/load_image.o
+ .rodata.str1.1
+                0x0000000000004675       0x81 ../sc2000-lava/serial.o
+                                         0x83 (size before relaxing)
+ .rodata.str1.1
+                0x00000000000046f6        0xa ../sc2000-lava/utils.o
+ .rodata.str1.1
+                0x0000000000004700       0x9b ../sc2000-lava/sdhci.o
+ .rodata.str1.1
+                0x000000000000479b        0xc ../sc2000-lava/mmc.o
+ .rodata.str1.1
+                0x00000000000047a7       0x10 ../sc2000-lava/part_dos.o
+ .rodata.str1.1
+                0x00000000000047b7       0x69 ../sc2000-lava/dtb.o
+ .rodata.str1.1
+                0x0000000000004820       0x21 ../sc2000-lava/dtb-cfg.o
+                                         0x28 (size before relaxing)
+ .rodata.str1.1
+                0x0000000000004841       0x3a ../sc2000-lava/fat.o
+                                         0x3f (size before relaxing)
+ .rodata.str1.1
+                0x000000000000487b       0x5a ../sc2000-lava/ext2.o
+                                         0x5c (size before relaxing)
+                0x00000000000048d8                . = ALIGN (0x4)
+ *fill*         0x00000000000048d5        0x3 
+ *(.data*)
+ .data          0x00000000000048d8        0x0 ../sc2000-lava/cache-cp15.o
+ .data          0x00000000000048d8        0x0 ../sc2000-lava/cache-pl310.o
+ .data          0x00000000000048d8        0x0 ../sc2000-lava/cache_v7.o
+ .data          0x00000000000048d8        0x0 ../sc2000-lava/lib1funcs.o
+ .data          0x00000000000048d8        0x0 ../sc2000-lava/boot-sequence.o
+ .data.rel.ro.local
+                0x00000000000048d8       0x14 ../sc2000-lava/boot-sequence.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/load_image.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/serial.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/lowlevel_init.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/nonsec_virt.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/nonsec.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/boot.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/romfs.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/string.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/ctype.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/utils.o
+ .data          0x00000000000048ec        0x0 ../sc2000-lava/sdhci.o
+ *fill*         0x00000000000048ec        0x4 
+ .data          0x00000000000048f0       0x80 ../sc2000-lava/f_sdh30_sdhci.o
+ .data          0x0000000000004970        0x0 ../sc2000-lava/mmc.o
+ .data          0x0000000000004970        0x0 ../sc2000-lava/part_dos.o
+ .data          0x0000000000004970        0x0 ../sc2000-lava/dtb.o
+ .data          0x0000000000004970        0x0 ../sc2000-lava/dtb-cfg.o
+ .data          0x0000000000004970        0x0 ../sc2000-lava/fat.o
+ .data          0x0000000000004970        0x0 ../sc2000-lava/ext2.o
+ .data          0x0000000000004970        0x0 ../sc2000-lava/serial-usio.o
+
+.glue_7         0x0000000000004970        0x0
+ .glue_7        0x0000000000004970        0x0 linker stubs
+
+.glue_7t        0x0000000000004970        0x0
+ .glue_7t       0x0000000000004970        0x0 linker stubs
+
+.vfp11_veneer   0x0000000000004970        0x0
+ .vfp11_veneer  0x0000000000004970        0x0 linker stubs
+
+.v4_bx          0x0000000000004970        0x0
+ .v4_bx         0x0000000000004970        0x0 linker stubs
+
+.iplt           0x0000000000004970        0x0
+ .iplt          0x0000000000004970        0x0 ../sc2000-lava/cache-cp15.o
+
+.rel.dyn        0x0000000000004970        0x0
+ .rel.iplt      0x0000000000004970        0x0 ../sc2000-lava/cache-cp15.o
+ .rel.got       0x0000000000004970        0x0 ../sc2000-lava/cache-cp15.o
+
+.exidx
+ *(.ARM.exidx)
+                0x0000000000004970                stubby_end = .
+                0x000000004f300000                . = 0x4f300000
+                0x000000004f300000                __bss_start = .
+
+.bss            0x000000004f300000    0x31660
+ *(.bss)
+ .bss           0x000000004f300000        0x0 ../sc2000-lava/cache-cp15.o
+ .bss           0x000000004f300000        0x0 ../sc2000-lava/cache-pl310.o
+ .bss           0x000000004f300000        0x0 ../sc2000-lava/cache_v7.o
+ .bss           0x000000004f300000        0x0 ../sc2000-lava/lib1funcs.o
+ .bss           0x000000004f300000       0x10 ../sc2000-lava/boot-sequence.o
+                0x000000004f300000                rootfstype
+                0x000000004f300004                console_key
+                0x000000004f300008                force_part
+                0x000000004f30000c                source_skip
+ .bss           0x000000004f300010        0x0 ../sc2000-lava/load_image.o
+ .bss           0x000000004f300010        0x0 ../sc2000-lava/serial.o
+ .bss           0x000000004f300010        0x0 ../sc2000-lava/lowlevel_init.o
+ .bss           0x000000004f300010        0x0 ../sc2000-lava/nonsec_virt.o
+ .bss           0x000000004f300010        0x0 ../sc2000-lava/nonsec.o
+ .bss           0x000000004f300010        0x0 ../sc2000-lava/boot.o
+ .bss           0x000000004f300010        0x4 ../sc2000-lava/romfs.o
+                0x000000004f300010                romfs
+ .bss           0x000000004f300014        0x0 ../sc2000-lava/string.o
+ .bss           0x000000004f300014        0x0 ../sc2000-lava/ctype.o
+ .bss           0x000000004f300014        0x8 ../sc2000-lava/utils.o
+                0x000000004f300014                malloc_pointer
+                0x000000004f300018                start_ads
+ .bss           0x000000004f30001c        0x0 ../sc2000-lava/sdhci.o
+ .bss           0x000000004f30001c        0x0 ../sc2000-lava/f_sdh30_sdhci.o
+ .bss           0x000000004f30001c        0xc ../sc2000-lava/mmc.o
+                0x000000004f300020                blksz
+                0x000000004f300024                lba
+ .bss           0x000000004f300028      0x410 ../sc2000-lava/part_dos.o
+                0x000000004f300028                table
+                0x000000004f300428                filesystem_read
+                0x000000004f30042c                bread
+                0x000000004f300430                partition_length_blocks
+                0x000000004f300434                partition_offset_blocks
+ .bss           0x000000004f300438        0x0 ../sc2000-lava/dtb.o
+ .bss           0x000000004f300438        0x0 ../sc2000-lava/dtb-cfg.o
+ .bss           0x000000004f300438    0x30000 ../sc2000-lava/fat.o
+                0x000000004f300438                do_fat_read_at_block
+                0x000000004f310438                get_dentfromdir_block
+                0x000000004f320438                get_contents_vfatname_block
+ .bss           0x000000004f330438     0x1228 ../sc2000-lava/ext2.o
+                0x000000004f330438                sec_buf
+                0x000000004f331438                tps
+                0x000000004f331638                indir2_blkno
+                0x000000004f33163c                indir2_size
+                0x000000004f331640                indir2_block
+                0x000000004f331644                indir1_blkno
+                0x000000004f331648                indir1_size
+                0x000000004f33164c                indir1_block
+                0x000000004f331650                symlinknest
+                0x000000004f331654                ext2fs_file
+                0x000000004f331658                ext2fs_root
+                0x000000004f33165c                ext2_inode_size
+ .bss           0x000000004f331660        0x0 ../sc2000-lava/serial-usio.o
+                0x000000004f331660                . = ALIGN (0x4)
+ *(.COMMON)
+                0x000000004f331660                . = ALIGN (0x4)
+                0x000000004f331660                __bss_end = .
+
+.sdram          0x000000004f331660     0x300c
+ *(.sdram_data)
+ .sdram_data    0x000000004f331660     0x100c ../sc2000-lava/load_image.o
+                0x000000004f331660                load_ads_initramfs
+                0x000000004f331664                load_ads_dtb
+                0x000000004f331668                load_ads_kernel
+                0x000000004f33166c                dtb_config
+ .sdram_data    0x000000004f33266c     0x1000 ../sc2000-lava/dtb-cfg.o
+                0x000000004f33266c                append_file
+ .sdram_data    0x000000004f33366c     0x1000 ../sc2000-lava/fat.o
+                0x000000004f33366c                buffer
+
+.stack          0x000000004f33466c     0x2214
+                0x000000004f33466c                __stack_start__ = .
+                0x000000004f33466c                STACK_AREA = .
+ *(.USER_STACK_AREA)
+                0x000000004f3346ec                . = (. + 0x80)
+ *fill*         0x000000004f33466c       0x80 
+                0x000000004f334700                . = ALIGN (0x40)
+ *fill*         0x000000004f3346ec       0x14 
+                0x000000004f334700                STACK_AREA_UNDEF = .
+                0x000000004f334780                . = (. + 0x80)
+ *fill*         0x000000004f334700       0x80 
+                0x000000004f334780                . = ALIGN (0x40)
+                0x000000004f334780                STACK_AREA_ABT = .
+                0x000000004f334f80                . = (. + 0x800)
+ *fill*         0x000000004f334780      0x800 
+                0x000000004f334f80                . = ALIGN (0x40)
+                0x000000004f334f80                STACK_AREA_SVC_CPU0 = .
+                0x000000004f335780                . = (. + 0x800)
+ *fill*         0x000000004f334f80      0x800 
+                0x000000004f335780                STACK_AREA_SVC_CPU1 = .
+                0x000000004f335800                . = (. + 0x80)
+ *fill*         0x000000004f335780       0x80 
+                0x000000004f335800                STACK_AREA_SVC_CPU2 = .
+                0x000000004f336000                . = (. + 0x800)
+ *fill*         0x000000004f335800      0x800 
+                0x000000004f336000                STACK_AREA_SVC_CPU3 = .
+                0x000000004f336000                . = ALIGN (0x40)
+                0x000000004f336000                STACK_AREA_FIQ = .
+                0x000000004f336800                . = (. + 0x800)
+ *fill*         0x000000004f336000      0x800 
+                0x000000004f336800                . = ALIGN (0x40)
+                0x000000004f336800                STACK_AREA_IRQ = .
+                0x000000004f336880                . = (. + 0x80)
+ *fill*         0x000000004f336800       0x80 
+                0x000000004f336880                . = ALIGN (0x40)
+                0x000000004f336880                STACK_AREA_IDLE = .
+                0x000000004f336880                __stack_end__ = .
+                0x000000004f336880                malloc_pool = ALIGN (0x4)
+LOAD ../sc2000-lava/cache-cp15.o
+LOAD ../sc2000-lava/cache-pl310.o
+LOAD ../sc2000-lava/cache_v7.o
+LOAD ../sc2000-lava/lib1funcs.o
+LOAD ../sc2000-lava/boot-sequence.o
+LOAD ../sc2000-lava/load_image.o
+LOAD ../sc2000-lava/serial.o
+LOAD ../sc2000-lava/lowlevel_init.o
+LOAD ../sc2000-lava/nonsec_virt.o
+LOAD ../sc2000-lava/nonsec.o
+LOAD ../sc2000-lava/boot.o
+LOAD ../sc2000-lava/romfs.o
+LOAD ../sc2000-lava/string.o
+LOAD ../sc2000-lava/ctype.o
+LOAD ../sc2000-lava/utils.o
+LOAD ../sc2000-lava/sdhci.o
+LOAD ../sc2000-lava/f_sdh30_sdhci.o
+LOAD ../sc2000-lava/mmc.o
+LOAD ../sc2000-lava/part_dos.o
+LOAD ../sc2000-lava/dtb.o
+LOAD ../sc2000-lava/dtb-cfg.o
+LOAD ../sc2000-lava/fat.o
+LOAD ../sc2000-lava/ext2.o
+LOAD ../sc2000-lava/serial-usio.o
+OUTPUT(../sc2000-lava/stubby.elf elf32-littlearm)
+
+.debug_info     0x0000000000000000     0xa4a0
+ .debug_info    0x0000000000000000      0x532 ../sc2000-lava/cache-cp15.o
+ .debug_info    0x0000000000000532       0x64 ../sc2000-lava/cache-pl310.o
+ .debug_info    0x0000000000000596      0x882 ../sc2000-lava/cache_v7.o
+ .debug_info    0x0000000000000e18       0x89 ../sc2000-lava/lib1funcs.o
+ .debug_info    0x0000000000000ea1      0x73c ../sc2000-lava/boot-sequence.o
+ .debug_info    0x00000000000015dd      0x48a ../sc2000-lava/load_image.o
+ .debug_info    0x0000000000001a67      0x1c1 ../sc2000-lava/serial.o
+ .debug_info    0x0000000000001c28       0x8d ../sc2000-lava/lowlevel_init.o
+ .debug_info    0x0000000000001cb5       0x84 ../sc2000-lava/boot.o
+ .debug_info    0x0000000000001d39      0x4f0 ../sc2000-lava/romfs.o
+ .debug_info    0x0000000000002229      0x410 ../sc2000-lava/string.o
+ .debug_info    0x0000000000002639       0x57 ../sc2000-lava/ctype.o
+ .debug_info    0x0000000000002690      0x603 ../sc2000-lava/utils.o
+ .debug_info    0x0000000000002c93     0x2050 ../sc2000-lava/sdhci.o
+ .debug_info    0x0000000000004ce3      0x300 ../sc2000-lava/f_sdh30_sdhci.o
+ .debug_info    0x0000000000004fe3     0x1993 ../sc2000-lava/mmc.o
+ .debug_info    0x0000000000006976      0x1c6 ../sc2000-lava/part_dos.o
+ .debug_info    0x0000000000006b3c      0x53f ../sc2000-lava/dtb.o
+ .debug_info    0x000000000000707b      0x4d4 ../sc2000-lava/dtb-cfg.o
+ .debug_info    0x000000000000754f     0x15de ../sc2000-lava/fat.o
+ .debug_info    0x0000000000008b2d     0x1748 ../sc2000-lava/ext2.o
+ .debug_info    0x000000000000a275      0x22b ../sc2000-lava/serial-usio.o
+
+.debug_abbrev   0x0000000000000000     0x24a4
+ .debug_abbrev  0x0000000000000000      0x1ad ../sc2000-lava/cache-cp15.o
+ .debug_abbrev  0x00000000000001ad       0x26 ../sc2000-lava/cache-pl310.o
+ .debug_abbrev  0x00000000000001d3      0x2ad ../sc2000-lava/cache_v7.o
+ .debug_abbrev  0x0000000000000480       0x14 ../sc2000-lava/lib1funcs.o
+ .debug_abbrev  0x0000000000000494      0x2a2 ../sc2000-lava/boot-sequence.o
+ .debug_abbrev  0x0000000000000736      0x1ae ../sc2000-lava/load_image.o
+ .debug_abbrev  0x00000000000008e4       0xe5 ../sc2000-lava/serial.o
+ .debug_abbrev  0x00000000000009c9       0x14 ../sc2000-lava/lowlevel_init.o
+ .debug_abbrev  0x00000000000009dd       0x14 ../sc2000-lava/boot.o
+ .debug_abbrev  0x00000000000009f1      0x183 ../sc2000-lava/romfs.o
+ .debug_abbrev  0x0000000000000b74      0x123 ../sc2000-lava/string.o
+ .debug_abbrev  0x0000000000000c97       0x45 ../sc2000-lava/ctype.o
+ .debug_abbrev  0x0000000000000cdc      0x200 ../sc2000-lava/utils.o
+ .debug_abbrev  0x0000000000000edc      0x437 ../sc2000-lava/sdhci.o
+ .debug_abbrev  0x0000000000001313      0x17a ../sc2000-lava/f_sdh30_sdhci.o
+ .debug_abbrev  0x000000000000148d      0x49e ../sc2000-lava/mmc.o
+ .debug_abbrev  0x000000000000192b       0xfd ../sc2000-lava/part_dos.o
+ .debug_abbrev  0x0000000000001a28      0x165 ../sc2000-lava/dtb.o
+ .debug_abbrev  0x0000000000001b8d      0x178 ../sc2000-lava/dtb-cfg.o
+ .debug_abbrev  0x0000000000001d05      0x3e0 ../sc2000-lava/fat.o
+ .debug_abbrev  0x00000000000020e5      0x2e6 ../sc2000-lava/ext2.o
+ .debug_abbrev  0x00000000000023cb       0xd9 ../sc2000-lava/serial-usio.o
+
+.debug_loc      0x0000000000000000     0x8372
+ .debug_loc     0x0000000000000000      0x141 ../sc2000-lava/cache-cp15.o
+ .debug_loc     0x0000000000000141      0x4fe ../sc2000-lava/cache_v7.o
+ .debug_loc     0x000000000000063f      0x3f1 ../sc2000-lava/boot-sequence.o
+ .debug_loc     0x0000000000000a30      0x299 ../sc2000-lava/load_image.o
+ .debug_loc     0x0000000000000cc9       0xa0 ../sc2000-lava/serial.o
+ .debug_loc     0x0000000000000d69      0x43a ../sc2000-lava/romfs.o
+ .debug_loc     0x00000000000011a3      0x5cd ../sc2000-lava/string.o
+ .debug_loc     0x0000000000001770      0x3f0 ../sc2000-lava/utils.o
+ .debug_loc     0x0000000000001b60     0x23ea ../sc2000-lava/sdhci.o
+ .debug_loc     0x0000000000003f4a       0x5c ../sc2000-lava/f_sdh30_sdhci.o
+ .debug_loc     0x0000000000003fa6     0x1058 ../sc2000-lava/mmc.o
+ .debug_loc     0x0000000000004ffe      0x13c ../sc2000-lava/part_dos.o
+ .debug_loc     0x000000000000513a      0x569 ../sc2000-lava/dtb.o
+ .debug_loc     0x00000000000056a3      0x543 ../sc2000-lava/dtb-cfg.o
+ .debug_loc     0x0000000000005be6     0x13ff ../sc2000-lava/fat.o
+ .debug_loc     0x0000000000006fe5     0x12f2 ../sc2000-lava/ext2.o
+ .debug_loc     0x00000000000082d7       0x9b ../sc2000-lava/serial-usio.o
+
+.debug_aranges  0x0000000000000000      0x2b0
+ .debug_aranges
+                0x0000000000000000       0x20 ../sc2000-lava/cache-cp15.o
+ .debug_aranges
+                0x0000000000000020       0x18 ../sc2000-lava/cache-pl310.o
+ .debug_aranges
+                0x0000000000000038       0x20 ../sc2000-lava/cache_v7.o
+ .debug_aranges
+                0x0000000000000058       0x20 ../sc2000-lava/lib1funcs.o
+ .debug_aranges
+                0x0000000000000078       0x20 ../sc2000-lava/boot-sequence.o
+ .debug_aranges
+                0x0000000000000098       0x20 ../sc2000-lava/load_image.o
+ .debug_aranges
+                0x00000000000000b8       0x20 ../sc2000-lava/serial.o
+ .debug_aranges
+                0x00000000000000d8       0x20 ../sc2000-lava/lowlevel_init.o
+ .debug_aranges
+                0x00000000000000f8       0x20 ../sc2000-lava/boot.o
+ .debug_aranges
+                0x0000000000000118       0x20 ../sc2000-lava/romfs.o
+ .debug_aranges
+                0x0000000000000138       0x20 ../sc2000-lava/string.o
+ .debug_aranges
+                0x0000000000000158       0x18 ../sc2000-lava/ctype.o
+ .debug_aranges
+                0x0000000000000170       0x20 ../sc2000-lava/utils.o
+ .debug_aranges
+                0x0000000000000190       0x20 ../sc2000-lava/sdhci.o
+ .debug_aranges
+                0x00000000000001b0       0x20 ../sc2000-lava/f_sdh30_sdhci.o
+ .debug_aranges
+                0x00000000000001d0       0x20 ../sc2000-lava/mmc.o
+ .debug_aranges
+                0x00000000000001f0       0x20 ../sc2000-lava/part_dos.o
+ .debug_aranges
+                0x0000000000000210       0x20 ../sc2000-lava/dtb.o
+ .debug_aranges
+                0x0000000000000230       0x20 ../sc2000-lava/dtb-cfg.o
+ .debug_aranges
+                0x0000000000000250       0x20 ../sc2000-lava/fat.o
+ .debug_aranges
+                0x0000000000000270       0x20 ../sc2000-lava/ext2.o
+ .debug_aranges
+                0x0000000000000290       0x20 ../sc2000-lava/serial-usio.o
+
+.debug_ranges   0x0000000000000000      0x940
+ .debug_ranges  0x0000000000000000       0x18 ../sc2000-lava/cache-cp15.o
+ .debug_ranges  0x0000000000000018       0x48 ../sc2000-lava/cache_v7.o
+ .debug_ranges  0x0000000000000060       0x18 ../sc2000-lava/boot-sequence.o
+ .debug_ranges  0x0000000000000078       0x18 ../sc2000-lava/serial.o
+ .debug_ranges  0x0000000000000090       0x18 ../sc2000-lava/utils.o
+ .debug_ranges  0x00000000000000a8      0x210 ../sc2000-lava/sdhci.o
+ .debug_ranges  0x00000000000002b8      0x420 ../sc2000-lava/mmc.o
+ .debug_ranges  0x00000000000006d8      0x160 ../sc2000-lava/fat.o
+ .debug_ranges  0x0000000000000838      0x108 ../sc2000-lava/ext2.o
+
+.debug_line     0x0000000000000000     0x2246
+ .debug_line    0x0000000000000000      0x17a ../sc2000-lava/cache-cp15.o
+ .debug_line    0x000000000000017a       0x1d ../sc2000-lava/cache-pl310.o
+ .debug_line    0x0000000000000197      0x154 ../sc2000-lava/cache_v7.o
+ .debug_line    0x00000000000002eb      0x10c ../sc2000-lava/lib1funcs.o
+ .debug_line    0x00000000000003f7      0x1da ../sc2000-lava/boot-sequence.o
+ .debug_line    0x00000000000005d1      0x120 ../sc2000-lava/load_image.o
+ .debug_line    0x00000000000006f1       0x9a ../sc2000-lava/serial.o
+ .debug_line    0x000000000000078b       0x6f ../sc2000-lava/lowlevel_init.o
+ .debug_line    0x00000000000007fa        0x0 ../sc2000-lava/nonsec.o
+ .debug_line    0x00000000000007fa       0x6f ../sc2000-lava/boot.o
+ .debug_line    0x0000000000000869      0x134 ../sc2000-lava/romfs.o
+ .debug_line    0x000000000000099d       0xe9 ../sc2000-lava/string.o
+ .debug_line    0x0000000000000a86       0x3e ../sc2000-lava/ctype.o
+ .debug_line    0x0000000000000ac4      0x126 ../sc2000-lava/utils.o
+ .debug_line    0x0000000000000bea      0x594 ../sc2000-lava/sdhci.o
+ .debug_line    0x000000000000117e       0x83 ../sc2000-lava/f_sdh30_sdhci.o
+ .debug_line    0x0000000000001201      0x524 ../sc2000-lava/mmc.o
+ .debug_line    0x0000000000001725       0xf2 ../sc2000-lava/part_dos.o
+ .debug_line    0x0000000000001817      0x184 ../sc2000-lava/dtb.o
+ .debug_line    0x000000000000199b      0x177 ../sc2000-lava/dtb-cfg.o
+ .debug_line    0x0000000000001b12      0x39d ../sc2000-lava/fat.o
+ .debug_line    0x0000000000001eaf      0x305 ../sc2000-lava/ext2.o
+ .debug_line    0x00000000000021b4       0x92 ../sc2000-lava/serial-usio.o
+
+.debug_str      0x0000000000000000     0x1d6d
+ .debug_str     0x0000000000000000      0x297 ../sc2000-lava/cache-cp15.o
+                                        0x2f5 (size before relaxing)
+ .debug_str     0x0000000000000297       0x24 ../sc2000-lava/cache-pl310.o
+                                        0x1ed (size before relaxing)
+ .debug_str     0x00000000000002bb      0x249 ../sc2000-lava/cache_v7.o
+                                        0x484 (size before relaxing)
+ .debug_str     0x0000000000000504      0x231 ../sc2000-lava/boot-sequence.o
+                                        0x453 (size before relaxing)
+ .debug_str     0x0000000000000735      0x108 ../sc2000-lava/load_image.o
+                                        0x3b0 (size before relaxing)
+ .debug_str     0x000000000000083d       0x41 ../sc2000-lava/serial.o
+                                        0x22e (size before relaxing)
+ .debug_str     0x000000000000087e       0x1f ../sc2000-lava/nonsec.o
+                                        0x164 (size before relaxing)
+ .debug_str     0x000000000000089d       0xb2 ../sc2000-lava/romfs.o
+                                        0x2d2 (size before relaxing)
+ .debug_str     0x000000000000094f       0x83 ../sc2000-lava/string.o
+                                        0x26c (size before relaxing)
+ .debug_str     0x00000000000009d2       0x25 ../sc2000-lava/ctype.o
+                                        0x181 (size before relaxing)
+ .debug_str     0x00000000000009f7       0xb5 ../sc2000-lava/utils.o
+                                        0x32c (size before relaxing)
+ .debug_str     0x0000000000000aac      0x307 ../sc2000-lava/sdhci.o
+                                        0x59a (size before relaxing)
+ .debug_str     0x0000000000000db3       0x3b ../sc2000-lava/f_sdh30_sdhci.o
+                                        0x2d5 (size before relaxing)
+ .debug_str     0x0000000000000dee      0x1f7 ../sc2000-lava/mmc.o
+                                        0x5bc (size before relaxing)
+ .debug_str     0x0000000000000fe5       0x42 ../sc2000-lava/part_dos.o
+                                        0x295 (size before relaxing)
+ .debug_str     0x0000000000001027       0xae ../sc2000-lava/dtb.o
+                                        0x351 (size before relaxing)
+ .debug_str     0x00000000000010d5      0x12e ../sc2000-lava/dtb-cfg.o
+                                        0x38a (size before relaxing)
+ .debug_str     0x0000000000001203      0x457 ../sc2000-lava/fat.o
+                                        0x71a (size before relaxing)
+ .debug_str     0x000000000000165a      0x6ef ../sc2000-lava/ext2.o
+                                        0xa61 (size before relaxing)
+ .debug_str     0x0000000000001d49       0x24 ../sc2000-lava/serial-usio.o
+                                        0x208 (size before relaxing)
+
+.comment        0x0000000000000000       0x2d
+ .comment       0x0000000000000000       0x2d ../sc2000-lava/cache-cp15.o
+                                         0x2e (size before relaxing)
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/cache-pl310.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/cache_v7.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/boot-sequence.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/load_image.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/serial.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/nonsec.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/romfs.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/string.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/ctype.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/utils.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/sdhci.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/f_sdh30_sdhci.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/mmc.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/part_dos.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/dtb.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/dtb-cfg.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/fat.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/ext2.o
+ .comment       0x000000000000002d       0x2e ../sc2000-lava/serial-usio.o
+
+.note.GNU-stack
+                0x0000000000000000        0x0
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/cache-cp15.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/cache-pl310.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/cache_v7.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/boot-sequence.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/load_image.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/serial.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/nonsec.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/romfs.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/string.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/ctype.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/utils.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/sdhci.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/f_sdh30_sdhci.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/mmc.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/part_dos.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/dtb.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/dtb-cfg.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/fat.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/ext2.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-lava/serial-usio.o
+
+.ARM.attributes
+                0x0000000000000000       0x3b
+ .ARM.attributes
+                0x0000000000000000       0x3b ../sc2000-lava/cache-cp15.o
+ .ARM.attributes
+                0x000000000000003b       0x3b ../sc2000-lava/cache-pl310.o
+ .ARM.attributes
+                0x0000000000000076       0x3b ../sc2000-lava/cache_v7.o
+ .ARM.attributes
+                0x00000000000000b1       0x2b ../sc2000-lava/lib1funcs.o
+ .ARM.attributes
+                0x00000000000000dc       0x3b ../sc2000-lava/boot-sequence.o
+ .ARM.attributes
+                0x0000000000000117       0x3b ../sc2000-lava/load_image.o
+ .ARM.attributes
+                0x0000000000000152       0x3b ../sc2000-lava/serial.o
+ .ARM.attributes
+                0x000000000000018d       0x2b ../sc2000-lava/lowlevel_init.o
+ .ARM.attributes
+                0x00000000000001b8       0x2b ../sc2000-lava/nonsec_virt.o
+ .ARM.attributes
+                0x00000000000001e3       0x3b ../sc2000-lava/nonsec.o
+ .ARM.attributes
+                0x000000000000021e       0x2b ../sc2000-lava/boot.o
+ .ARM.attributes
+                0x0000000000000249       0x3b ../sc2000-lava/romfs.o
+ .ARM.attributes
+                0x0000000000000284       0x3b ../sc2000-lava/string.o
+ .ARM.attributes
+                0x00000000000002bf       0x3b ../sc2000-lava/ctype.o
+ .ARM.attributes
+                0x00000000000002fa       0x3b ../sc2000-lava/utils.o
+ .ARM.attributes
+                0x0000000000000335       0x3b ../sc2000-lava/sdhci.o
+ .ARM.attributes
+                0x0000000000000370       0x3b ../sc2000-lava/f_sdh30_sdhci.o
+ .ARM.attributes
+                0x00000000000003ab       0x3b ../sc2000-lava/mmc.o
+ .ARM.attributes
+                0x00000000000003e6       0x3b ../sc2000-lava/part_dos.o
+ .ARM.attributes
+                0x0000000000000421       0x3b ../sc2000-lava/dtb.o
+ .ARM.attributes
+                0x000000000000045c       0x3b ../sc2000-lava/dtb-cfg.o
+ .ARM.attributes
+                0x0000000000000497       0x3b ../sc2000-lava/fat.o
+ .ARM.attributes
+                0x00000000000004d2       0x3b ../sc2000-lava/ext2.o
+ .ARM.attributes
+                0x000000000000050d       0x3b ../sc2000-lava/serial-usio.o
+
+.debug_frame    0x0000000000000000      0xda0
+ .debug_frame   0x0000000000000000       0xa8 ../sc2000-lava/cache-cp15.o
+ .debug_frame   0x00000000000000a8      0x148 ../sc2000-lava/cache_v7.o
+ .debug_frame   0x00000000000001f0       0xf0 ../sc2000-lava/boot-sequence.o
+ .debug_frame   0x00000000000002e0       0x54 ../sc2000-lava/load_image.o
+ .debug_frame   0x0000000000000334       0x70 ../sc2000-lava/serial.o
+ .debug_frame   0x00000000000003a4       0xa4 ../sc2000-lava/romfs.o
+ .debug_frame   0x0000000000000448       0xe8 ../sc2000-lava/string.o
+ .debug_frame   0x0000000000000530      0x184 ../sc2000-lava/utils.o
+ .debug_frame   0x00000000000006b4      0x148 ../sc2000-lava/sdhci.o
+ .debug_frame   0x00000000000007fc       0x20 ../sc2000-lava/f_sdh30_sdhci.o
+ .debug_frame   0x000000000000081c      0x138 ../sc2000-lava/mmc.o
+ .debug_frame   0x0000000000000954       0x48 ../sc2000-lava/part_dos.o
+ .debug_frame   0x000000000000099c       0x9c ../sc2000-lava/dtb.o
+ .debug_frame   0x0000000000000a38       0x50 ../sc2000-lava/dtb-cfg.o
+ .debug_frame   0x0000000000000a88      0x148 ../sc2000-lava/fat.o
+ .debug_frame   0x0000000000000bd0      0x190 ../sc2000-lava/ext2.o
+ .debug_frame   0x0000000000000d60       0x40 ../sc2000-lava/serial-usio.o

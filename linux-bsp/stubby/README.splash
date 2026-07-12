@@ -1,0 +1,39 @@
+Stubby Splash Support
+=====================
+
+Andy Green <andy.green@linaro.org>
+
+Video init
+----------
+
+Video init is left to platform-specific code.  It needs to expose a function
+
+void board_start_video(void)
+
+which will do whatever is needed driven by platform-specific CONFIG_ info.
+
+
+Generic Splash Image Support
+----------------------------
+
+Stubby provides an optional compressed BMP parser. enabled with
+CONFIG_DRIVER_BMPRLE8.  This is restricted to
+
+ - 256-colour paletteized BMP (as exported by, eg, GIMP)
+ - BMP is same dimensions as framebuffer
+ - RLE8 compression (again as exported by, eg, GIMP)
+ - width must be divisible by 4 (normally true for any framebuffer size)
+
+RLE8 compression provides a reasonable tradeoff for code size (and auditabiliy)
+versus decompression speed.
+
+The BMP information is taken from a file in the same filesystem as the
+kernel, the name of the BMP file is set in the config
+
+#define CONFIG_FILEPATH_SPLASH "boot/mb86s70.bmp"
+
+The first filesystem scanned by Stubby that provides this BMP file is used.
+
+The BMP parser supports downsampling the 32-bpp palette into 5-6-5 if you set
+CONFIG_SPLASH_FB_BPP to 16 in the config.
+

@@ -1,0 +1,206 @@
+Stubby Kernel Authenticity Verification Support
+-----------------------------------------------
+
+Andy Green <andy.green@linaro.org>  2014-03-04
+
+Approach
+--------
+
+When Stubby find a filesystem it wants to try to boot from, it normally
+looks for
+
+ boot/Image (uncompressed kernel)
+ boot/mb8aa0350eb.dtb (device tree binary)
+
+If you add:
+
+ #define CONFIG_RSA_SIGNATURE
+ #define CONFIG_FILEPATH_KERNEL_SIG "boot/kernel+dtb.sig"
+
+to your config, then Stubby will also look for
+
+ boot/kernel+dtb.sig
+
+in order to validate the kernel and dtb before running it.
+
+If the signature
+
+ - is missing
+
+ - was not encrypted with the right private key
+
+ - when decrypted, does not match the content of the actual file
+
+The file + signature combination is recognized to not be authentic.
+
+If you also configure CONFIG_RSA_SIGNATURE_ENFORCING, non-authentic kernels
+will not be used for boot.  Without that option the authenticity check
+failure is just reported to serial console.
+
+When using this "Authenticity verification mode", Stubby boot looks like this
+
+Stubby-f8adc86 Tue  4 Mar 20:31:25 CST 2014
+ Booting on CPU 0x100
+ (SHA-256 Authenticity verification, pubkey: 2048 bit, sig: AD4AA185DD4916BE0F0838D7)
+SD card probed
+Reading from SD
+ ext2 p1
+  confirming authenticity
+  kernel + dtb loaded
+   root=/dev/mmcblk1p1 rootfstype=ext4
+
+Cryptography
+------------
+
+A SHA-1 or SHA-256 hash is produced from the original file(s) to be signed,
+and the hash is encrypted with the private part of a (by default)
+1024-bit RSA keypair.
+
+You can select in the configuration file whether SHA-1 or SHA-256 hashes are
+used by enabling one of
+
+#define CONFIG_HASH_TYPE_SHA1                                                 
+#define CONFIG_HASH_TYPE_SHA256
+
+Stubby loads the kernel and dtb into memory and computes the hash of the both
+files concatenated.  The signature file is also loaded by Stubby, and it
+attempts to decrypt it with the public key stored inside Stubby.
+
+If the decryption succeeds, the decrypted hash is compared against the hash
+Stubby computed for the kernel + dtb it was given... if they do not match the
+kernel is rejected (and the memory region containing the unstrusted code is
+zero-ed to avoid leaving attacker-controlled data in memory).
+
+If they do match, there is a very very high probability both that the kernel
+and dtb are unchanged from when it was signed, and the private key used to
+sign it is the one matching the public key stored inside stubby.  Not only that
+but the probability it's the same kernel and dtb pair is also assured to the
+same level.
+
+
+ - Copying the signature from another kernel version
+
+ - copying a different kernel (even one signed with a different signature)
+
+ - deleting the signature
+
+ - making a fake sig with a different keypair
+
+ - modifying the kernel or dtb by even one bit
+
+ - swapping in a different, even correctly signed dtb
+
+ - adding, removing or changing an initramfs
+
+
+will all cause the authenticity check to fail with very very high probability.
+
+If you configured the _ENFORCING option, failing kernels will be rejected for
+boot by Stubby, otherwise the problem is only reported to serial console and
+the kernel still used.  This is useful during development where authenticity
+check is usually not important except when preparing kernel + dtb + signature
+for deployment on bootloaders which do have the _ENFORCING set with the same
+public key.
+
+
+Creating a signing keypair
+--------------------------
+
+$ ./scripts/fjslt-signing-generate-keys.sh
+
+You need to give a passphrase for the private key three times... the first two
+times encrypt the private key with the passprhrase, and the third time we use
+the keys to extract the public key.
+
+ ./privkey.pem   The secret keypair
+ ./pubkey.der    The public (non-secret) key
+ ./pubkey.h      The public key in a form Stubby can build in
+
+You need to copy ./pubkey.h to ./src/pubkey.h and rebuild stubby for it to
+user the new key.
+
+Back up ./privkey.pem somewhere safe.
+
+
+Public Key
+----------
+
+The public key used to check the signature file lives in
+
+ ./src/pubkey.h
+
+and is compiled into Stubby.  You need to copy pubkey.h to ./src/pubkey.h by
+hand after creating the keypair.
+
+
+Signing the kernel or other executable blob + dtb
+-------------------------------------------------
+
+Stubby's single signature covers all the files from the boot process, so
+the kernel + dtb and optionally also the initramfs.
+
+The order of concatination by Stubby is
+
+ - Image
+ - dtb
+ - initramfs (if used)
+
+$ ./scripts/fjslt-signing-make-sig.sh Image mb8aa0350eb.dtb > kernel+dtb.sig
+
+Produces a signature for the both files combined, while leaving the actual
+files unchanged.  When set to ENFORCING, Stubby will not accept any initramfs
+since there was none involved in making the signature.
+
+$ ./scripts/fjslt-signing-make-sig.sh Image mb8aa0350eb.dtb initramfs > kernel+dtb.sig
+
+Will make a signature covering all three files, and likewise because the
+signature was made with the initramfs, Stubby will reject to boot with it
+missing or changed when in ENFORCING mode.
+
+You'll need to give the private key passphrase in order to sign anything.
+
+
+Revocation List
+---------------
+
+It's common that after signing and releasing code, security or other
+problems are found that mean you no longer want people running that particular
+code... even though it has a genuine signature.
+
+Stubby supports a "revocation list" in
+
+ ./src/revocation-hashes.h
+
+which allows you to list hashes of signed code that Stubby will reject even
+if a correct signature is provided.
+
+In this way you can provide a firmware update including new Stubby and new
+Kernel which once installed will not permit running the problem kernels,
+even though they remain validly signed.  Older kernels not explicitly
+revoked remain usable.
+
+
+Test key
+--------
+
+You will need to generate your own secret keypair using the
+./scripts/fjslt-signing-generate-keys.sh script mentioned above before using
+on a real system.
+
+However to make getting started more convenient, Stubby includes a test key
+with the passphrase "testkey" in the ./test-key directory.  Stubby already has
+the public key for that in ./src/pubkey.h.
+
+The test key is 2048-bit strength.
+
+The default config also enables RSA authenticity checking but does not
+enforce it.  So you can ignore the checking to start with, or get get started
+and share signed binaries using the test key easily when you're ready.
+
+Since everyone with Stubby sources has they private key and the passphrase,
+this is ONLY useful for getting started.  You'll need to make your own
+keypair before actually deploying.
+
+You can recognize if Stubby is configured with this test public key by seeing
+"pubkey: AD4AA185DD4916BE0F0838D7" when Stubby starts.
+

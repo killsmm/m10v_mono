@@ -1,0 +1,6 @@
+[submodule "yocto"]
+	path = yocto
+	url = git@gitee.com:zxll111/m10v_yocto.git
+[submodule "linux-4.4.15"]
+	path = linux-4.4.15
+	url = git@gitee.com:zxll111/m10v_kernel.git

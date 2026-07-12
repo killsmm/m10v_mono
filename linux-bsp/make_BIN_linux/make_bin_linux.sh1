@@ -1,0 +1,459 @@
+#!/bin/bash
+
+VERSION=3.4
+CURNTDIR=`pwd`
+#-----File path---------------------
+KERNELDIR=$CURNTDIR/../linux-4.4.15
+SHRIVELDIR=$CURNTDIR/../shrivel
+POKYDIR=$CURNTDIR/../yocto/build-mlb01-rtos/tmp/deploy/images/mlb01-sdk
+POKYFILE=core-image-minimal-mlb01-sdk*.rootfs.tar.bz2
+#WHITELIST=whitelist-zxl
+WHITELIST=whitelist-poky-1.8-netsec
+STUBBYDIR=$SHRIVELDIR/stubby
+STUBBY=$STUBBYDIR/stubby.bin
+#-----Get binary from RTOS team-----
+RTOSBIN=MILB_SDK.bin
+BOOTSTRAP=boot_strap.bin
+M0BIN=RS_MILBCM0.bin
+RESOURCE=RESOURCE.bin
+USERDATA=User_data.bin
+WARPBIN=
+#-----Action setting----------------
+DEVICETREE=mlb01-evb-rtos-act
+DEVICETREE=mlb01-evb-rtos-act
+BOARDCONFIG=milbeaut_p3_defconfig
+MAKELDIMAGE=0
+MAKELDIMAGE=0
+#----- kernel build parameters -----
+MODINSDIR=$SHRIVELDIR/staging
+KBUILDOPT="ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-"
+if [ -n "$KBUILDDIR" ]; then
+  KBUILDOPT="$KBUILDOPT O=$KBUILDDIR"
+else
+  KBUILDDIR=$KERNELDIR
+fi
+NR_CPUS=`grep processor /proc/cpuinfo | wc -l`
+#----- DTB parameters --------------
+DTBNAME=$DEVICETREE.dtb
+DTBOUT=sc2000.dtb
+
+#------writing image parameters-----
+ROOTFS_IMG=$SHRIVELDIR/_output/initramfs
+ROOTFS_EXT4=$CURNTDIR/ext4dir
+SHRIVELLED=$SHRIVELDIR/shrivelled
+
+#------Additional Partition Image-----
+BOOTINFO1=BOOT_1GB.bin
+BOOTINFO2=BOOT_2GB.bin
+USR_CODE1=UCODE_1GB.bin
+USR_CODE2=UCODE_2GB.bin
+
+#function
+AskYes() { #message
+  while read -p "$1 [Y(enter)/n]" YN; do
+    case $YN in
+      [Nn]* ) {
+        return 1
+      };;
+      [0-9A-MO-XZa-mo-xz]* ) {
+        echo "Please answer yes or no or enter."
+      };;
+      * ) {
+        return 0
+      };;
+    esac
+  done
+}
+
+AskNo() { #message
+  while read -p "$1 [N(enter)/y]" NY; do
+    case $NY in
+      [Yy]* ) {
+        return 0
+      };;
+      [0-9A-MO-XZa-mo-xz]* ) {
+        echo "Please answer yes or no or enter."
+      };;
+      * ) {
+        return 1
+      };;
+    esac
+  done
+}
+
+BuildKernel() { #defconfig
+  (cd $KERNELDIR
+   make $KBUILDOPT $1
+   if [ $# -eq 1 ]; then
+     if AskNo "Would you like to customize your kernel config?" ; then
+       make $KBUILDOPT menuconfig
+     fi
+   fi
+   make $KBUILDOPT zImage modules dtbs -j$NR_CPUS || exit
+   rm -rf $MODINSDIR
+   make $KBUILDOPT INSTALL_MOD_STRIP=1 INSTALL_MOD_PATH=$MODINSDIR modules_install || exit
+  )
+}
+
+AddStaging() {
+  (cd $SHRIVELDIR
+  rm -f rootfs.tar.bz2
+  cp -rf $MODINSDIR/lib/ .
+  find lib -type l | xargs rm
+  bzip2 -dc $POKYDIR/$POKYFILE > rootfs.tar
+  tar uvf rootfs.tar ./lib
+  rm -rf ./lib
+  bzip2 rootfs.tar
+  ) > /dev/null
+}
+
+CheckExist() { # file OKMsg ErrorMsg
+  if [ -e $1 ]; then
+    echo "$2"
+  else
+    echo "Error: $3"
+    exit 1
+  fi
+}
+
+CheckExistCopy() {
+  CheckExist $1 " $2 OK" "Copy "`basename $1`
+}
+
+CheckExistNo() {
+  CheckExist $1 `basename $1`" OK" "No exist $1"
+}
+
+FileCheck() {
+  if [ $DATABINMAKE -ne 0 ]; then
+    echo "[Path check]"
+    echo "-RTOS"
+    CheckExistCopy $CURNTDIR/RTOS/$RTOSBIN "--RTOS BIN"
+    CheckExistCopy $CURNTDIR/RTOS/$BOOTSTRAP "--Boot Strap BIN"
+    CheckExistCopy $CURNTDIR/RTOS/$RESOURCE "--RESOURCE BIN"
+    CheckExistCopy $CURNTDIR/RTOS/$USERDATA "--User data BIN"
+    CheckExistCopy $CURNTDIR/RTOS/$M0BI "--M0 BIN"
+    if [ $DATABINMAKE -eq 2 ]; then
+        CheckExistCopy $CURNTDIR/RTOS/$BOOTINFO1 "--ROOT INFO 1"
+        CheckExistCopy $CURNTDIR/RTOS/$BOOTINFO2 "--ROOT INFO 2"
+        CheckExistCopy $CURNTDIR/RTOS/$USR_CODE1 "--User Code 1"
+        CheckExistCopy $CURNTDIR/RTOS/$USR_CODE2 "--User Code 2"
+    fi
+    WARPFLG=0
+    if [ ! -z $WARPBIN ]; then
+      CheckExistCopy $CURNTDIR/RTOS/$WARPBIN "--Warp BIN"
+      WARPFLG=1
+    fi
+    echo "-SD"
+    if [ $DATABINMAKE -ne 2 ]; then
+      CheckExistCopy $CURNTDIR/SD/nand.par "--nand.par"
+    fi
+    CheckExistCopy $CURNTDIR/SD/pardata.par "--pardata.par"
+    CheckExistCopy $CURNTDIR/SD/SD.DAT "--SD.DAT"
+    CheckExistCopy $CURNTDIR/SD/SDRAM.PAR "--SDRAM.PAR"
+    CheckExistCopy $CURNTDIR/SD/boot.par "--boot.par"
+  fi
+}
+
+DirCheck() {
+  echo ""
+  echo "[Path check]"
+  CheckExist $KERNELDIR "-Kernel exists" "Wrong path of the kernel"
+  CheckExist $POKYDIR/$POKYFILE "-rootfs exists" "Wrong path of the rootfs"
+  CheckExist $SHRIVELDIR "-Shrivel exists" "Wrong path of the Shrivel"
+  CheckExist $STUBBY "-Stubby exists" "Wrong path to stubby.bin"
+}
+
+RunShrivel(){
+  echo "Make USB Test Tool"
+  CHKFILE=$POKYDIR/$POKYFILE
+  if [ -e $CHKFILE ]; then
+    echo "Copy relation file to Shrivel"
+    AddStaging
+  else
+    echo "warning: Please get the rootFS or buld poky"
+    exit 1
+  fi
+  echo "run shrivel.sh"
+  sudo ./shrivel.sh rootfs.tar.bz2 $WHITELIST
+  mkdir -p initram
+  cp -p rootfs-${WHITELIST}.initramfs initram/initramfs
+  [ $USEUBIFS -ne 0 ] && ./genubifs.sh shrivelled shrivelled.rootfs.ubifs
+  return 0
+}
+
+printb() { # num (0-255)
+  /bin/echo -ne "\\x"`printf "%02x" $1`
+}
+
+AddHeader() { # type param file
+  TYPE=$1
+  PARAM=$2
+  INFILE=$3
+
+  # Check parameters
+  case $TYPE in
+    0)
+      case $PARAM in 0|1|2) ;; *) return 1 ;; esac ;;
+    4)
+      test $PARAM -lt 0 -o $PARAM -gt 15 && return 1 ;;
+    6)
+      test $PARAM -lt 0 -o $PARAM -gt 15 -a $PARAM -ne 255 && return 1 ;;
+    16)
+      case $PARAM in 0|1) ;; *) return 1 ;; esac ;;
+    1|2|3)
+      ;;
+    *)
+      return 1;;
+  esac
+
+  [ ! -f $INFILE ] && return 1
+  LEN=`stat -c%s $INFILE`
+  if [ $TYPE -eq 3 ]; then
+    PADLEN=`echo "( 2048 - $LEN % 2048 ) % 2048" | bc`
+  else
+    PADLEN=`echo "( 16 - $LEN % 16 ) % 16" | bc` # 0 - 15
+  fi
+  ALGLEN=$((LEN + PADLEN))
+
+  echo -n "MILBEAUT"
+  printb $TYPE ; printb 0
+  printb $PARAM ; printb 0
+  printb $((ALGLEN % 256))
+  printb $((ALGLEN / 256 % 256))
+  printb $((ALGLEN / 65536 % 256))
+  printb $((ALGLEN / 16777216 % 256))
+  cat $INFILE
+  while [ $PADLEN -ne 0 ]; do
+    printb 0; PADLEN=$((PADLEN - 1))
+  done
+}
+
+SetShrivel() {
+  #DeviceTree copy
+  echo "Copy the kernel image to Shrivel"
+  mkdir -p $SHRIVELDIR/kernel/boot
+  cp $ZIMAGE $SHRIVELDIR/kernel/boot/Image-nolpae
+  cp $DTB $SHRIVELDIR/kernel/boot/$DTBOUT
+}
+
+KernelFileChk() {
+  if [ -n "$ZIMAGE" -a -e "$ZIMAGE" ]; then
+    [ -z "$DTB" -o ! -e "$DTB" ] && echo "No DTB is given" && exit 1
+  fi
+  if [ -z "$INITRAMFS" -a ! -e $MODINSDIR/lib ]; then
+    echo "The kernel has not been built"
+    echo "Please build kernel"
+    exit 1
+  fi
+}
+
+Kernel_ChkBld() {
+  echo ""
+  if [ $1 = ask ]; then
+    if AskYes "Would you like to build the kernel?" ; then
+      echo "** Kenel build start **"
+      BuildKernel $BOARDCONFIG
+      echo "** Kenel build end   **"
+    fi
+    KernelFileChk
+    ZIMAGE=$KBUILDDIR/arch/arm/boot/zImage
+    DTB=$KBUILDDIR/arch/arm/boot/dts/$DTBNAME
+  else
+    echo "** Kenel build start **"
+    BuildKernel $BOARDCONFIG skip
+    echo "** Kenel build end   **"
+    ZIMAGE=$KBUILDDIR/arch/arm/boot/zImage
+    DTB=$KBUILDDIR/arch/arm/boot/dts/$DTBNAME
+  fi
+  SetShrivel
+}
+
+Shrivel_ChkBld() {
+  echo ""
+  cd $SHRIVELDIR > /dev/null
+  if [ $1 = ask ]; then
+    if [ $USEUBIFS -eq 0 ]; then
+      AskYes "Would you like to create initramfs?" && RunShrivel
+    else
+      AskYes "Would you like to create ubifs?" && RunShrivel
+    fi
+  else
+    RunShrivel
+  fi
+  if [ -n "$INITRAMFS" -a -e "$INITRAMFS" ]; then
+    cp $INITRAMFS initram/initramfs
+  fi 
+}
+
+RunRomfs() {
+  #shrivel file check
+  cd $SHRIVELDIR
+  CheckExistNo stubby/stubby.bin
+  CheckExistNo kernel/boot/Image-nolpae
+  CheckExistNo kernel/boot/$DTBOUT
+  CheckExistNo initram/initramfs
+  [ $USEUBIFS -ne 0 ] && CheckExistNo shrivelled.rootfs.ubifs
+
+  #make filesystem
+  ./romfs.sh checkSkip
+
+  if [ $MAKELDIMAGE -eq 1 ]; then
+    #make writing image
+    echo "make writing image"
+    rm $ROOTFS_IMG
+    size=`sudo du -sb $SHRIVELLED | awk '{ print $1; }'`
+    image_size=`expr $size / 4096`
+    image_size=`expr $image_size + $image_size / 10 \* 3`
+    dd if=/dev/zero of=$ROOTFS_IMG bs=4096 count=$image_size
+
+#    sudo mkfs -t ext4 -b 4096 $ROOTFS_IMG
+#    sudo mount -o loop -t ext4 $ROOTFS_IMG /tmp
+#    sudo cp -pfr $SHRIVELLED/* /tmp
+#    sudo umount /tmp
+
+    LOOP_DEVICE=`sudo losetup -f`
+    sudo losetup $LOOP_DEVICE $ROOTFS_IMG
+    sudo mkfs -t ext4 -b 4096 $LOOP_DEVICE
+    sudo mount $LOOP_DEVICE /tmp/
+    sudo cp -pfr $SHRIVELLED/* /tmp/
+    sudo umount /tmp/
+    sudo losetup -d $LOOP_DEVICE
+  fi
+
+  cd $CURNTDIR
+  cp $SHRIVELDIR/_output/LINUX.BIN .
+  cp $SHRIVELDIR/_output/initramfs .
+
+  [ $USEUBIFS -ne 0 ] && cp $SHRIVELDIR/shrivelled.rootfs.ubifs . >/dev/null
+  echo ""
+}
+
+
+RunMakeDataBin() {
+echo ""
+  if [ $DATABINMAKE -eq 0 ]; then
+    if [ $USEUBIFS -eq 1 ]; then
+      echo "End make LINUX.BIN and ubifs"
+      [ -e shrivelled.rootfs.ubifs ] && rm initramfs >/dev/null
+    else
+      echo "End make LINUX.BIN and initramfs"
+      [ -e shrivelled.rootfs.ubifs ] && rm shrivelled.rootfs.ubifs >/dev/null
+    fi  
+    echo "....Done"
+    exit
+  fi
+
+  echo "Start make DATA.BIN"
+  if [ $USEUBIFS -eq 1 ]; then 
+    (AddHeader 3 0 RTOS/$BOOTSTRAP
+     AddHeader 4 1 RTOS/$RTOSBIN
+     AddHeader 4 4 LINUX.BIN
+     AddHeader 4 7 RTOS/$RESOURCE
+     AddHeader 4 8 RTOS/$USERDATA ) > $CURNTDIR/SD/DATA.bin
+    cp $SHRIVELDIR/shrivelled.rootfs.ubifs $CURNTDIR/SD >/dev/null
+  else  #initramfs
+    if [ $DATABINMAKE -eq 2 ]; then
+      (AddHeader 3 0 RTOS/$M0BIN
+       AddHeader 4 2 RTOS/$BOOTSTRAP
+       AddHeader 4 4 RTOS/$RTOSBIN
+       AddHeader 4 7 LINUX.BIN
+       AddHeader 4 8 initramfs
+       AddHeader 4 9 RTOS/$WARPBIN
+       AddHeader 4 10 RTOS/$USERDATA
+       AddHeader 4 11 RTOS/$BOOTINFO1
+       AddHeader 4 12 RTOS/$BOOTINFO2
+       AddHeader 4 13 RTOS/$USR_CODE1
+       AddHeader 4 14 RTOS/$USR_CODE2
+       AddHeader 4 15 RTOS/$RESOURCE ) > $CURNTDIR/SD/DATA.bin
+    else
+      (AddHeader 3 0 RTOS/$M0BIN
+       AddHeader 4 0 RTOS/$BOOTSTRAP
+       AddHeader 4 2 RTOS/$RTOSBIN
+       AddHeader 4 5 LINUX.BIN
+       AddHeader 4 6 initramfs
+       if [ $WARPFLG -eq 1 ]; then
+         AddHeader 4 7 RTOS/$WARPBIN
+       fi
+       AddHeader 4 8 RTOS/$RESOURCE
+       AddHeader 4 9 RTOS/$USERDATA ) > $CURNTDIR/SD/DATA.bin
+    fi
+  fi
+  rm -f LINUX.BIN nand.par initramfs shrivelled.rootfs.ubifs >/dev/null
+
+  echo ""
+  echo "....Done"
+}
+
+Signboard() {
+  echo "_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/"
+  echo "  MAKE BINARY for Linux ver$VERSION"
+  echo "_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/"
+}
+
+Usage() {
+  echo "Usage: make_bin_linux.sh [OPTION]" 1>&2
+  echo "Create a Linux binary for writing image" 1>&2
+  echo "" 1>&2
+  echo " No parameters     Create a binary not ask the user." 1>&2
+  echo " -h, --help        Display Help." 1>&2
+  echo " -a, --ask         Create a binary while ask the user." 1>&2
+  echo " -k, --kernel      Build of the kernel only." 1>&2
+  echo " -f, --filesystem  Not build the kernel, create a binary." 1>&2
+  echo "" 1>&2
+  echo "Example:" 1>&2
+  echo "    ./make_bin_linux.sh --ask" 1>&2
+}
+
+#Main
+#Parameters check
+if [ $# -ne 1 ]; then
+  Signboard
+  FileCheck
+  DirCheck
+  Kernel_ChkBld noask
+  Shrivel_ChkBld noask
+  RunRomfs
+  RunMakeDataBin
+else
+  case $1 in
+    "-a" | "--ask" ) {
+      Signboard
+      FileCheck
+      DirCheck
+      Kernel_ChkBld ask
+      Shrivel_ChkBld ask
+    };;
+    "-k" | "--kernel" ) {
+      Signboard
+      echo "[Path check]"
+      CheckExist $KERNELDIR "-Kernel exists" "Wrong path of the kernel"
+      CheckExist $SHRIVELDIR "-Shrivel exists" "Wrong path of the Shrivel"
+      echo ""
+      echo "** Kenel build start **"
+      BuildKernel $BOARDCONFIG
+      echo "** Kenel build end   **"
+      exit
+    };;
+    "-f" | "--filesystem" ) {
+      Signboard
+      FileCheck
+      DirCheck
+      Shrivel_ChkBld noask
+    };;
+    "-h" | "--help" ) {
+      Usage
+      exit
+    };;
+    * ) {
+      echo "parameter error."
+      echo ""
+      Usage
+      exit
+    };;
+  esac
+  RunRomfs
+  RunMakeDataBin
+fi
+exit
+

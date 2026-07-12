@@ -1,0 +1,142 @@
+ Stubby bootloader for mb8ac0300, mb86s7x
+ ----------------------------------------
+
+ Stubby is a small, selfcontained bootloader designed to directly
+ boot Linux.  Typically a fully-featured configuration is < 36KB
+
+ It supports
+
+ - Build-time configuration
+ 
+ - Direct booting of Linux or other OS
+
+ - Device Tree binaries
+ 
+ - Runtime manipulation of fdt from file on boot filesystem
+
+ - initramfs loading
+
+ - predictable and stateless boot source selection, they are
+   checked in a set order and the first usable one is used
+ 
+ - No boot script or other configuration to go wrong
+
+ - vfat, ext2 and romfs filesystem parsing
+
+ - RSA / SHA1 / SHA256 boot file signing and verification
+ 
+  Stubby is released under GNU General Public License version 2
+  (GPL 2.0). See LICENSE for details.
+ 
+ Boot files
+ ----------
+ 
+ Stubby checks inside a series of possible boot sources for the
+ following files
+ 
+ /boot/Image               usually the Linux kernel
+ /boot/mb<whatever>.dtb    Device Tree binary
+ /boot/initramfs           Optional initramfs
+ 
+ Alternatively, it can chain-boot U-Boot, in which case it will
+ look for
+ 
+ /boot/u-boot.bin
+
+
+ Crypto
+ ------
+
+ See README.crypto for information on the signing procedure
+
+
+ Flattened Device Tree customization
+ -----------------------------------
+ 
+ If the other boot files are present, Stubby also checks the
+ boot source for /boot/dtb.cfg.  If it exists, the file is
+ parsed and used to modify the in-memory Flattened Device Tree.
+ 
+ # comments are allowed
+ 
+ DT strings may be appended
+ 
+ /chosen/bootargs += " extra boot args"
+ 
+ Or replaced
+ 
+ /chosen/bootargs = "new commandline"
+ 
+ Numeric data can be given in hex or decimal.  It should be given in
+ one long list, < >, < > is not supported, just give everything in one
+ < .. >
+ 
+ /my/override = < 0x12345, 123 >
+ 
+ Byte hex arrays are also supported
+ 
+ /ethernet/local-mac-address = [ 11 aa 33 cc 55 66 ]
+
+
+M8M-specific information
+------------------------
+
+The mb86s27 "M8M" stubby has some extra files generated necessary for programming to NAND.
+
+Copy
+
+ ./mb86s27/nand.par             --> SD card nand.par
+ ./mb86s27/SDRAM.PAR            --> SD card SDRAM.PAR
+ ./mb86s27/stubby-mb86s27-*.bin --> SD card DATA.BIN
+ ./m8m-nand-SD.DAT              --> SD card SD.DAT
+
+to an SD card WITH A VFAT FILESYSTEM DIRECTLY ON THE DEVICE.
+The ROM does NOT understand partition tables.
+
+Also it expects to find these kernel files on a partition in SD0
+
+ /boot/Image-nolpae  (it can be just zImage renamed)
+ /boot/mb86s27eb.dtb
+
+
+You can also use stubby.bin as SD.DAT with the m8m in ROM flashing mode
+(SW3.3 ON).
+
+1) Prepare an SD Card with a small partition 1 (50MB is OK) formatted VFAT
+2) Copy the mb86s27-sddat.bin variant to partition 1 as "SD.DAT"
+3) Copy sdram.par to partition 1 as sdram.par
+4) Add a /boot directory to partition 1 and put the kernel + dtb in there
+5) Optionally add an ext4 filesystem on partition 2 as the rootfs
+
+MLB01-specific information
+------------------------
+ 1) For RTOS-Main
+   Copy sc2000-rtos/stubby-sc2000-rtos.bin shrivel/r/stubby.bin
+   Copy boot/Image-nolpae  (it can be just zImage renamed) to shrivel/r/boot
+   Copy boot/dts/mlb01-evb-rtos.dtb shrivel/r/boot/sc2000.dtb
+   Combine them to a Linux.bin.
+   Combine the Linux.bin and initramfs with MILB_SDK.bin to a DATA.bin
+   Burn that Data.bin to NAND of RK board.
+
+ 2) For BSP SD boot.
+   Execute "./Get_data_bin.sh sc2000/stubby-sc2000.bin 1" to get a
+   Data.bin for ES1 board.
+   Execute "./Get_data_bin.sh sc2000/stubby-sc2000.bin 2" to get a
+   Data.bin for ES3 board.
+   Copy all file at SD directory to SD card which was formatted  by FAT32 or FAT16.
+   Copy the Data.bin to that SD card.
+   Burn the Data.bin to RK board's NAND using that SD card.
+   Copy arch/arm/boot/Image-nolpae  (it can be just zImage renamed) to SD's boot.
+   Copy arch/arm/boot/dts/mlb01-evb.dtb to SD's boot.
+ 3) For SD writer
+   Execute ./Get_data_bin.sh sc2000-sddat/stubby-sc2000-sddat.bin to get a
+   Data.bin.
+   Copy all file at SD directory to SD card which was formatted  by FAT32.
+   Copy the Data.bin to that SD card.
+   Copy arch/arm/boot/Image-nolpae  (it can be just zImage renamed) to the SD's boot.
+   Copy arch/arm/boot/dts/mlb01-evb.dtb to SD's boot/mlb01-evb-sd.dtb.
+   Copy initramfs in which burning script or application is started automatically to the SD's boot
+   Burn the Data.bin to RK board's NAND using that SD card.
+   Power-on the RK board.
+
+

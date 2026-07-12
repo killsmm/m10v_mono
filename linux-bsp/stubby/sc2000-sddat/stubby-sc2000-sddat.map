@@ -1,0 +1,721 @@
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+                0x0000000000000800                IRQ_STACK_SIZE = 0x800
+                0x0000000000000080                FIQ_STACK_SIZE = 0x80
+                0x0000000000000800                SVC_STACK_SIZE = 0x800
+                0x0000000000000800                SYS_STACK_SIZE = 0x800
+                0x0000000000000080                ABT_STACK_SIZE = 0x80
+                0x0000000000000080                UND_STACK_SIZE = 0x80
+                0x0000000000000000                . = 0x0
+                0x0000000000000000                stubby_start = .
+
+.text           0x0000000000000000     0x4908
+ *(.initialtext)
+ .initialtext   0x0000000000000000       0xb0 ../sc2000-sddat/boot.o
+                0x0000000000000000                reset
+                0x0000000000000100                . = ALIGN (0x100)
+ *fill*         0x00000000000000b0       0x50 
+ *(._secure.text)
+ *(.got.plt)
+ .got.plt       0x0000000000000100        0xc ../sc2000-sddat/cache-cp15.o
+                0x0000000000000100                _GLOBAL_OFFSET_TABLE_
+ *(.got)
+ .got           0x000000000000010c       0x9c ../sc2000-sddat/cache-cp15.o
+ *(.igot.plt)
+ .igot.plt      0x00000000000001a8        0x0 ../sc2000-sddat/cache-cp15.o
+ *(.igot)
+ *(.text)
+ .text          0x00000000000001a8      0x110 ../sc2000-sddat/cache-cp15.o
+                0x00000000000001c0                icache_enable
+                0x00000000000001d4                icache_disable
+                0x00000000000001e8                icache_status
+                0x00000000000001f2                dcache_enable
+                0x0000000000000290                dcache_disable
+                0x00000000000002ac                dcache_status
+ .text          0x00000000000002b8        0x0 ../sc2000-sddat/cache-pl310.o
+ .text          0x00000000000002b8      0x1c0 ../sc2000-sddat/cache_v7.o
+                0x000000000000036e                invalidate_icache_all
+                0x0000000000000382                __v7_outer_cache_enable
+                0x0000000000000382                v7_outer_cache_enable
+                0x0000000000000384                v7_outer_cache_disable
+                0x0000000000000384                __v7_outer_cache_disable
+                0x0000000000000386                __v7_outer_cache_flush_all
+                0x0000000000000386                v7_outer_cache_flush_all
+                0x0000000000000388                flush_dcache_all
+                0x0000000000000398                v7_outer_cache_inval_all
+                0x0000000000000398                __v7_outer_cache_inval_all
+                0x000000000000039a                invalidate_dcache_all
+                0x00000000000003aa                arm_init_before_mmu
+                0x00000000000003cc                v7_outer_cache_flush_range
+                0x00000000000003cc                __v7_outer_cache_flush_range
+                0x00000000000003ce                flush_dcache_range
+                0x00000000000003f6                flush_cache
+                0x00000000000003fc                __v7_outer_cache_inval_range
+                0x00000000000003fc                v7_outer_cache_inval_range
+                0x00000000000003fe                invalidate_dcache_range
+                0x0000000000000444                cleanup_before_linux
+ .text          0x0000000000000478      0x46c ../sc2000-sddat/lib1funcs.o
+                0x0000000000000478                __udivsi3
+                0x0000000000000478                __aeabi_uidiv
+                0x00000000000005b4                __aeabi_idiv
+                0x0000000000000738                __aeabi_uidivmod
+                0x0000000000000750                __aeabi_idivmod
+                0x0000000000000768                __aeabi_uldivmod
+                0x00000000000008c4                __aeabi_llsl
+ .text          0x00000000000008e4      0x31c ../sc2000-sddat/boot-sequence.o
+                0x00000000000008e4                print_stubby_info
+                0x0000000000000918                check_console_key
+                0x0000000000000948                describe
+                0x00000000000009bc                select_boot_source
+                0x00000000000009e8                try_boot_source
+                0x0000000000000a64                boot_sequence
+                0x0000000000000bcc                jump_to_linux
+ .text          0x0000000000000c00      0x1b0 ../sc2000-sddat/load_image.o
+                0x0000000000000c00                _filesystem_read
+                0x0000000000000c20                load_from_filesystem
+ .text          0x0000000000000db0       0x50 ../sc2000-sddat/serial.o
+                0x0000000000000db0                getc
+                0x0000000000000db4                putc
+                0x0000000000000dcc                puts
+                0x0000000000000dde                serial_init
+ .text          0x0000000000000e00       0x48 ../sc2000-sddat/lowlevel_init.o
+                0x0000000000000e00                lowlevel_init
+                0x0000000000000e08                lowlevel_init_2
+ .text          0x0000000000000e48        0x0 ../sc2000-sddat/nonsec_virt.o
+ .text          0x0000000000000e48        0x0 ../sc2000-sddat/nonsec.o
+ .text          0x0000000000000e48        0x0 ../sc2000-sddat/boot.o
+ .text          0x0000000000000e48      0x230 ../sc2000-sddat/romfs.o
+                0x0000000000000fa0                romfs_filesystem_read
+                0x0000000000000fe8                romfs_filesystem_get_ads
+                0x0000000000001020                romfs_mount
+ .text          0x0000000000001078      0x14a ../sc2000-sddat/string.o
+                0x0000000000001078                strcpy
+                0x0000000000001088                strncpy
+                0x00000000000010a0                strcat
+                0x00000000000010ba                strcmp
+                0x00000000000010d0                strncmp
+                0x00000000000010f2                strchr
+                0x000000000000110a                strlen
+                0x000000000000111a                memset
+                0x0000000000001160                memcmp
+                0x000000000000117e                findstr
+ .text          0x00000000000011c2        0x0 ../sc2000-sddat/ctype.o
+ *fill*         0x00000000000011c2        0x2 
+ .text          0x00000000000011c4      0x1c4 ../sc2000-sddat/utils.o
+                0x00000000000011c4                pic_dereference
+                0x00000000000011e4                __div0
+                0x00000000000011f0                udelay
+                0x0000000000001216                printnybble
+                0x0000000000001232                _print8
+                0x000000000000124c                print8
+                0x0000000000001260                _print32
+                0x000000000000129c                print32
+                0x00000000000012b0                print32_noleading
+                0x00000000000012c4                printdec
+                0x0000000000001308                raise
+                0x000000000000130c                __aeabi_unwind_cpp_pr0
+                0x000000000000130e                replay_dump
+                0x0000000000001324                malloc
+                0x000000000000134c                uaw_be32
+                0x000000000000135c                __swap32
+                0x0000000000001372                memcpy
+ .text          0x0000000000001388      0x89c ../sc2000-sddat/sdhci.o
+                0x000000000000146c                sdhci_send_command
+                0x0000000000001824                sdhci_set_signal_voltage
+                0x0000000000001868                sdhci_execute_tuning
+                0x000000000000193c                sdhci_set_ios
+                0x0000000000001a08                sdhci_sw_reset
+                0x0000000000001a16                sdhci_init
+                0x0000000000001b04                add_sdhci
+ .text          0x0000000000001c24       0x24 ../sc2000-sddat/f_sdh30_sdhci.o
+                0x0000000000001c24                f_sdh30_init
+ .text          0x0000000000001c48      0x968 ../sc2000-sddat/mmc.o
+                0x0000000000001c78                mmc_bread
+                0x0000000000001e44                mmc_go_idle
+                0x0000000000001e72                mmc_set_clock
+                0x00000000000023dc                mmc_init
+                0x00000000000025ac                print_mmc_devices
+ .text          0x00000000000025b0      0x14c ../sc2000-sddat/part_dos.o
+                0x00000000000025b0                partition_read_table
+                0x00000000000025fc                parse_partition
+ .text          0x00000000000026fc      0x28c ../sc2000-sddat/dtb.o
+                0x00000000000026fc                fdt_set_prop_size
+                0x00000000000027a8                fdt_find_path
+                0x0000000000002896                update_dtb
+ .text          0x0000000000002988      0x388 ../sc2000-sddat/dtb-cfg.o
+                0x00000000000029b2                process_dtb_config
+ .text          0x0000000000002d10      0xa8c ../sc2000-sddat/fat.o
+                0x00000000000030bc                do_fat_read_at
+                0x00000000000036fc                do_fat_read
+                0x0000000000003706                fat_check
+ .text          0x000000000000379c      0xac4 ../sc2000-sddat/ext2.o
+                0x000000000000379c                ext2fs_devread
+                0x00000000000038dc                ext2fs_read_file
+                0x0000000000003ed0                ext2fs_find_file1
+                0x0000000000004018                ext2fs_find_file
+                0x0000000000004064                ext2fs_close
+                0x00000000000040c4                ext2fs_open
+                0x0000000000004138                ext2fs_read
+                0x0000000000004178                do_ext2_read
+                0x00000000000041b0                ext2fs_mount
+ .text          0x0000000000004260       0x84 ../sc2000-sddat/serial-usio.o
+                0x0000000000004260                uart_init
+                0x00000000000042a8                _putc
+                0x00000000000042c4                _getc
+ *(.text.unlikely)
+                0x00000000000042e4                . = ALIGN (0x4)
+ *(.rodata)
+ .rodata        0x00000000000042e4      0x100 ../sc2000-sddat/ctype.o
+                0x00000000000042e4                _ctype
+ .rodata        0x00000000000043e4       0x2c ../sc2000-sddat/utils.o
+ .rodata        0x0000000000004410       0x50 ../sc2000-sddat/mmc.o
+ *(.rodata.str1.1)
+ .rodata.str1.1
+                0x0000000000004460       0xbe ../sc2000-sddat/boot-sequence.o
+                                         0xc3 (size before relaxing)
+ .rodata.str1.1
+                0x000000000000451e      0x115 ../sc2000-sddat/load_image.o
+ .rodata.str1.1
+                0x0000000000004633       0x60 ../sc2000-sddat/serial.o
+                                         0x62 (size before relaxing)
+ .rodata.str1.1
+                0x0000000000004693        0xa ../sc2000-sddat/utils.o
+ .rodata.str1.1
+                0x000000000000469d       0x9b ../sc2000-sddat/sdhci.o
+ .rodata.str1.1
+                0x0000000000004738        0xc ../sc2000-sddat/mmc.o
+ .rodata.str1.1
+                0x0000000000004744       0x10 ../sc2000-sddat/part_dos.o
+ .rodata.str1.1
+                0x0000000000004754       0x69 ../sc2000-sddat/dtb.o
+ .rodata.str1.1
+                0x00000000000047bd       0x21 ../sc2000-sddat/dtb-cfg.o
+                                         0x28 (size before relaxing)
+ .rodata.str1.1
+                0x00000000000047de       0x3a ../sc2000-sddat/fat.o
+                                         0x3f (size before relaxing)
+ .rodata.str1.1
+                0x0000000000004818       0x5a ../sc2000-sddat/ext2.o
+                                         0x5c (size before relaxing)
+                0x0000000000004874                . = ALIGN (0x4)
+ *fill*         0x0000000000004872        0x2 
+ *(.data*)
+ .data          0x0000000000004874        0x0 ../sc2000-sddat/cache-cp15.o
+ .data          0x0000000000004874        0x0 ../sc2000-sddat/cache-pl310.o
+ .data          0x0000000000004874        0x0 ../sc2000-sddat/cache_v7.o
+ .data          0x0000000000004874        0x0 ../sc2000-sddat/lib1funcs.o
+ .data          0x0000000000004874        0x0 ../sc2000-sddat/boot-sequence.o
+ .data.rel.ro.local
+                0x0000000000004874       0x14 ../sc2000-sddat/boot-sequence.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/load_image.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/serial.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/lowlevel_init.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/nonsec_virt.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/nonsec.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/boot.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/romfs.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/string.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/ctype.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/utils.o
+ .data          0x0000000000004888        0x0 ../sc2000-sddat/sdhci.o
+ .data          0x0000000000004888       0x80 ../sc2000-sddat/f_sdh30_sdhci.o
+ .data          0x0000000000004908        0x0 ../sc2000-sddat/mmc.o
+ .data          0x0000000000004908        0x0 ../sc2000-sddat/part_dos.o
+ .data          0x0000000000004908        0x0 ../sc2000-sddat/dtb.o
+ .data          0x0000000000004908        0x0 ../sc2000-sddat/dtb-cfg.o
+ .data          0x0000000000004908        0x0 ../sc2000-sddat/fat.o
+ .data          0x0000000000004908        0x0 ../sc2000-sddat/ext2.o
+ .data          0x0000000000004908        0x0 ../sc2000-sddat/serial-usio.o
+
+.glue_7         0x0000000000004908        0x0
+ .glue_7        0x0000000000004908        0x0 linker stubs
+
+.glue_7t        0x0000000000004908        0x0
+ .glue_7t       0x0000000000004908        0x0 linker stubs
+
+.vfp11_veneer   0x0000000000004908        0x0
+ .vfp11_veneer  0x0000000000004908        0x0 linker stubs
+
+.v4_bx          0x0000000000004908        0x0
+ .v4_bx         0x0000000000004908        0x0 linker stubs
+
+.iplt           0x0000000000004908        0x0
+ .iplt          0x0000000000004908        0x0 ../sc2000-sddat/cache-cp15.o
+
+.rel.dyn        0x0000000000004908        0x0
+ .rel.iplt      0x0000000000004908        0x0 ../sc2000-sddat/cache-cp15.o
+ .rel.got       0x0000000000004908        0x0 ../sc2000-sddat/cache-cp15.o
+
+.exidx
+ *(.ARM.exidx)
+                0x0000000000004908                stubby_end = .
+                0x000000004f000000                . = 0x4f000000
+                0x000000004f000000                __bss_start = .
+
+.bss            0x000000004f000000    0x31660
+ *(.bss)
+ .bss           0x000000004f000000        0x0 ../sc2000-sddat/cache-cp15.o
+ .bss           0x000000004f000000        0x0 ../sc2000-sddat/cache-pl310.o
+ .bss           0x000000004f000000        0x0 ../sc2000-sddat/cache_v7.o
+ .bss           0x000000004f000000        0x0 ../sc2000-sddat/lib1funcs.o
+ .bss           0x000000004f000000       0x10 ../sc2000-sddat/boot-sequence.o
+                0x000000004f000000                rootfstype
+                0x000000004f000004                console_key
+                0x000000004f000008                force_part
+                0x000000004f00000c                source_skip
+ .bss           0x000000004f000010        0x0 ../sc2000-sddat/load_image.o
+ .bss           0x000000004f000010        0x0 ../sc2000-sddat/serial.o
+ .bss           0x000000004f000010        0x0 ../sc2000-sddat/lowlevel_init.o
+ .bss           0x000000004f000010        0x0 ../sc2000-sddat/nonsec_virt.o
+ .bss           0x000000004f000010        0x0 ../sc2000-sddat/nonsec.o
+ .bss           0x000000004f000010        0x0 ../sc2000-sddat/boot.o
+ .bss           0x000000004f000010        0x4 ../sc2000-sddat/romfs.o
+                0x000000004f000010                romfs
+ .bss           0x000000004f000014        0x0 ../sc2000-sddat/string.o
+ .bss           0x000000004f000014        0x0 ../sc2000-sddat/ctype.o
+ .bss           0x000000004f000014        0x8 ../sc2000-sddat/utils.o
+                0x000000004f000014                malloc_pointer
+                0x000000004f000018                start_ads
+ .bss           0x000000004f00001c        0x0 ../sc2000-sddat/sdhci.o
+ .bss           0x000000004f00001c        0x0 ../sc2000-sddat/f_sdh30_sdhci.o
+ .bss           0x000000004f00001c        0xc ../sc2000-sddat/mmc.o
+                0x000000004f000020                blksz
+                0x000000004f000024                lba
+ .bss           0x000000004f000028      0x410 ../sc2000-sddat/part_dos.o
+                0x000000004f000028                table
+                0x000000004f000428                filesystem_read
+                0x000000004f00042c                bread
+                0x000000004f000430                partition_length_blocks
+                0x000000004f000434                partition_offset_blocks
+ .bss           0x000000004f000438        0x0 ../sc2000-sddat/dtb.o
+ .bss           0x000000004f000438        0x0 ../sc2000-sddat/dtb-cfg.o
+ .bss           0x000000004f000438    0x30000 ../sc2000-sddat/fat.o
+                0x000000004f000438                do_fat_read_at_block
+                0x000000004f010438                get_dentfromdir_block
+                0x000000004f020438                get_contents_vfatname_block
+ .bss           0x000000004f030438     0x1228 ../sc2000-sddat/ext2.o
+                0x000000004f030438                sec_buf
+                0x000000004f031438                tps
+                0x000000004f031638                indir2_blkno
+                0x000000004f03163c                indir2_size
+                0x000000004f031640                indir2_block
+                0x000000004f031644                indir1_blkno
+                0x000000004f031648                indir1_size
+                0x000000004f03164c                indir1_block
+                0x000000004f031650                symlinknest
+                0x000000004f031654                ext2fs_file
+                0x000000004f031658                ext2fs_root
+                0x000000004f03165c                ext2_inode_size
+ .bss           0x000000004f031660        0x0 ../sc2000-sddat/serial-usio.o
+                0x000000004f031660                . = ALIGN (0x4)
+ *(.COMMON)
+                0x000000004f031660                . = ALIGN (0x4)
+                0x000000004f031660                __bss_end = .
+
+.sdram          0x000000004f031660     0x300c
+ *(.sdram_data)
+ .sdram_data    0x000000004f031660     0x100c ../sc2000-sddat/load_image.o
+                0x000000004f031660                load_ads_initramfs
+                0x000000004f031664                load_ads_dtb
+                0x000000004f031668                load_ads_kernel
+                0x000000004f03166c                dtb_config
+ .sdram_data    0x000000004f03266c     0x1000 ../sc2000-sddat/dtb-cfg.o
+                0x000000004f03266c                append_file
+ .sdram_data    0x000000004f03366c     0x1000 ../sc2000-sddat/fat.o
+                0x000000004f03366c                buffer
+
+.stack          0x000000004f03466c     0x2214
+                0x000000004f03466c                __stack_start__ = .
+                0x000000004f03466c                STACK_AREA = .
+ *(.USER_STACK_AREA)
+                0x000000004f0346ec                . = (. + 0x80)
+ *fill*         0x000000004f03466c       0x80 
+                0x000000004f034700                . = ALIGN (0x40)
+ *fill*         0x000000004f0346ec       0x14 
+                0x000000004f034700                STACK_AREA_UNDEF = .
+                0x000000004f034780                . = (. + 0x80)
+ *fill*         0x000000004f034700       0x80 
+                0x000000004f034780                . = ALIGN (0x40)
+                0x000000004f034780                STACK_AREA_ABT = .
+                0x000000004f034f80                . = (. + 0x800)
+ *fill*         0x000000004f034780      0x800 
+                0x000000004f034f80                . = ALIGN (0x40)
+                0x000000004f034f80                STACK_AREA_SVC_CPU0 = .
+                0x000000004f035780                . = (. + 0x800)
+ *fill*         0x000000004f034f80      0x800 
+                0x000000004f035780                STACK_AREA_SVC_CPU1 = .
+                0x000000004f035800                . = (. + 0x80)
+ *fill*         0x000000004f035780       0x80 
+                0x000000004f035800                STACK_AREA_SVC_CPU2 = .
+                0x000000004f036000                . = (. + 0x800)
+ *fill*         0x000000004f035800      0x800 
+                0x000000004f036000                STACK_AREA_SVC_CPU3 = .
+                0x000000004f036000                . = ALIGN (0x40)
+                0x000000004f036000                STACK_AREA_FIQ = .
+                0x000000004f036800                . = (. + 0x800)
+ *fill*         0x000000004f036000      0x800 
+                0x000000004f036800                . = ALIGN (0x40)
+                0x000000004f036800                STACK_AREA_IRQ = .
+                0x000000004f036880                . = (. + 0x80)
+ *fill*         0x000000004f036800       0x80 
+                0x000000004f036880                . = ALIGN (0x40)
+                0x000000004f036880                STACK_AREA_IDLE = .
+                0x000000004f036880                __stack_end__ = .
+                0x000000004f036880                malloc_pool = ALIGN (0x4)
+LOAD ../sc2000-sddat/cache-cp15.o
+LOAD ../sc2000-sddat/cache-pl310.o
+LOAD ../sc2000-sddat/cache_v7.o
+LOAD ../sc2000-sddat/lib1funcs.o
+LOAD ../sc2000-sddat/boot-sequence.o
+LOAD ../sc2000-sddat/load_image.o
+LOAD ../sc2000-sddat/serial.o
+LOAD ../sc2000-sddat/lowlevel_init.o
+LOAD ../sc2000-sddat/nonsec_virt.o
+LOAD ../sc2000-sddat/nonsec.o
+LOAD ../sc2000-sddat/boot.o
+LOAD ../sc2000-sddat/romfs.o
+LOAD ../sc2000-sddat/string.o
+LOAD ../sc2000-sddat/ctype.o
+LOAD ../sc2000-sddat/utils.o
+LOAD ../sc2000-sddat/sdhci.o
+LOAD ../sc2000-sddat/f_sdh30_sdhci.o
+LOAD ../sc2000-sddat/mmc.o
+LOAD ../sc2000-sddat/part_dos.o
+LOAD ../sc2000-sddat/dtb.o
+LOAD ../sc2000-sddat/dtb-cfg.o
+LOAD ../sc2000-sddat/fat.o
+LOAD ../sc2000-sddat/ext2.o
+LOAD ../sc2000-sddat/serial-usio.o
+OUTPUT(../sc2000-sddat/stubby.elf elf32-littlearm)
+
+.debug_info     0x0000000000000000     0xa43e
+ .debug_info    0x0000000000000000      0x532 ../sc2000-sddat/cache-cp15.o
+ .debug_info    0x0000000000000532       0x64 ../sc2000-sddat/cache-pl310.o
+ .debug_info    0x0000000000000596      0x882 ../sc2000-sddat/cache_v7.o
+ .debug_info    0x0000000000000e18       0x8a ../sc2000-sddat/lib1funcs.o
+ .debug_info    0x0000000000000ea2      0x73a ../sc2000-sddat/boot-sequence.o
+ .debug_info    0x00000000000015dc      0x48a ../sc2000-sddat/load_image.o
+ .debug_info    0x0000000000001a66      0x15e ../sc2000-sddat/serial.o
+ .debug_info    0x0000000000001bc4       0x8e ../sc2000-sddat/lowlevel_init.o
+ .debug_info    0x0000000000001c52       0x85 ../sc2000-sddat/boot.o
+ .debug_info    0x0000000000001cd7      0x4f0 ../sc2000-sddat/romfs.o
+ .debug_info    0x00000000000021c7      0x410 ../sc2000-sddat/string.o
+ .debug_info    0x00000000000025d7       0x57 ../sc2000-sddat/ctype.o
+ .debug_info    0x000000000000262e      0x603 ../sc2000-sddat/utils.o
+ .debug_info    0x0000000000002c31     0x2050 ../sc2000-sddat/sdhci.o
+ .debug_info    0x0000000000004c81      0x300 ../sc2000-sddat/f_sdh30_sdhci.o
+ .debug_info    0x0000000000004f81     0x1993 ../sc2000-sddat/mmc.o
+ .debug_info    0x0000000000006914      0x1c6 ../sc2000-sddat/part_dos.o
+ .debug_info    0x0000000000006ada      0x53f ../sc2000-sddat/dtb.o
+ .debug_info    0x0000000000007019      0x4d4 ../sc2000-sddat/dtb-cfg.o
+ .debug_info    0x00000000000074ed     0x15de ../sc2000-sddat/fat.o
+ .debug_info    0x0000000000008acb     0x1748 ../sc2000-sddat/ext2.o
+ .debug_info    0x000000000000a213      0x22b ../sc2000-sddat/serial-usio.o
+
+.debug_abbrev   0x0000000000000000     0x2481
+ .debug_abbrev  0x0000000000000000      0x1ad ../sc2000-sddat/cache-cp15.o
+ .debug_abbrev  0x00000000000001ad       0x26 ../sc2000-sddat/cache-pl310.o
+ .debug_abbrev  0x00000000000001d3      0x2ad ../sc2000-sddat/cache_v7.o
+ .debug_abbrev  0x0000000000000480       0x14 ../sc2000-sddat/lib1funcs.o
+ .debug_abbrev  0x0000000000000494      0x2a2 ../sc2000-sddat/boot-sequence.o
+ .debug_abbrev  0x0000000000000736      0x1ae ../sc2000-sddat/load_image.o
+ .debug_abbrev  0x00000000000008e4       0xc2 ../sc2000-sddat/serial.o
+ .debug_abbrev  0x00000000000009a6       0x14 ../sc2000-sddat/lowlevel_init.o
+ .debug_abbrev  0x00000000000009ba       0x14 ../sc2000-sddat/boot.o
+ .debug_abbrev  0x00000000000009ce      0x183 ../sc2000-sddat/romfs.o
+ .debug_abbrev  0x0000000000000b51      0x123 ../sc2000-sddat/string.o
+ .debug_abbrev  0x0000000000000c74       0x45 ../sc2000-sddat/ctype.o
+ .debug_abbrev  0x0000000000000cb9      0x200 ../sc2000-sddat/utils.o
+ .debug_abbrev  0x0000000000000eb9      0x437 ../sc2000-sddat/sdhci.o
+ .debug_abbrev  0x00000000000012f0      0x17a ../sc2000-sddat/f_sdh30_sdhci.o
+ .debug_abbrev  0x000000000000146a      0x49e ../sc2000-sddat/mmc.o
+ .debug_abbrev  0x0000000000001908       0xfd ../sc2000-sddat/part_dos.o
+ .debug_abbrev  0x0000000000001a05      0x165 ../sc2000-sddat/dtb.o
+ .debug_abbrev  0x0000000000001b6a      0x178 ../sc2000-sddat/dtb-cfg.o
+ .debug_abbrev  0x0000000000001ce2      0x3e0 ../sc2000-sddat/fat.o
+ .debug_abbrev  0x00000000000020c2      0x2e6 ../sc2000-sddat/ext2.o
+ .debug_abbrev  0x00000000000023a8       0xd9 ../sc2000-sddat/serial-usio.o
+
+.debug_loc      0x0000000000000000     0x8333
+ .debug_loc     0x0000000000000000      0x13f ../sc2000-sddat/cache-cp15.o
+ .debug_loc     0x000000000000013f      0x4fe ../sc2000-sddat/cache_v7.o
+ .debug_loc     0x000000000000063d      0x3f0 ../sc2000-sddat/boot-sequence.o
+ .debug_loc     0x0000000000000a2d      0x299 ../sc2000-sddat/load_image.o
+ .debug_loc     0x0000000000000cc6       0x64 ../sc2000-sddat/serial.o
+ .debug_loc     0x0000000000000d2a      0x43a ../sc2000-sddat/romfs.o
+ .debug_loc     0x0000000000001164      0x5cd ../sc2000-sddat/string.o
+ .debug_loc     0x0000000000001731      0x3f0 ../sc2000-sddat/utils.o
+ .debug_loc     0x0000000000001b21     0x23ea ../sc2000-sddat/sdhci.o
+ .debug_loc     0x0000000000003f0b       0x5c ../sc2000-sddat/f_sdh30_sdhci.o
+ .debug_loc     0x0000000000003f67     0x1058 ../sc2000-sddat/mmc.o
+ .debug_loc     0x0000000000004fbf      0x13c ../sc2000-sddat/part_dos.o
+ .debug_loc     0x00000000000050fb      0x569 ../sc2000-sddat/dtb.o
+ .debug_loc     0x0000000000005664      0x543 ../sc2000-sddat/dtb-cfg.o
+ .debug_loc     0x0000000000005ba7     0x13ff ../sc2000-sddat/fat.o
+ .debug_loc     0x0000000000006fa6     0x12f2 ../sc2000-sddat/ext2.o
+ .debug_loc     0x0000000000008298       0x9b ../sc2000-sddat/serial-usio.o
+
+.debug_aranges  0x0000000000000000      0x2b0
+ .debug_aranges
+                0x0000000000000000       0x20 ../sc2000-sddat/cache-cp15.o
+ .debug_aranges
+                0x0000000000000020       0x18 ../sc2000-sddat/cache-pl310.o
+ .debug_aranges
+                0x0000000000000038       0x20 ../sc2000-sddat/cache_v7.o
+ .debug_aranges
+                0x0000000000000058       0x20 ../sc2000-sddat/lib1funcs.o
+ .debug_aranges
+                0x0000000000000078       0x20 ../sc2000-sddat/boot-sequence.o
+ .debug_aranges
+                0x0000000000000098       0x20 ../sc2000-sddat/load_image.o
+ .debug_aranges
+                0x00000000000000b8       0x20 ../sc2000-sddat/serial.o
+ .debug_aranges
+                0x00000000000000d8       0x20 ../sc2000-sddat/lowlevel_init.o
+ .debug_aranges
+                0x00000000000000f8       0x20 ../sc2000-sddat/boot.o
+ .debug_aranges
+                0x0000000000000118       0x20 ../sc2000-sddat/romfs.o
+ .debug_aranges
+                0x0000000000000138       0x20 ../sc2000-sddat/string.o
+ .debug_aranges
+                0x0000000000000158       0x18 ../sc2000-sddat/ctype.o
+ .debug_aranges
+                0x0000000000000170       0x20 ../sc2000-sddat/utils.o
+ .debug_aranges
+                0x0000000000000190       0x20 ../sc2000-sddat/sdhci.o
+ .debug_aranges
+                0x00000000000001b0       0x20 ../sc2000-sddat/f_sdh30_sdhci.o
+ .debug_aranges
+                0x00000000000001d0       0x20 ../sc2000-sddat/mmc.o
+ .debug_aranges
+                0x00000000000001f0       0x20 ../sc2000-sddat/part_dos.o
+ .debug_aranges
+                0x0000000000000210       0x20 ../sc2000-sddat/dtb.o
+ .debug_aranges
+                0x0000000000000230       0x20 ../sc2000-sddat/dtb-cfg.o
+ .debug_aranges
+                0x0000000000000250       0x20 ../sc2000-sddat/fat.o
+ .debug_aranges
+                0x0000000000000270       0x20 ../sc2000-sddat/ext2.o
+ .debug_aranges
+                0x0000000000000290       0x20 ../sc2000-sddat/serial-usio.o
+
+.debug_ranges   0x0000000000000000      0x928
+ .debug_ranges  0x0000000000000000       0x18 ../sc2000-sddat/cache-cp15.o
+ .debug_ranges  0x0000000000000018       0x48 ../sc2000-sddat/cache_v7.o
+ .debug_ranges  0x0000000000000060       0x18 ../sc2000-sddat/boot-sequence.o
+ .debug_ranges  0x0000000000000078       0x18 ../sc2000-sddat/utils.o
+ .debug_ranges  0x0000000000000090      0x210 ../sc2000-sddat/sdhci.o
+ .debug_ranges  0x00000000000002a0      0x420 ../sc2000-sddat/mmc.o
+ .debug_ranges  0x00000000000006c0      0x160 ../sc2000-sddat/fat.o
+ .debug_ranges  0x0000000000000820      0x108 ../sc2000-sddat/ext2.o
+
+.debug_line     0x0000000000000000     0x223e
+ .debug_line    0x0000000000000000      0x17a ../sc2000-sddat/cache-cp15.o
+ .debug_line    0x000000000000017a       0x1d ../sc2000-sddat/cache-pl310.o
+ .debug_line    0x0000000000000197      0x156 ../sc2000-sddat/cache_v7.o
+ .debug_line    0x00000000000002ed      0x10d ../sc2000-sddat/lib1funcs.o
+ .debug_line    0x00000000000003fa      0x1dd ../sc2000-sddat/boot-sequence.o
+ .debug_line    0x00000000000005d7      0x123 ../sc2000-sddat/load_image.o
+ .debug_line    0x00000000000006fa       0x71 ../sc2000-sddat/serial.o
+ .debug_line    0x000000000000076b       0x6d ../sc2000-sddat/lowlevel_init.o
+ .debug_line    0x00000000000007d8        0x0 ../sc2000-sddat/nonsec.o
+ .debug_line    0x00000000000007d8       0x70 ../sc2000-sddat/boot.o
+ .debug_line    0x0000000000000848      0x135 ../sc2000-sddat/romfs.o
+ .debug_line    0x000000000000097d       0xea ../sc2000-sddat/string.o
+ .debug_line    0x0000000000000a67       0x3f ../sc2000-sddat/ctype.o
+ .debug_line    0x0000000000000aa6      0x129 ../sc2000-sddat/utils.o
+ .debug_line    0x0000000000000bcf      0x596 ../sc2000-sddat/sdhci.o
+ .debug_line    0x0000000000001165       0x84 ../sc2000-sddat/f_sdh30_sdhci.o
+ .debug_line    0x00000000000011e9      0x526 ../sc2000-sddat/mmc.o
+ .debug_line    0x000000000000170f       0xf5 ../sc2000-sddat/part_dos.o
+ .debug_line    0x0000000000001804      0x187 ../sc2000-sddat/dtb.o
+ .debug_line    0x000000000000198b      0x179 ../sc2000-sddat/dtb-cfg.o
+ .debug_line    0x0000000000001b04      0x39f ../sc2000-sddat/fat.o
+ .debug_line    0x0000000000001ea3      0x307 ../sc2000-sddat/ext2.o
+ .debug_line    0x00000000000021aa       0x94 ../sc2000-sddat/serial-usio.o
+
+.debug_str      0x0000000000000000     0x1d81
+ .debug_str     0x0000000000000000      0x298 ../sc2000-sddat/cache-cp15.o
+                                        0x2f6 (size before relaxing)
+ .debug_str     0x0000000000000298       0x25 ../sc2000-sddat/cache-pl310.o
+                                        0x1ee (size before relaxing)
+ .debug_str     0x00000000000002bd      0x24a ../sc2000-sddat/cache_v7.o
+                                        0x485 (size before relaxing)
+ .debug_str     0x0000000000000507      0x232 ../sc2000-sddat/boot-sequence.o
+                                        0x454 (size before relaxing)
+ .debug_str     0x0000000000000739      0x109 ../sc2000-sddat/load_image.o
+                                        0x3b1 (size before relaxing)
+ .debug_str     0x0000000000000842       0x42 ../sc2000-sddat/serial.o
+                                        0x21f (size before relaxing)
+ .debug_str     0x0000000000000884       0x20 ../sc2000-sddat/nonsec.o
+                                        0x165 (size before relaxing)
+ .debug_str     0x00000000000008a4       0xb3 ../sc2000-sddat/romfs.o
+                                        0x2d3 (size before relaxing)
+ .debug_str     0x0000000000000957       0x84 ../sc2000-sddat/string.o
+                                        0x26d (size before relaxing)
+ .debug_str     0x00000000000009db       0x26 ../sc2000-sddat/ctype.o
+                                        0x182 (size before relaxing)
+ .debug_str     0x0000000000000a01       0xb6 ../sc2000-sddat/utils.o
+                                        0x32d (size before relaxing)
+ .debug_str     0x0000000000000ab7      0x308 ../sc2000-sddat/sdhci.o
+                                        0x59b (size before relaxing)
+ .debug_str     0x0000000000000dbf       0x3c ../sc2000-sddat/f_sdh30_sdhci.o
+                                        0x2d6 (size before relaxing)
+ .debug_str     0x0000000000000dfb      0x1f8 ../sc2000-sddat/mmc.o
+                                        0x5bd (size before relaxing)
+ .debug_str     0x0000000000000ff3       0x43 ../sc2000-sddat/part_dos.o
+                                        0x296 (size before relaxing)
+ .debug_str     0x0000000000001036       0xaf ../sc2000-sddat/dtb.o
+                                        0x352 (size before relaxing)
+ .debug_str     0x00000000000010e5      0x12f ../sc2000-sddat/dtb-cfg.o
+                                        0x38b (size before relaxing)
+ .debug_str     0x0000000000001214      0x458 ../sc2000-sddat/fat.o
+                                        0x71b (size before relaxing)
+ .debug_str     0x000000000000166c      0x6f0 ../sc2000-sddat/ext2.o
+                                        0xa62 (size before relaxing)
+ .debug_str     0x0000000000001d5c       0x25 ../sc2000-sddat/serial-usio.o
+                                        0x209 (size before relaxing)
+
+.comment        0x0000000000000000       0x2d
+ .comment       0x0000000000000000       0x2d ../sc2000-sddat/cache-cp15.o
+                                         0x2e (size before relaxing)
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/cache-pl310.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/cache_v7.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/boot-sequence.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/load_image.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/serial.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/nonsec.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/romfs.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/string.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/ctype.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/utils.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/sdhci.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/f_sdh30_sdhci.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/mmc.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/part_dos.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/dtb.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/dtb-cfg.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/fat.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/ext2.o
+ .comment       0x000000000000002d       0x2e ../sc2000-sddat/serial-usio.o
+
+.note.GNU-stack
+                0x0000000000000000        0x0
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/cache-cp15.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/cache-pl310.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/cache_v7.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/boot-sequence.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/load_image.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/serial.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/nonsec.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/romfs.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/string.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/ctype.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/utils.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/sdhci.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/f_sdh30_sdhci.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/mmc.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/part_dos.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/dtb.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/dtb-cfg.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/fat.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/ext2.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../sc2000-sddat/serial-usio.o
+
+.ARM.attributes
+                0x0000000000000000       0x3b
+ .ARM.attributes
+                0x0000000000000000       0x3b ../sc2000-sddat/cache-cp15.o
+ .ARM.attributes
+                0x000000000000003b       0x3b ../sc2000-sddat/cache-pl310.o
+ .ARM.attributes
+                0x0000000000000076       0x3b ../sc2000-sddat/cache_v7.o
+ .ARM.attributes
+                0x00000000000000b1       0x2b ../sc2000-sddat/lib1funcs.o
+ .ARM.attributes
+                0x00000000000000dc       0x3b ../sc2000-sddat/boot-sequence.o
+ .ARM.attributes
+                0x0000000000000117       0x3b ../sc2000-sddat/load_image.o
+ .ARM.attributes
+                0x0000000000000152       0x3b ../sc2000-sddat/serial.o
+ .ARM.attributes
+                0x000000000000018d       0x2b ../sc2000-sddat/lowlevel_init.o
+ .ARM.attributes
+                0x00000000000001b8       0x2b ../sc2000-sddat/nonsec_virt.o
+ .ARM.attributes
+                0x00000000000001e3       0x3b ../sc2000-sddat/nonsec.o
+ .ARM.attributes
+                0x000000000000021e       0x2b ../sc2000-sddat/boot.o
+ .ARM.attributes
+                0x0000000000000249       0x3b ../sc2000-sddat/romfs.o
+ .ARM.attributes
+                0x0000000000000284       0x3b ../sc2000-sddat/string.o
+ .ARM.attributes
+                0x00000000000002bf       0x3b ../sc2000-sddat/ctype.o
+ .ARM.attributes
+                0x00000000000002fa       0x3b ../sc2000-sddat/utils.o
+ .ARM.attributes
+                0x0000000000000335       0x3b ../sc2000-sddat/sdhci.o
+ .ARM.attributes
+                0x0000000000000370       0x3b ../sc2000-sddat/f_sdh30_sdhci.o
+ .ARM.attributes
+                0x00000000000003ab       0x3b ../sc2000-sddat/mmc.o
+ .ARM.attributes
+                0x00000000000003e6       0x3b ../sc2000-sddat/part_dos.o
+ .ARM.attributes
+                0x0000000000000421       0x3b ../sc2000-sddat/dtb.o
+ .ARM.attributes
+                0x000000000000045c       0x3b ../sc2000-sddat/dtb-cfg.o
+ .ARM.attributes
+                0x0000000000000497       0x3b ../sc2000-sddat/fat.o
+ .ARM.attributes
+                0x00000000000004d2       0x3b ../sc2000-sddat/ext2.o
+ .ARM.attributes
+                0x000000000000050d       0x3b ../sc2000-sddat/serial-usio.o
+
+.debug_frame    0x0000000000000000      0xda0
+ .debug_frame   0x0000000000000000       0xa8 ../sc2000-sddat/cache-cp15.o
+ .debug_frame   0x00000000000000a8      0x148 ../sc2000-sddat/cache_v7.o
+ .debug_frame   0x00000000000001f0       0xf0 ../sc2000-sddat/boot-sequence.o
+ .debug_frame   0x00000000000002e0       0x54 ../sc2000-sddat/load_image.o
+ .debug_frame   0x0000000000000334       0x70 ../sc2000-sddat/serial.o
+ .debug_frame   0x00000000000003a4       0xa4 ../sc2000-sddat/romfs.o
+ .debug_frame   0x0000000000000448       0xe8 ../sc2000-sddat/string.o
+ .debug_frame   0x0000000000000530      0x184 ../sc2000-sddat/utils.o
+ .debug_frame   0x00000000000006b4      0x148 ../sc2000-sddat/sdhci.o
+ .debug_frame   0x00000000000007fc       0x20 ../sc2000-sddat/f_sdh30_sdhci.o
+ .debug_frame   0x000000000000081c      0x138 ../sc2000-sddat/mmc.o
+ .debug_frame   0x0000000000000954       0x48 ../sc2000-sddat/part_dos.o
+ .debug_frame   0x000000000000099c       0x9c ../sc2000-sddat/dtb.o
+ .debug_frame   0x0000000000000a38       0x50 ../sc2000-sddat/dtb-cfg.o
+ .debug_frame   0x0000000000000a88      0x148 ../sc2000-sddat/fat.o
+ .debug_frame   0x0000000000000bd0      0x190 ../sc2000-sddat/ext2.o
+ .debug_frame   0x0000000000000d60       0x40 ../sc2000-sddat/serial-usio.o
