@@ -12,7 +12,7 @@ SYSTEMD_SERVICE_${PN} = "hostapd.service"
 SYSTEMD_AUTO_ENABLE_${PN} = "disable"
 
 SRC_URI = " \
-    http://w1.fi/releases/hostapd-${PV}.tar.gz \
+    https://source.ipfire.org/source-2.x/hostapd-${PV}.tar.gz \
     file://defconfig \
     file://init \
     file://hostapd.service \
