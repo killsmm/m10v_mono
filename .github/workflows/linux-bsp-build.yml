@@ -25,8 +25,8 @@ jobs:
 
           docker run --rm \
             --user m10v \
-            --workdir /workspace \
-            --volume "$PWD:/workspace" \
+            --workdir /workspace/linux-bsp \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
             --env BB_ENV_EXTRAWHITE="BUILD_VERSION BUILD_DATE" \
             --env BUILD_VERSION \
             --env BUILD_DATE="$(date)" \
