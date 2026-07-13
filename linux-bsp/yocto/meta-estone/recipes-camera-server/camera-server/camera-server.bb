@@ -12,13 +12,10 @@
 LICENSE = "CLOSED"
 LIC_FILES_CHKSUM = ""
 
-SRC_URI = "git://git@gitee.com/zxll111/m10v_camera_server.git;protocol=ssh;branch=main"
+inherit externalsrc
 
-# Modify these as desired
-PV = "1.0+git${SRCPV}"
-SRCREV = "${AUTOREV}"
-
-S = "${WORKDIR}/git"
+EXTERNALSRC = "${M10V_MONOREPO_ROOT}/app/m10v_camera_server"
+PV = "1.0"
 
 
 # NOTE: the following library dependencies are unknown, ignoring: libgroupsock libUsageEnvironment libBasicUsageEnvironment libliveMedia
@@ -31,6 +28,7 @@ S = "${WORKDIR}/git"
 
 
 do_compile(){
+	cd ${S}
 	GO_VERSION=$(go version)
 	bbwarn "hello"
     bbwarn "go verison = ${GO_VERSION}"

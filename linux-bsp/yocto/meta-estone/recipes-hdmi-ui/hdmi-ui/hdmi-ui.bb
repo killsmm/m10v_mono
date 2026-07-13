@@ -12,13 +12,10 @@
 LICENSE = "CLOSED"
 LIC_FILES_CHKSUM = ""
 
-SRC_URI = "git://git@github.com/killsmm/m10v_HDMI_UI.git;protocol=ssh"
+inherit externalsrc
 
-# Modify these as desired
-PV = "1.0+git${SRCPV}"
-SRCREV = "${AUTOREV}"
-
-S = "${WORKDIR}/git"
+EXTERNALSRC = "${M10V_MONOREPO_ROOT}/app/m10v_HDMI_UI"
+PV = "1.0"
 
 
 # NOTE: the following library dependencies are unknown, ignoring: libgroupsock libUsageEnvironment libBasicUsageEnvironment libliveMedia

@@ -12,18 +12,15 @@
 LICENSE = "CLOSED"
 LIC_FILES_CHKSUM = ""
 
-SRC_URI = "git://git@github.com/killsmm/M10v_frontend.git;protocol=ssh;branch=master"
+inherit externalsrc
 
-# Modify these as desired
-PV = "1.0+git${SRCPV}"
-SRCREV = "${AUTOREV}"
-
-S = "${WORKDIR}/git"
+EXTERNALSRC = "${M10V_MONOREPO_ROOT}/app/vue-app"
+PV = "1.0"
 
 do_compile() {
+    cd ${S}
     npm install  @vue/cli
     npm install  @vue/cli-service
-    cd ${S}
     npm run build
 }
 
