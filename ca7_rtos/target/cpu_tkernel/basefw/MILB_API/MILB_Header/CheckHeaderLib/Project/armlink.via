@@ -1,0 +1,9 @@
+--datacompressor=off
+--entry _Reset_Handler
+--info=common,inline,sizes,totals,stack,unused
+--map
+--symbols
+--verbose
+--xref
+--mangled
+--debug

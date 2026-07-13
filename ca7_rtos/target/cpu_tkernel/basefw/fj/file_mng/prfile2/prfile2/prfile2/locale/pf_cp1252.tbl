@@ -1,0 +1,35 @@
+/*
+     Copyright(C) 2006 eSOL Co., Ltd. All rights reserved.
+ 
+     This software is protected by the law and the agreement concerning
+     a Japanese country copyright method, an international agreement,
+     and other intellectual property right and may be used and copied
+     only in accordance with the terms of such license and with the inclusion
+     of the above copyright notice.
+ 
+     This software or any other copies thereof may not be provided
+     or otherwise made available to any other person.  No title to
+     and ownership of the software is hereby transferred.
+ 
+     The information in this software is subject to change without
+     notice and should not be construed as a commitment by eSOL Co.,Ltd.
+ */
+ /****************************************************************************
+ [pf_cp1252.tbl] - CodePage1252(LATIN_1) to/from UNICODE conversion table
+
+    Note that the actual indices for this table are (lead_index-1) and 
+    (tail_index-1) since they are zero-based.
+ ****************************************************************************/
+
+/**********/
+/* CP1252 */
+/**********/
+
+static const PF_WCHAR cp1252_to_unicode[32] =
+{
+    0x20AC, 0     , 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 
+    0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0     , 0x017D, 0     , 
+    0     , 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 
+    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0     , 0x017E, 0x0178
+};
+

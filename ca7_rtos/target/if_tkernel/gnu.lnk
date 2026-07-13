@@ -1,0 +1,72 @@
+/* Define Memories in the system */
+
+MEMORY
+{
+   ROM(rx) : ORIGIN = 0x40008000, LENGTH = 0x00100000
+   RAM(rwx) : ORIGIN = 0x40108000, LENGTH = 0x1FE00000
+}
+
+/* Specify the default entry point to the program */
+
+ENTRY(vector_base)
+
+/* Define the sections, and where they are mapped in memory */
+
+SECTIONS
+{
+.text : {
+   . = ALIGN(0x100);
+   __code_start = .;
+   vector.o(.text)
+   boot.o(.text)
+   icrt0.o(.text)
+   *(.text)
+   *(.text.*)
+   . = ALIGN(4);
+   __code_end = .;
+} > ROM
+
+.rodata : {
+   . = ALIGN(4);
+   __rodata_start = .;
+   *(.rodata)
+   *(.rodata.*)
+   . = ALIGN(4);
+   __rodata_end = .;
+} > ROM
+
+.ARM.exidx : {
+   __exidx_start = .;
+   *(.ARM.exidx*)
+   __exidx_end = .;
+} > ROM
+
+__data_org = .;
+.data : {
+   . = ALIGN(4);
+   __data_start = .;
+   *(.data)
+   *(.data.*)
+   . = ALIGN(4);
+   __data_end = .;
+} > RAM AT> ROM
+
+.bss ALIGN(0x4000) (NOLOAD) : {
+   . = ALIGN(4);
+   __bss_start = .;
+   *(.bss)
+   *(.bss.*)
+   *(COMMON)
+   . = ALIGN(4);
+   __bss_end = .;
+} > RAM
+
+.kernel_memory ALIGN(0x10000) (NOLOAD) : {
+   . = ALIGN(4);
+   __kernel_memory_start = .;
+   . += 0xC000000;
+   __kernel_memory_end = .;
+} > RAM
+
+_end = .;
+}

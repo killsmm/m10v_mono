@@ -1,0 +1,163 @@
+/**
+ * @file		dynamic_scenario.h
+ * @brief		Dynamic scenario mode I/F
+ * @note		None
+ * @attention	None
+ * 
+ * <B><I>Copyright 2015 Socionext Inc.</I></B>
+ */
+
+#ifndef _DYNAMIC_SCENARIO_H_
+#define _DYNAMIC_SCENARIO_H_
+
+#include "ddim_typedef.h"
+
+/*----------------------------------------------------------------------*/
+/* Definition															*/
+/*----------------------------------------------------------------------*/
+#define D_BF_DYNAMIC_SCENARIO_KEY_FILEPATH "I:\\_DYNSNR_.KEY"		// Key File Path
+#define D_BF_DYNAMIC_SCENARIO_ACT_FILEPATH "I:\\DYNSNR%02d.ACT"		// Action File Path Format
+#define D_BF_DYNAMIC_SCENARIO_ACTION_LIMIT (99)						// Limit of Action Count
+
+// Action File Name
+#define D_BF_DYNAMIC_SCENARIO_ACTION_01 (1)		// DYNSNR01.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_02 (2)		// DYNSNR02.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_03 (3)		// DYNSNR03.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_04 (4)		// DYNSNR04.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_05 (5)		// DYNSNR05.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_06 (6)		// DYNSNR06.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_07 (7)		// DYNSNR07.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_08 (8)		// DYNSNR08.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_09 (9)		// DYNSNR09.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_10 (10)	// DYNSNR10.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_11 (11)	// DYNSNR11.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_12 (12)	// DYNSNR12.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_13 (13)	// DYNSNR13.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_14 (14)	// DYNSNR14.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_15 (15)	// DYNSNR15.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_16 (16)	// DYNSNR16.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_17 (17)	// DYNSNR17.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_18 (18)	// DYNSNR18.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_19 (19)	// DYNSNR19.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_20 (20)	// DYNSNR20.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_21 (21)	// DYNSNR21.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_22 (22)	// DYNSNR22.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_23 (23)	// DYNSNR23.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_24 (24)	// DYNSNR24.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_25 (25)	// DYNSNR25.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_26 (26)	// DYNSNR26.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_27 (27)	// DYNSNR27.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_28 (28)	// DYNSNR28.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_29 (29)	// DYNSNR29.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_30 (30)	// DYNSNR30.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_31 (31)	// DYNSNR31.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_32 (32)	// DYNSNR32.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_33 (33)	// DYNSNR33.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_34 (34)	// DYNSNR34.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_35 (35)	// DYNSNR35.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_36 (36)	// DYNSNR36.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_37 (37)	// DYNSNR37.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_38 (38)	// DYNSNR38.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_39 (39)	// DYNSNR39.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_40 (40)	// DYNSNR40.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_41 (41)	// DYNSNR41.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_42 (42)	// DYNSNR42.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_43 (43)	// DYNSNR43.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_44 (44)	// DYNSNR44.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_45 (45)	// DYNSNR45.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_46 (46)	// DYNSNR46.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_47 (47)	// DYNSNR47.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_48 (48)	// DYNSNR48.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_49 (49)	// DYNSNR49.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_50 (50)	// DYNSNR50.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_51 (51)	// DYNSNR51.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_52 (52)	// DYNSNR52.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_53 (53)	// DYNSNR53.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_54 (54)	// DYNSNR54.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_55 (55)	// DYNSNR55.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_56 (56)	// DYNSNR56.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_57 (57)	// DYNSNR57.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_58 (58)	// DYNSNR58.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_59 (59)	// DYNSNR59.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_60 (60)	// DYNSNR60.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_61 (61)	// DYNSNR61.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_62 (62)	// DYNSNR62.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_63 (63)	// DYNSNR63.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_64 (64)	// DYNSNR64.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_65 (65)	// DYNSNR65.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_66 (66)	// DYNSNR66.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_67 (67)	// DYNSNR67.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_68 (68)	// DYNSNR68.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_69 (69)	// DYNSNR69.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_70 (70)	// DYNSNR70.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_71 (71)	// DYNSNR71.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_72 (72)	// DYNSNR72.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_73 (73)	// DYNSNR73.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_74 (74)	// DYNSNR74.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_75 (75)	// DYNSNR75.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_76 (76)	// DYNSNR76.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_77 (77)	// DYNSNR77.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_78 (78)	// DYNSNR78.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_79 (79)	// DYNSNR79.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_80 (80)	// DYNSNR80.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_81 (81)	// DYNSNR81.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_82 (82)	// DYNSNR82.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_83 (83)	// DYNSNR83.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_84 (84)	// DYNSNR84.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_85 (85)	// DYNSNR85.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_86 (86)	// DYNSNR86.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_87 (87)	// DYNSNR87.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_88 (88)	// DYNSNR88.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_89 (89)	// DYNSNR89.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_90 (90)	// DYNSNR90.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_91 (91)	// DYNSNR91.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_92 (92)	// DYNSNR92.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_93 (93)	// DYNSNR93.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_94 (94)	// DYNSNR94.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_95 (95)	// DYNSNR95.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_96 (96)	// DYNSNR96.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_97 (97)	// DYNSNR97.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_98 (98)	// DYNSNR98.ACT
+#define D_BF_DYNAMIC_SCENARIO_ACTION_99 (99)	// DYNSNR99.ACT
+
+/*----------------------------------------------------------------------*/
+/* Enumeration															*/
+/*----------------------------------------------------------------------*/
+/* Nothing Special */
+
+/*----------------------------------------------------------------------*/
+/* Structure															*/
+/*----------------------------------------------------------------------*/
+/* Nothing Special */
+
+/*----------------------------------------------------------------------*/
+/* Global Data															*/
+/*----------------------------------------------------------------------*/
+/* Nothing Special */
+
+/*----------------------------------------------------------------------*/
+/* Macro																*/
+/*----------------------------------------------------------------------*/
+/* Nothing Special */
+
+/*----------------------------------------------------------------------*/
+/* Function																*/
+/*----------------------------------------------------------------------*/
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Dynamic Scenario Load
+INT32 BF_Dynamic_Scenario( VOID );
+
+// Action Status Check
+INT32 BF_Dynamic_Scenario_Is_Enable( UINT32 action_no );
+
+// Action Status Set
+INT32 BF_Dynamic_Scenario_Set_Status( UINT32 action_no, UINT32 status );
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif	// _DYNAMIC_SCENARIO_H_

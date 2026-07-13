@@ -1,0 +1,121 @@
+led.o: led.c
+excep_ints.o: excep_ints.c \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_typedef.h \
+ porting.h
+tkdev_timer.o: tkdev_timer.c \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_typedef.h \
+ porting.h \
+ ../cpu_tkernel/basefw/fj/utility/os_tools/include/task_monitor.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h
+icrt0.o: icrt0.S porting.h
+porting.o: porting.c \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_platform.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_typedef.h \
+ porting.h
+boot.o: boot.S porting.h
+udelay.o: udelay.S
+vector.o: vector.S porting.h
+putc.o: putc.S
+TKernel_id.o: tk_usercustom/src/TKernel_id.c \
+ tk_usercustom/include/TKernel_id.h
+interrupt_set.o: tk_usercustom/src/interrupt_set.c \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_cfg_label.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_typedef.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_syscall.h \
+ tk_usercustom/include/interrupt_set.h \
+ tk_usercustom/include/os_user_custom.h \
+ tk_usercustom/include/../../../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ tk_usercustom/include/TKernel_id.h
+os_resource_id.o: tk_usercustom/src/os_resource_id.c \
+ tk_usercustom/include/TKernel_id.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_user_custom.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/mw_user_custom.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/../../include/media.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_media.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_custom.h
+newlib_getreent.o: ../../lib/newlib_getreent.c \
+ ../../lib/../target/if_tkernel/porting.h ../../lib/libcsupport.h
+newlib_syscalls.o: ../../lib/newlib_syscalls.c ../../lib/libcsupport.h
+usermain.o: tk_usercustom/src/usermain.c \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_cfg_label.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_syscall.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_typedef.h \
+ tk_usercustom/include/TKernel_id.h tk_usercustom/include/TKernel_id2.h \
+ tk_usercustom/include/os_user_custom.h \
+ tk_usercustom/include/../../../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ tk_usercustom/include/TKernel_id.h tk_usercustom/include/interrupt_set.h \
+ ../cpu_tkernel/board/sdram/include/sdram_map_define.h
+newlib_syscalls_r.o: ../../lib/newlib_syscalls_r.c \
+ ../../lib/libcsupport.h
+os_user_custom.o: tk_usercustom/src/os_user_custom.c \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_cfg_label.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_syslib_depend.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_typedef.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_syscall.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_dbgspt.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_segment.h \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_errno.h \
+ tk_usercustom/src/../../porting.h tk_usercustom/include/os_user_custom.h \
+ tk_usercustom/include/../../../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ tk_usercustom/include/TKernel_id.h
+kernel_cfg.o: ../../config/kernel_cfg.c \
+ C:/Users/zhouxinliang/Documents/_SoftwareProjects/GB_PF_Source_v2_4_0_20210420/CA7_RTOS/include/mptk_typedef.h
+os_resource_id.o: tk_usercustom/src/os_resource_id.c \
+ tk_usercustom/include/TKernel_id.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_user_custom.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/mw_user_custom.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/../../include/media.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_media.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_custom.h
+os_resource_id.o: tk_usercustom/src/os_resource_id.c \
+ tk_usercustom/include/TKernel_id.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_user_custom.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/mw_user_custom.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/../../include/media.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_media.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_custom.h
+os_resource_id.o: tk_usercustom/src/os_resource_id.c \
+ tk_usercustom/include/TKernel_id.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_user_custom.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/mw_user_custom.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/../../include/media.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_media.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_custom.h
+os_resource_id.o: tk_usercustom/src/os_resource_id.c \
+ tk_usercustom/include/TKernel_id.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_user_custom.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/mw_user_custom.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/../../include/media.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_media.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_custom.h
+os_resource_id.o: tk_usercustom/src/os_resource_id.c \
+ tk_usercustom/include/TKernel_id.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_user_custom.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/mw_user_custom.h \
+ ../cpu_tkernel/basefw/fj/file_mng/media_driver/include/../../include/media.h \
+ ../cpu_tkernel/basefw/MILB_API/include/ddim_typedef.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_media.h \
+ ../cpu_tkernel/basefw/include/fj_std.h \
+ ../cpu_tkernel/basefw/include/fj_custom.h

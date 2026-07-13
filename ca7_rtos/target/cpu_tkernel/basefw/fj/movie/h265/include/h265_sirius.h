@@ -1,0 +1,382 @@
+/**
+ * @file		h265_sirius.h
+ * @brief		H.265 SIRIUS function Header.
+ * @note		None
+ * @attention	None
+ * 
+ * <B><I>Copyright 2015 Socionext Inc.</I></B>
+ */
+
+#ifndef _H265_SIRIUS_H_
+#define _H265_SIRIUS_H_
+
+#include "h265_movie.h"
+#include "sr.h"
+
+/*----------------------------------------------------------------------*/
+/* Definition															*/
+/*----------------------------------------------------------------------*/
+// SIRIUS Wait Time
+#define D_H265_SIRIUS_BOOT_TIMEOUT					(1000)
+#define D_H265_SIRIUS_START_TIMEOUT					(1000)
+#define D_H265_SIRIUS_STOP_TIMEOUT					(1000)
+
+// Definition of a fixed size of SIRIUS setting.
+#define D_H265_SIRIUS_BRIDGE_PARAM_SIZE				(SDRAM_SIZ_MOVIE_PLAY_H265_PARAM)	// 1Mbyte
+#define D_H265_SIRIUS_BRIDGE_COLPIC_SIZE			(SDRAM_SIZ_MOVIE_PLAY_H265_COLPIC)	// 1.125Mbyte
+#define D_H265_SIRIUS_BRIDGE_COMMON_SIZE_2GB		(0x80000000)
+#define D_H265_SIRIUS_BRIDGE_COMMON_SIZE_1_5GB		(0x60000000)
+#define D_H265_SIRIUS_BRIDGE_COMMON_SIZE_1GB		(0x40000000)
+#define D_H265_SIRIUS_BRIDGE_COMMON_SIZE_512MB		(0x20000000)
+#define D_H265_SIRIUS_BRIDGE_COMMON_SIZE_256MB		(0x10000000)
+
+// --- REMOVE_ES_COMPILE_OPT BEGIN ---
+#ifdef CO_ES1_HARDWARE
+// --- REMOVE_ES_COMPILE_OPT END ---
+// --- REMOVE_ES1_HARDWARE BEGIN ---
+// Table Number
+#define D_H265_SIRIUS_FM_EMPTY_FIFO_MAX_NUM			(ENC_FM_NUM)
+
+// Y/C or dpb bank size
+// ENC
+// NHD map
+// 960p:1280x960
+// 720p:1280x720
+// 480p: 848x480
+#define D_H265_ENC_MAP_MODE_NHD_NUM			(SR_ENCODE_MODE_0)
+#define D_H265_ENC_MAP_MODE_NHD_WIDTH		(1280)
+#define D_H265_ENC_MAP_MODE_NHD_Y_LINES		(960)
+#define D_H265_ENC_MAP_MODE_NHD_C_LINES		(480)
+#define D_H265_ENC_MAP_MODE_NHD_Y_BANK		0x0012C000
+#define D_H265_ENC_MAP_MODE_NHD_C_BANK		0x00098000
+
+// HD map
+// 1.5K(1:1):1504x1504
+// 1.4K(4:3):1920x1440
+// 1080p:1920x1080
+#define D_H265_ENC_MAP_MODE_HD_NUM			(SR_ENCODE_MODE_1)
+#define D_H265_ENC_MAP_MODE_HD_WIDTH		(1920)
+#define D_H265_ENC_MAP_MODE_HD_Y_LINES		(1504)
+#define D_H265_ENC_MAP_MODE_HD_C_LINES		(768)
+#define D_H265_ENC_MAP_MODE_HD_Y_BANK		0x002D0000
+#define D_H265_ENC_MAP_MODE_HD_C_BANK		0x00168000
+
+// 4K2K map
+// 4K Cinema:4096x2160
+// 4K:3840x2160
+// 2.7K(16:9): 2704x1520
+// 2.7K(4:3): 2704x2028
+// 2.5K(4:3): 2560x1920
+#define D_H265_ENC_MAP_MODE_4K2K_NUM		(SR_ENCODE_MODE_2)
+#define D_H265_ENC_MAP_MODE_4K2K_WIDTH		(4096)
+#define D_H265_ENC_MAP_MODE_4K2K_Y_LINES	(2176)
+#define D_H265_ENC_MAP_MODE_4K2K_C_LINES	(1088)
+#define D_H265_ENC_MAP_MODE_4K2K_Y_BANK		0x00880000
+#define D_H265_ENC_MAP_MODE_4K2K_C_BANK		0x00440000
+
+// 3K map
+// 3Kx3K(1:1):3000x3000
+#define D_H265_ENC_MAP_MODE_3K_NUM			(SR_ENCODE_MODE_3)
+#define D_H265_ENC_MAP_MODE_3K_WIDTH		(3072)
+#define D_H265_ENC_MAP_MODE_3K_Y_LINES		(3008)
+#define D_H265_ENC_MAP_MODE_3K_C_LINES		(1504)
+#define D_H265_ENC_MAP_MODE_3K_Y_BANK		0x008d0000
+#define D_H265_ENC_MAP_MODE_3K_C_BANK		0x00468000
+
+// 4K3K map
+// 4K3K:4000x3000
+#define D_H265_ENC_MAP_MODE_4K3K_NUM		(SR_ENCODE_MODE_4)
+#define D_H265_ENC_MAP_MODE_4K3K_WIDTH		(4096)
+#define D_H265_ENC_MAP_MODE_4K3K_Y_LINES	(3008)
+#define D_H265_ENC_MAP_MODE_4K3K_C_LINES	(1504)
+#define D_H265_ENC_MAP_MODE_4K3K_Y_BANK		0x00BC0000
+#define D_H265_ENC_MAP_MODE_4K3K_C_BANK		0x005E0000
+
+// 6K3K map
+// 6K:6000x3000
+#define D_H265_ENC_MAP_MODE_6K3K_NUM		(SR_ENCODE_MODE_5)
+#define D_H265_ENC_MAP_MODE_6K3K_WIDTH		(6016)
+#define D_H265_ENC_MAP_MODE_6K3K_Y_LINES	(3008)
+#define D_H265_ENC_MAP_MODE_6K3K_C_LINES	(1504)
+#define D_H265_ENC_MAP_MODE_6K3K_Y_BANK		0x01144000
+#define D_H265_ENC_MAP_MODE_6K3K_C_BANK		0x008A4000
+// --- REMOVE_ES1_HARDWARE END ---
+// --- REMOVE_ES_COMPILE_OPT BEGIN ---
+#endif // CO_ES1_HARDWARE
+// --- REMOVE_ES_COMPILE_OPT END ---
+
+// DEC
+// NHD map
+// 960p:1280x960
+// 720p:1280x720
+// 480p: 848x480
+#define D_H265_DEC_MAP_MODE_NHD_NUM			(SR_DECODE_MODE_0)
+#define D_H265_DEC_MAP_MODE_NHD_WIDTH		(1280)
+#define D_H265_DEC_MAP_MODE_NHD_Y_LINES		(960)
+#define D_H265_DEC_MAP_MODE_NHD_C_LINES		(480)
+#define D_H265_DEC_MAP_MODE_NHD_Y_BANK		0x0012C000
+#define D_H265_DEC_MAP_MODE_NHD_C_BANK		0x00098000
+
+// 1080p map
+// 1080p:1920x1080
+#define D_H265_DEC_MAP_MODE_1080P_NUM			(SR_DECODE_MODE_1)
+#define D_H265_DEC_MAP_MODE_1080P_WIDTH			(1920)
+#define D_H265_DEC_MAP_MODE_1080P_Y_LINES		(1088)
+#define D_H265_DEC_MAP_MODE_1080P_C_LINES		(544)
+#define D_H265_DEC_MAP_MODE_1080P_Y_BANK		0x00200000
+#define D_H265_DEC_MAP_MODE_1080P_C_BANK		0x00100000
+
+// HD map
+// 1.5K(1:1):1504x1504
+// 1.4K(4:3):1920x1440
+#define D_H265_DEC_MAP_MODE_HD_NUM				(SR_DECODE_MODE_2)
+#define D_H265_DEC_MAP_MODE_HD_WIDTH			(1920)
+#define D_H265_DEC_MAP_MODE_HD_Y_LINES			(1504)
+#define D_H265_DEC_MAP_MODE_HD_C_LINES			(768)
+#define D_H265_DEC_MAP_MODE_HD_Y_BANK			0x002D0000
+#define D_H265_DEC_MAP_MODE_HD_C_BANK			0x00168000
+
+// 2.7K(16:9) map
+// 2.7K(16:9): 2704x1520
+#define D_H265_DEC_MAP_MODE_2_7K_16_9_NUM		(SR_DECODE_MODE_3)
+#define D_H265_DEC_MAP_MODE_2_7K_16_9_WIDTH		(2816)
+#define D_H265_DEC_MAP_MODE_2_7K_16_9_Y_LINES	(1536)
+#define D_H265_DEC_MAP_MODE_2_7K_16_9_C_LINES	(768)
+#define D_H265_DEC_MAP_MODE_2_7K_16_9_Y_BANK	0x00420000
+#define D_H265_DEC_MAP_MODE_2_7K_16_9_C_BANK	0x00210000
+
+// 2.7K(4:3) map
+// 2.7K(4:3): 2704x2028
+// 2.5K(4:3): 2560x1920
+#define D_H265_DEC_MAP_MODE_2_7K_4_3_NUM		(SR_DECODE_MODE_4)
+#define D_H265_DEC_MAP_MODE_2_7K_4_3_WIDTH		(2816)
+#define D_H265_DEC_MAP_MODE_2_7K_4_3_Y_LINES	(2048)
+#define D_H265_DEC_MAP_MODE_2_7K_4_3_C_LINES	(1024)
+#define D_H265_DEC_MAP_MODE_2_7K_4_3_Y_BANK		0x00580000
+#define D_H265_DEC_MAP_MODE_2_7K_4_3_C_BANK		0x002C0000
+
+// 4K map
+// 4K:3840x2160
+#define D_H265_DEC_MAP_MODE_4K_NUM				(SR_DECODE_MODE_5)
+#define D_H265_DEC_MAP_MODE_4K_WIDTH			(3840)
+#define D_H265_DEC_MAP_MODE_4K_Y_LINES			(2176)
+#define D_H265_DEC_MAP_MODE_4K_C_LINES			(1088)
+#define D_H265_DEC_MAP_MODE_4K_Y_BANK			0x007F8000
+#define D_H265_DEC_MAP_MODE_4K_C_BANK			0x003FC000
+
+// 4KCinema map
+// 4K Cinema:4096x2160
+#define D_H265_DEC_MAP_MODE_4K_CINEMA_NUM		(SR_DECODE_MODE_6)
+#define D_H265_DEC_MAP_MODE_4K_CINEMA_WIDTH		(4096)
+#define D_H265_DEC_MAP_MODE_4K_CINEMA_Y_LINES	(2176)
+#define D_H265_DEC_MAP_MODE_4K_CINEMA_C_LINES	(1088)
+#define D_H265_DEC_MAP_MODE_4K_CINEMA_Y_BANK	0x00880000
+#define D_H265_DEC_MAP_MODE_4K_CINEMA_C_BANK	0x00440000
+
+// 3K map
+// 3Kx3K(1:1):3000x3000
+#define D_H265_DEC_MAP_MODE_3K_NUM				(SR_DECODE_MODE_7)
+#define D_H265_DEC_MAP_MODE_3K_WIDTH			(3072)
+#define D_H265_DEC_MAP_MODE_3K_Y_LINES			(3008)
+#define D_H265_DEC_MAP_MODE_3K_C_LINES			(1504)
+#define D_H265_DEC_MAP_MODE_3K_Y_BANK			0x008d0000
+#define D_H265_DEC_MAP_MODE_3K_C_BANK			0x00468000
+
+// 4K3K map
+// 4K3K:4000x3000
+#define D_H265_DEC_MAP_MODE_4K3K_NUM			(SR_DECODE_MODE_8)
+#define D_H265_DEC_MAP_MODE_4K3K_WIDTH			(4096)
+#define D_H265_DEC_MAP_MODE_4K3K_Y_LINES		(3008)
+#define D_H265_DEC_MAP_MODE_4K3K_C_LINES		(1504)
+#define D_H265_DEC_MAP_MODE_4K3K_Y_BANK			0x00BC0000
+#define D_H265_DEC_MAP_MODE_4K3K_C_BANK			0x005E0000
+
+// 6K3K map
+// 6K:6000x3000
+#define D_H265_DEC_MAP_MODE_6K3K_NUM			(SR_DECODE_MODE_9)
+#define D_H265_DEC_MAP_MODE_6K3K_WIDTH			(6016)
+#define D_H265_DEC_MAP_MODE_6K3K_Y_LINES		(3008)
+#define D_H265_DEC_MAP_MODE_6K3K_C_LINES		(1504)
+#define D_H265_DEC_MAP_MODE_6K3K_Y_BANK			0x01144000
+#define D_H265_DEC_MAP_MODE_6K3K_C_BANK			0x008A4000
+
+
+// --- REMOVE_ES_COMPILE_OPT BEGIN ---
+#ifdef CO_ES1_HARDWARE
+// --- REMOVE_ES_COMPILE_OPT END ---
+// --- REMOVE_ES1_HARDWARE BEGIN ---
+// y/c or dpb compression mode
+#define D_H265_MAP_COMPRESS_ON			(1)		// for LossLess compression
+#define D_H265_MAP_COMPRESS_OFF			(0)		// for throuh
+
+// compression table size
+#define D_H265_MAP_SIZE_COMPRESSION_Y	(18*1024)
+#define D_H265_MAP_SIZE_COMPRESSION_C	(9*1024)
+
+// encbufy/encbufc bank num
+#define D_H265_MAP_ENCBUFY_BANK_NUM		(ENC_FM_NUM)
+#define D_H265_MAP_ENCBUFC_BANK_NUM		(ENC_FM_NUM)
+
+// dpb bank num
+#define D_H265_MAP_DPB_BANK_NUM			(5)
+// --- REMOVE_ES1_HARDWARE END ---
+// --- REMOVE_ES_COMPILE_OPT BEGIN ---
+#endif // CO_ES1_HARDWARE
+// --- REMOVE_ES_COMPILE_OPT END ---
+
+// support size
+// FHD (1920x1080)
+#define D_H265_MAP_SIZE_FHD_CODEC_WIDTH				(1920)
+#define D_H265_MAP_SIZE_FHD_CODEC_LINES				(1080)
+
+// 1440(1440x1080)
+#define D_H265_MAP_SIZE_1440_CODEC_WIDTH			(1440)
+#define D_H265_MAP_SIZE_1440_CODEC_LINES			(1080)
+
+// 1440P(1920x1440)
+#define D_H265_MAP_SIZE_1440P_CODEC_WIDTH			(1920)
+#define D_H265_MAP_SIZE_1440P_CODEC_LINES			(1440)
+
+// HD(1280x720)
+#define D_H265_MAP_SIZE_HD_CODEC_WIDTH				(1280)
+#define D_H265_MAP_SIZE_HD_CODEC_LINES				(720)
+
+// SD-NTSC(720x480)
+#define D_H265_MAP_SIZE_SD_NTSC_CODEC_WIDTH			(720)
+#define D_H265_MAP_SIZE_SD_NTSC_CODEC_LINES			(480)
+
+// SD-PAL(720x576)
+#define D_H265_MAP_SIZE_SD_PAL_CODEC_WIDTH			(720)
+#define D_H265_MAP_SIZE_SD_PAL_CODEC_LINES			(576)
+
+// VGA(640x480)
+#define D_H265_MAP_SIZE_VGA_CODEC_WIDTH				(640)
+#define D_H265_MAP_SIZE_VGA_CODEC_LINES				(480)
+
+// QVGA(320x240)
+#define D_H265_MAP_SIZE_QVGA_CODEC_WIDTH			(320)
+#define D_H265_MAP_SIZE_QVGA_CODEC_LINES			(240)
+
+// SXVGA(1280x960)
+#define D_H265_MAP_SIZE_SXVGA_CODEC_WIDTH			(1280)
+#define D_H265_MAP_SIZE_SXVGA_CODEC_LINES			(960)
+
+// HVGAW(640x360)
+#define D_H265_MAP_SIZE_HVGAW_CODEC_WIDTH			(640)
+#define D_H265_MAP_SIZE_HVGAW_CODEC_LINES			(360)
+
+// FWVGA(848x480)
+#define D_H265_MAP_SIZE_FWVGA_CODEC_WIDTH			(848)
+#define D_H265_MAP_SIZE_FWVGA_CODEC_LINES			(480)
+
+// FWQVGA(432x240)
+#define D_H265_MAP_SIZE_FWQVGA_CODEC_WIDTH			(432)
+#define D_H265_MAP_SIZE_FWQVGA_CODEC_LINES			(240)
+
+// 4K2K(16:9)(4096x2304)
+#define D_H265_MAP_SIZE_4K2K_16_9_CODEC_WIDTH		(4096)
+#define D_H265_MAP_SIZE_4K2K_16_9_CODEC_LINES		(2304)
+
+// 4K2K(1.90:1)(4096x2160)
+#define D_H265_MAP_SIZE_4K2K_1_9_1_CODEC_WIDTH		(4096)
+#define D_H265_MAP_SIZE_4K2K_1_9_1_CODEC_LINES		(2160)
+
+// 4K2K(2:1)(4096x2048)
+#define D_H265_MAP_SIZE_4K2K_2_1_CODEC_WIDTH		(4096)
+#define D_H265_MAP_SIZE_4K2K_2_1_CODEC_LINES		(2048)
+
+// 4K2K(QFHD)(3840x2160)
+#define D_H265_MAP_SIZE_4K2K_QFHD_CODEC_WIDTH		(3840)
+#define D_H265_MAP_SIZE_4K2K_QFHD_CODEC_LINES		(2160)
+
+// 2.7K(4:3)(2704x2028)
+#define D_H265_MAP_SIZE_2_7K_4_3_CODEC_WIDTH		(2704)
+#define D_H265_MAP_SIZE_2_7K_4_3_CODEC_LINES		(2028)
+
+// 2.7K(16:9)(2704x1520)
+#define D_H265_MAP_SIZE_2_7K_16_9_CODEC_WIDTH		(2704)
+#define D_H265_MAP_SIZE_2_7K_16_9_CODEC_LINES		(1520)
+
+// 2.7K(1.90:1)(2880x1524)
+#define D_H265_MAP_SIZE_2_7K_1_9_1_CODEC_WIDTH		(2880)
+#define D_H265_MAP_SIZE_2_7K_1_9_1_CODEC_LINES		(1524)		// for 1528
+
+
+
+/*----------------------------------------------------------------------*/
+/* Function Prototype Definition										*/
+/*----------------------------------------------------------------------*/
+VOID H265_Sirius_dummy_system_inHandler( VOID );
+// --- REMOVE_ES_COMPILE_OPT BEGIN ---
+#ifdef CO_ES1_HARDWARE
+// --- REMOVE_ES_COMPILE_OPT END ---
+// --- REMOVE_ES1_HARDWARE BEGIN ---
+VOID H265_Sirius_dummy_enc_inHandler( VOID );
+// --- REMOVE_ES1_HARDWARE END ---
+// --- REMOVE_ES_COMPILE_OPT BEGIN ---
+#endif // CO_ES1_HARDWARE
+// --- REMOVE_ES_COMPILE_OPT END ---
+VOID H265_Sirius_dummy_dec_inHandler( VOID );
+VOID H265_Sirius_Cont_Process( VOID );
+
+VOID H265_Sirius_Clock_Stop( VOID );
+
+INT32 H265_Sirius_Initialize( UINT32 mode, T_SR_BRIDGE_MAP_PARAM *bridge_map );
+VOID  H265_Sirius_Finalize( VOID );
+
+// --- REMOVE_ES_COMPILE_OPT BEGIN ---
+#ifdef CO_ES1_HARDWARE
+// --- REMOVE_ES_COMPILE_OPT END ---
+// --- REMOVE_ES1_HARDWARE BEGIN ---
+INT32 H265_Sirius_Enc_Start( UINT32 ch, T_SR_ENC_INITPARAM* initparam, T_SR_ENC_FM_TABLE *fmtable );
+INT32 H265_Sirius_Enc_Stop( UINT32 ch );
+INT32 H265_Sirius_Enc_Fm_Free_Get( UINT32 ch, T_SR_ENC_FM_TABLE *fmtable );
+INT32 H265_Sirius_Enc_Frame( UINT32 ch, T_SR_ENC_PARAM *vecparam, T_SR_ENC_FM_TABLE *fmtable );
+INT32 H265_Sirius_Enc_Veb_Info_Set( UINT32 ch, UINT32 picture_size );
+INT32 H265_Sirius_Enc_Frame_Info_Get( UINT32 ch, T_SR_ENC_VINFO *vinfo );
+
+VOID H265_Sirius_Enc_Fm_Empty_Init( UINT32 ch );
+INT32 H265_Sirius_Enc_Fm_Empty_Field_Set( UINT32 ch, UINT32 empty_index );
+INT32 H265_Sirius_Enc_Fm_Empty_Field_Get( UINT32 ch, UINT32* empty_index );
+// --- REMOVE_ES1_HARDWARE END ---
+// --- REMOVE_ES_COMPILE_OPT BEGIN ---
+#endif // CO_ES1_HARDWARE
+// --- REMOVE_ES_COMPILE_OPT END ---
+
+INT32 H265_Sirius_Dec_Start( UINT32 mode );
+INT32 H265_Sirius_Dec_Stop( VOID );
+INT32 H265_Sirius_Dec_Frame( T_SR_DEC_PICTURE_INFO *picture_info, UINT32 *alloc_result );
+INT32 H265_Sirius_Dec_Frame_Alloc( T_SR_FM_OUT_INFO *fminfo, UINT32 *alloc_result );
+INT32 H265_Sirius_Dec_Frame_Keepid( UINT32 id );
+INT32 H265_Sirius_Dec_Frame_Free( UINT32 id );
+
+
+#define H265_Sirius_Power_Set		HEVC_Sirius_Power_Set
+#define H265_Sirius_Reset_Set		HEVC_Sirius_Reset_Set
+#define H265_Sirius_Clock_Set		HEVC_Sirius_Clock_Set
+#define H265_Sirius_DSB				HEVC_Sirius_DSB
+#define H265_Sirius_Memory_Read		HEVC_Sirius_READ
+#define H265_Sirius_Memory_Write	HEVC_Sirius_WRITE
+#define H265_Sirius_Clean			HEVC_Sirius_Clean
+#define H265_Sirius_Flush			HEVC_Sirius_Flush
+
+#define H265_Sirius_Dpd				HEVC_Sirius_Dpd
+#define H265_Sirius_Dpe				HEVC_Sirius_Dpe
+
+#define H265_Sirius_BootFirm_Download	HEVC_Sirius_BootFirm_Download
+#define H265_Sirius_UcodeFirm_Download	HEVC_Sirius_UcodeFirm_Download
+
+
+
+VOID H265_Sirius_Power_Set( UCHAR arg );
+VOID H265_Sirius_Reset_Set( UCHAR arg );
+VOID H265_Sirius_Clock_Set( UCHAR arg );
+VOID H265_Sirius_DSB( VOID );
+UINT32 H265_Sirius_Memory_Read( UINT32 address );
+VOID H265_Sirius_Memory_Write( UINT32 address, UINT32 data );
+VOID H265_Sirius_Clean( UINT32 address, UINT32 size );
+VOID H265_Sirius_Flush( UINT32 address, UINT32 size );
+UINT32 H265_Sirius_Dpd( VOID );
+VOID H265_Sirius_Dpe( UINT32 status);
+
+#endif

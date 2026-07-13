@@ -12,13 +12,10 @@
 LICENSE = "CLOSED"
 LIC_FILES_CHKSUM = ""
 
-SRC_URI = "git://git@github.com/killsmm/M10V-CA7-RTOS.git;protocol=ssh;branch=main"
+inherit externalsrc
 
-# Modify these as desired
-PV = "1.0+git${SRCPV}"
-SRCREV = "${AUTOREV}"
-
-S = "${WORKDIR}/git"
+EXTERNALSRC = "${M10V_MONOREPO_ROOT}/ca7_rtos"
+PV = "1.0"
 
 
 # NOTE: the following library dependencies are unknown, ignoring: libgroupsock libUsageEnvironment libBasicUsageEnvironment libliveMedia
@@ -65,4 +62,4 @@ do_install(){
 FILES_${PN} += "compiled_rtos_githash"
 
 addtask deploy after do_compile
-addtask prepare before do_fetch 
+addtask prepare before do_fetch

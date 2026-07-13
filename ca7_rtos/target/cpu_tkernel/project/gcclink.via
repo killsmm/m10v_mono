@@ -1,0 +1,1 @@
+GCCLINK_VIA := --entry _Reset_Handler

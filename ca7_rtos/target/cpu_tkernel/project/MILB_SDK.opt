@@ -1,0 +1,95 @@
+MILB_OPT :=
+MILB_OPT += -D CO_SD_AUTO_MOUNT_FOR_TKERNEL_VERSION		# SD card automount(for T-Kernel only build.)
+MILB_OPT += -D CO_LCD_ENABLE							# LCD enable
+MILB_OPT += -D CO_LENS_NOT_DRIVE						# for debug without sensor-board
+MILB_OPT += -D CO_AUTO_MODE_CHANGE_ON				# Auto Mode Change
+#MILB_OPT += -D CO_PROCESSOR_MODE_AMP					# AMP Mode
+MILB_OPT += -D CO_WAIT_FOR_INTERRUPT_ON				# Low Power Mode
+MILB_OPT += -D "UART_CTRL_CH=2"						# for Realos UART
+MILB_OPT += -D CO_BF_STARTUP_ENABLE_ERROR_INT		# Enable HIF/VLD's Error interrupt
+#MILB_OPT += -D CO_ASSERT_LOG_ON						# Assert Log
+MILB_OPT += -D CO_MEASURE_TIMER						# Measure Timer
+# --- REMOVE_MBA BEGIN ---
+MILB_OPT += -D CO_DEBUG_MBALOG_ON					# MBA Log for All(incl. Host)
+MILB_OPT += -D CO_BF_MBALOG_ON						# MBA Log for BaseFW only
+MILB_OPT += -D CO_DEBUG_MBALOG_OVERWRITE				# MBA Log overwrite
+# --- REMOVE_MBA END ---
+#MILB_OPT += -D CO_DISPATCH_CHECK_ON					# Dispatch Log
+#MILB_OPT += -D CO_TASK_MONITOR_ON					# Task Monitor
+#MILB_OPT += -D CO_HEAP_MONITOR_ON					# Heap Monitor
+#MILB_OPT += -D CO_MXIC_MONITOR_ON					# MXIC Monitor
+MILB_OPT += -D CO_PMU_MONITOR_ON					# PMU Monitor
+MILB_OPT += -D CO_SDRAMC_MONITOR_ON					# SDRAMC Monitor
+MILB_OPT += -D CO_MPROFILE_ON						# Mprofile Monitor
+#MILB_OPT += -D "CO_DSP_MODE=0"						# DSP Mode(0:load from NF, 1:load from SD[debug])
+#MILB_OPT += -D CO_ASV_SET							# ASV SET
+#MILB_OPT += -D CO_WITHOUT_LINUX						# for Realos Host Test without Linux
+MILB_OPT += -D CO_4K2K_QFHD							# Use QFHD(3840x2160) Size
+#MILB_OPT += -D CO_4K2K_2_1							# Use 2:1(4096x2048) Size
+MILB_OPT += -D CO_REALOS_FILE_DEBUG_ON				# File Save to SD by Realos(surveillance camera Debug)
+#MILB_OPT += -D CO_MEASURE_BOOTUP_TIME				# Measure BootUp Time
+# --- REMOVE_DCF_EXIF BEGIN ---
+MILB_OPT += -D CO_DCF_EXIF_ON						# DCF Exif Function
+# --- REMOVE_DCF_EXIF END ---
+MILB_OPT += -D CO_GYRO_SAMPLERATE_8KHZ				# Gyro Sampling rate 8KHz
+#MILB_OPT += -D CO_POWER_MEASUREMENT					# for Power measurement
+# --- REMOVE_ES_COMPILE_OPT BEGIN ---
+MILB_OPT += -D CO_SUPPORT_30FPS						# 30fps feature (for General)
+MILB_OPT += -D CO_SUPPORT_60FPS						# 60fps feature
+# --- REMOVE_ES_COMPILE_OPT END ---
+MILB_OPT += -D CO_IQBIN_GENERAL						# General IQ.bin format. (REMOVE_IQBIN_GENERAL REMOVE)
+MILB_OPT += -D CO_IQBIN_NUM_LIMIT					# Number restriction of IQ.bin.
+#MILB_OPT += -D CO_DBG_FILL_STACK					# Stack memory fill when boot time. (fill data: 0xEE)
+#MILB_OPT += -D CO_DBG_TASK_TRACE					# Trace active task ID. (variable g_bf_task_trace_cur_info and g_bf_task_trace_task_info.)
+#MILB_OPT += -D CO_READOUT_SOFT_TIMESTAMP			# Readout timestamp of sensor is calculated by software
+#MILB_OPT += -D CO_R2Y_2ND_VGA_OUT					# VGA out from R2Y YYW1ch
+#MILB_OPT += -D CO_R2Y_2ND_OUT_SIZE=640					# 640/960/1280 out from R2Y YYW1ch
+MILB_OPT += -D D_COM_BUF_FOR_TERMINAL				# Linux-RTOS UART on USB
+#MILB_OPT += -D CO_DISABLE_PRINT_IN_INTERRUPT		# Stop print in interrupt
+# --- REMOVE_VIEW_DEMO BEGIN --
+#MILB_OPT += -D CO_VIEW_DEMO_ON				# View Demo
+# --- REMOVE_VIEW_DEMO END --
+#MILB_OPT += -D CO_IM_TUNING_ON				# Enable IQ tool in RTOS UART
+
+3A_OPT :=
+#3A_OPT += -D CO_ADAPTIVE_AE_AUTO
+
+BOARD_OPT :=
+BOARD_OPT += -D CO_BOARD_TYPE_RK
+
+BOOTVERSION_OPT :=
+#BOOTVERSION_OPT += -D CO_LINUX_VERSION_ON
+BOOTVERSION_OPT += -D CO_SD0_DRIVER_ENABLE
+BOOTVERSION_OPT += -D CO_SD1_DRIVER_ENABLE
+BOOTVERSION_OPT += -D CO_NF_DRIVER_ENABLE
+BOOTVERSION_OPT += -D CO_EMMC_DRIVER_ENABLE
+
+CMOS_OPT :=
+CMOS_OPT += -D D_DRV_SENSOR_IMX477						# Sony IMX477 MasterMode
+CMOS_OPT += -D D_DRV_SENSOR_IMX477_SENSOR_MASTER		# Sony IMX477 sensor master mode
+
+FASTBOOT_OPT :=
+#FASTBOOT_OPT += -D CO_FAST_BOOT_ON
+
+FS_OPT :=
+FS_OPT += -D CO_FS_USED_PRFILE2
+
+LCD_OPT :=
+#LCD_OPT += -D "D_LCD_DRV_ST7796S_RGB_DELTA=0x00010010" # ST7796S RGB DELTA mode
+#LCD_OPT += -D "D_LCD_DRV_AUO27_RGB_DELTA=0x00010008" # AUO27 RGB DELTA mode
+#LCD_OPT += -D "D_LCD_DRV_CASIO_RGB_DELTA=0x00010004" # CASIO RGB_DELTA mode
+LCD_OPT += -D "D_LCD_DRV_LPM030M369F_YUV_STRIPE=0x00010020" # LPM030M369F YUV STRIPE mode
+
+UI_OPT :=
+UI_OPT += -D "CO_UI_TYPE=0"		# 0 : CUI, 1: GUI
+
+USB_OPT :=
+#USB_OPT += -D CO_USB_ON
+#USB_OPT += -D CO_USB_MTP_ON
+
+USER_OPT :=
+USER_OPT += -D CO_TKERNEL_LINUX_COOP
+#USER_OPT += -D CO_TKERNEL_ONLY
+
+MILB_OPT += -D CO_HOST_PCIE_EP
+MILB_OPT += -D CO_HOST_PCIE_RC

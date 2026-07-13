@@ -1,0 +1,64 @@
+/**
+ * @file		COMMAND_ON_OPTION.h
+ * @brief		Observe Terminal Command Option
+ * @note		None
+ * @attention	None
+ * 
+ * <B><I>Copyright 2015 Socionext Inc.</I></B>
+ */
+
+#ifndef _COMMAND_ON_OPTION_H_
+#define _COMMAND_ON_OPTION_H_
+
+#define ALL_COMMAND_ON
+
+#ifdef ALL_COMMAND_ON
+#define OSD_COMMAND_ON
+#define CAPTURE_COMMAND_ON
+#define IQ_COMMAND_ON
+#define LENS_COMMAND_ON
+#define MOVIE_COMMAND_ON
+#define LCD_COMMAND_ON
+#define PB_COMMAND_ON
+#define AE_COMMAND_ON
+#define AF_COMMAND_ON
+#define AWB_COMMAND_ON
+#define FLCK_COMMAND_ON
+#define CCDAFE_COMMAND_ON
+#define AUDIO_COMMAND_ON
+#define FILESYSTEM_COMMAND_ON
+#define DEVICE_DRIVER_COMMAND_ON
+#define DEVICE_CONFIG_COMMAND_ON
+#define SPR_COMMAND_ON
+#define SYSTEM_COMMAND_ON
+#define WATCHDOG_COMMAND_ON
+#define IPCU_COMMAND_ON
+#define UPDATE_COMMAND_ON
+#define IMB2R_COMMAND_ON
+#define IMBMH_COMMAND_ON
+#define IMCNR_COMMAND_ON
+#define IMFPT_COMMAND_ON
+#define IMLTM_COMMAND_ON
+#define IMIIP_COMMAND_ON
+#define IMJPEG_COMMAND_ON
+#define IMR2Y_COMMAND_ON
+#define IMXCH_COMMAND_ON
+#define R2Y_COMMAND_ON
+#define DISP_COMMAND_ON
+#define HDMI_COMMAND_ON
+#define TOP_COMMAND_ON
+#define ARM_COMMAND_ON
+#define RECOVERY_COMMAND_ON
+#define DCDC_COMMAND_ON
+#define MEMORY_COMMAND_ON
+#define PCIE_RC_COMMAND_ON
+#define PCIE_EP_COMMAND_ON
+#define SLIMBUS_COMMAND_ON
+// --- REMOVE_USB BEGIN ---
+#if !defined(CO_LINUX_VERSION_ON) && defined(CO_USB_ON)
+#define USB_COMMAND_ON
+#endif
+// --- REMOVE_USB END ---
+#endif	// ALL_COMMAND_ON
+
+#endif	// _COMMAND_ON_OPTION_H_

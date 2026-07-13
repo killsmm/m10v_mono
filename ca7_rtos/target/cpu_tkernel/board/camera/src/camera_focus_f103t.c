@@ -1,0 +1,932 @@
+#include "os_if.h"
+#include "share.h"
+#include "share_data.h"
+#include "camera_focus_f103t.h"
+#include "fj_peripheral.h"
+#include "os_user_custom.h"
+#include "camera_f103t_table.h"
+
+#define F103T_CMD_INIT             0x01 //协议初始化
+#define F103T_CMD_ContAPapxABS     0x02 //打开光圈	
+#define F103T_CMD_StartMF          0x03 //启动focus 手动模式
+#define F103T_CMD_ContLDdstABS     0x04 // 调整focus
+#define F103T_CMD_AskLDDataM       0x05 //当前focus/zoom1/zoom2/光圈步
+#define F103T_CMD_AskLDinf		   0x06 //focus/zoom1/zoom2/光圈最大步
+#define F103T_CMD_ZOOM1_CTRL       0x07 // zoom1 控制
+#define F103T_CMD_ZOOM2_CTRL       0x08 // zoom2 控制
+
+#define F130T_CMD_FOCUS_CTRL       0x09 // 
+#define F130T_CMD_IR_CUT            0x0a
+
+//#define I2C_CHANNEL_NUM FJ_PERI_CH_0
+#define I2C_CHANNEL_NUM FJ_PERI_CH_1
+#define ADDR    0x88 
+
+
+
+#define D_DAC_POS_MIN			(0)				// 10bit resolution (temporary, need calibrarte)
+#define D_DAC_POS_MAX			(522)			// 10bit resolution (temporary, need calibrarte)
+
+
+// extern int32_t f103t_dac_pulse_max ; 
+// extern int32_t f103t_dac_pulse_min ;
+// extern int32_t g_zoom1_pulse_max ; 
+// extern int32_t g_zoom1_pulse_min;
+// extern int32_t g_zoom2_pulse_max; 
+// extern int32_t g_zoom2_pulse_min;
+
+
+
+// extern double f103t_dac_pos_coarse_fw_setp;
+// extern double f103t_dac_pos_coarse_bw_setp;
+// extern double f103t_dac_pos_fine_fw_setp;
+// extern double f103t_dac_pos_fine_bw_setp;
+
+
+#define SUB_RELATIVE(a,b) ( (a)>(b) ? ( (a)-(b) ): ( (b)-(a) ) )
+
+#define FOCAL_LENGTH_ITEM 0
+#define ZOOM1_STEP_ITEM 1
+#define ZOOM2_STEP_ITEM 2
+#define FOCUS_STEP_ITEM 3
+#define FOCUS_STEP_NEAR_ITEM 24 
+
+/* ZOOM1最大调整步骤 */
+#define ZOOM1MAXSETP  1228
+/* FOCUS最大调整步骤 */
+#define FOCUSMAXSETP  1071
+/* ZOOM2最大调整步骤 */
+#define ZOOM2MAXSETP  1068
+
+/* 减法的相对值 */
+#define SUB_ABS(a,b) ( a>b ? (a-b): (b-a) )
+
+static int32_t _zoom1_setp = ZOOM1MAXSETP;
+static int32_t _zoom2_setp = ZOOM2MAXSETP;
+static int32_t _focus_setp = FOCUSMAXSETP;
+
+static E_CAMERA_ID _camera_focus_id ;
+static T_CAMERA_FOCUS_PARAM* _camera_focus_prm = NULL;
+
+#define D_DAC_POS_INIT				(0)	// Default position
+
+// If your module doesn't have Calibration Data, please tune D_DAC_POS_FW_INIT and D_DAC_POS_BW_INIT by using your module
+#define D_DAC_POS_FW_INIT			(0)	// Start position for forward (temporary, need fine tuning)
+#define D_DAC_POS_BW_INIT			(522)	// Start position for backward (temporary, need fine tuning)
+
+#define D_DAC_POS_COARSE_FW_SETP	(15)	// coarse search forward moviing step (temporary, need fine tuning)
+#define D_DAC_POS_COARSE_BW_SETP	(15)	// coarse search backward moviing step (temporary, need fine tuning)
+#define D_DAC_POS_FINE_FW_SETP		(1)	// fine search forward moviing step (temporary, need fine tuning)
+#define D_DAC_POS_FINE_BW_SETP		(1)	// fine search backward moviing step (temporary, need fine tuning)
+
+int16_t* _index_array = NULL;  
+
+int32_t f103t_dac_pulse_max = D_DAC_POS_BW_INIT; 
+int32_t f103t_dac_pulse_min = 0;
+int32_t f103t_dac_pos_init = 0;
+int32_t g_zoom1_pulse_max = 1247; 
+int32_t g_zoom1_pulse_min = 0;
+int32_t g_zoom2_pulse_max = 1068; 
+int32_t g_zoom2_pulse_min = 0;
+int32_t f103t_dac_pos_coarse_fw_setp = 2;
+int32_t f103t_dac_pos_coarse_bw_setp = 2;
+int32_t f103t_dac_pos_fine_fw_setp = 3;
+int32_t f103t_dac_pos_fine_bw_setp = 3;
+/*----------------------------------------------------------------------*/
+/* Local Method Definition												*/
+/*----------------------------------------------------------------------*/
+static E_CAMERA_ERR_CODE	init_T_CAMERA_FOCUS_PARAM( E_CAMERA_ID focus_id, T_CAMERA_FOCUS_PARAM* prm );
+
+#define DoF_INF				10000
+const T_CAMERA_FOCUS_DOF F103T_DOF[E_CAMERA_FOCUS_DOF_MAX] =		// dof table (temporary, need calibrarte)
+{									// lens[um]	best[m]		far[m]		near[m]		adj_on	adj_lens_um
+	[E_CAMERA_FOCUS_DOF_INF] 	=	{0.00,		DoF_INF,	DoF_INF,	DoF_INF,	OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_1000CM]	=	{2.00,		10,			DoF_INF,	2.74,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_500CM] 	=	{4.00,		5,			DoF_INF,	2.15,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_400CM] 	=	{5.00,		4,			DoF_INF,	1.95,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_300CM] 	=	{6.00,		3,			14.563,		1.67,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_200CM] 	=	{10.00,		2,			4.240,		1.31,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_190CM] 	=	{10.00,		1.9,		3.820,		1.27,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_180CM] 	=	{11.00,		1.8,		3.430,		1.22,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_170CM] 	=	{11.00,		1.7,		3.090,		1.17,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_160CM] 	=	{12.00,		1.6,		2.770,		1.13,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_150CM] 	=	{13.00,		1.5,		2.480,		1.08,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_140CM] 	=	{14.00,		1.4,		2.220,		1.02,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_130CM] 	=	{15.00,		1.3,		1.980,		0.97,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_120CM] 	=	{16.00,		1.2,		1.760,		0.91,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_110CM] 	=	{17.00,		1.1,		1.550,		0.85,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_100CM] 	=	{19.00,		1,			1.360,		0.79,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_90CM] 	=	{21.00,		0.9,		1.180,		0.73,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_80CM] 	=	{24.00,		0.8,		1.010,		0.66,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_70CM] 	=	{27.00,		0.7,		0.860,		0.59,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_60CM] 	=	{32.00,		0.6,		0.710,		0.52,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_50CM] 	=	{38.00,		0.5,		0.580,		0.44,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_45CM] 	=	{43.00,		0.45,		0.510,		0.403,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_40CM] 	=	{48.00,		0.4,		0.446,		0.362,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_35CM] 	=	{55.00,		0.35,		0.385,		0.321,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_30CM]	=	{64.00,		0.3,		0.325,		0.279,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_25CM] 	=	{77.00,		0.25,		0.267,		0.235,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_20CM] 	=	{97.00,		0.2,		0.211,		0.190,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_15CM] 	=	{131.00,	0.15,		0.156,		0.145,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_14CM] 	=	{140.00,	0.14,		0.145,		0.135,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_13CM] 	=	{151.00,	0.13,		0.134,		0.126,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_12CM] 	=	{164.00,	0.12,		0.124,		0.117,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_11CM] 	=	{180.00,	0.11,		0.113,		0.107,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_10CM] 	=	{199.00,	0.1,		0.102,		0.098,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_9CM] 	=	{222.00,	0.09,		0.092,		0.088,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_8CM] 	=	{251.00,	0.08,		0.082,		0.079,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_7CM] 	=	{290.00,	0.07,		0.071,		0.069,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_6CM] 	=	{342.00,	0.06,		0.061,		0.059,		OFF,	0.000000000},
+	[E_CAMERA_FOCUS_DOF_5CM] 	=	{417.00,	0.05,		0.051,		0.049,		OFF,	0.000000000},
+};
+
+/*----------------------------------------------------------------------*/
+/* Global Data															*/
+/*----------------------------------------------------------------------*/
+
+T_CAMERA_FOCUS_BASIC	F103T_BASIC =
+{
+	.access = E_CAMERA_ACCESS_I2C,
+	.focus_if = E_CAMERA_FOCUS_IF_VCM,
+	.i2c_ch = FJ_PERI_CH_0,
+	.i2c_slave7bit = 0x44,
+
+	.mini_value = D_DAC_POS_MIN,
+	.max_value = D_DAC_POS_MAX,
+	.coarse_fw_step_num = (D_DAC_POS_MAX - D_DAC_POS_FW_INIT) / D_DAC_POS_COARSE_FW_SETP,
+	.coarse_bw_step_num = (D_DAC_POS_BW_INIT - D_DAC_POS_MIN) / D_DAC_POS_COARSE_BW_SETP,
+	.fine_fw_step_num = (D_DAC_POS_COARSE_FW_SETP * 2) / D_DAC_POS_FINE_FW_SETP,
+	.fine_bw_step_num = (D_DAC_POS_COARSE_BW_SETP * 2) / D_DAC_POS_FINE_BW_SETP,
+};
+
+static USHORT gDacValue_Curr[E_CAMERA_ID_MAX] = {D_DAC_POS_INIT, D_DAC_POS_INIT, D_DAC_POS_INIT, D_DAC_POS_INIT};
+
+
+static int i2c_write(UCHAR* data, UCHAR size)
+{
+
+    FJ_I2C_CTRL				ctrl = {0};
+    FJ_I2C_TRANSFER_DATA	trans = {0};
+    int						ret = 0;
+	
+    if ( FJ_I2C_Open(I2C_CHANNEL_NUM) != FJ_ERR_OK)
+    {
+        return -1;
+    }
+	
+    ctrl.type				= FJ_I2C_TYPE_MASTER;
+	ctrl.speed				= FJ_I2C_SPEED_FAST;
+	ctrl.address_format		= FJ_I2C_ADDRESS_FORMAT_7_BIT;
+	ctrl.slave_address		= ADDR >> 1;
+
+    if (FJ_I2C_Ctrl(I2C_CHANNEL_NUM, ctrl, NULL) != FJ_ERR_OK)
+    {
+		
+        FJ_I2C_Close(I2C_CHANNEL_NUM);
+        return -1;
+    }
+	trans.trn_data.data_length					= size;
+	trans.trn_data.data							= data;
+	trans.dirction								= 0;
+	trans.timeout_threshold						= 500; //ms
+	trans.retry_num								= 3;
+    if( FJ_I2C_Transfer(I2C_CHANNEL_NUM, &trans, 1) != FJ_ERR_OK ){
+		ret = -1;
+	}
+
+    FJ_I2C_Close(I2C_CHANNEL_NUM);
+	//OS_User_Dly_Tsk(11);
+#if 0
+	printf("i2c_write:");
+	for(int i=0 ; i< size ;i++)
+		printf("%02x ", data[i]);
+	printf("\n");
+#endif
+    return ret;
+}
+static int i2c_read( UCHAR* cmd, UCHAR cmd_size,  UCHAR* data, UCHAR size)
+{
+
+    FJ_I2C_CTRL				ctrl = {0};
+    FJ_I2C_TRANSFER_DATA	trans = {0};
+    int						ret = 0;
+	
+    if ( FJ_I2C_Open(I2C_CHANNEL_NUM) != FJ_ERR_OK)
+    {
+        return -1;
+    }
+
+    ctrl.type				= FJ_I2C_TYPE_MASTER;
+	ctrl.speed				= FJ_I2C_SPEED_FAST;
+	ctrl.address_format		= FJ_I2C_ADDRESS_FORMAT_7_BIT;
+	ctrl.slave_address		= ADDR >> 1;
+	//printf("1----------------------\n");
+
+    if (FJ_I2C_Ctrl(I2C_CHANNEL_NUM, ctrl, NULL) != FJ_ERR_OK)
+    {
+		FJ_I2C_Close(I2C_CHANNEL_NUM);
+        return -1;
+    }
+
+	trans.slave_register_address.data_length = cmd_size;
+	trans.slave_register_address.data = cmd;
+	//memcpy( trans.slave_register_address.data, cmd, cmd_size );
+
+	trans.trn_data.data_length					= size;
+	trans.trn_data.data							= data;
+	trans.dirction								= 1;
+	trans.retry_num								= 500;
+	trans.timeout_threshold						= 3; //ms
+//printf("2----------------------\n");
+    if( FJ_I2C_Transfer(I2C_CHANNEL_NUM, &trans, 1) != FJ_ERR_OK ){
+		ret = -1;
+	}
+	//printf("3----------------------\n");
+    FJ_I2C_Close(I2C_CHANNEL_NUM);
+	OS_User_Dly_Tsk(25);
+    return ret;
+}
+
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_Init(E_CAMERA_ID focus_id, T_CAMERA_FOCUS_PARAM* prm)
+{
+    int ret = 0;
+	//UCHAR c1[] = {F103T_CMD_INIT};
+//
+	_camera_focus_prm = prm;
+	_camera_focus_id = focus_id;
+
+	FJ_Gpio_Set_Direction(FJ_GPIO_PC2L, FJ_GPIO_DIR_IN);
+	FJ_Gpio_Set_Function(FJ_GPIO_PC2L,FJ_GPIO_FUNC_HWMODE);
+
+	FJ_Gpio_Set_Direction(FJ_GPIO_PC3L, FJ_GPIO_DIR_IN);
+	FJ_Gpio_Set_Function(FJ_GPIO_PC3L,FJ_GPIO_FUNC_HWMODE);
+
+
+	FJ_Gpio_Set_Direction(FJ_GPIO_P67, FJ_GPIO_DIR_OUT);
+	FJ_Gpio_Set_Function(FJ_GPIO_P67,FJ_GPIO_FUNC_GPIO);
+	FJ_Gpio_Set_Pull_Up_Down_Enable(FJ_GPIO_P67, TRUE);
+	FJ_Gpio_Set_Pull_Up_Down_Ctrl(FJ_GPIO_P67, 1);
+
+
+    // ret =i2c_write(c1, 1);
+	// if (  ret != 0 )
+	// {
+
+	// 	return E_CAMERA_ERR_NG;
+	// }
+	OS_User_Dly_Tsk(5000);
+	printf("f103t_dac_pos_fine_bw_setp = %d\n", f103t_dac_pos_fine_bw_setp);
+	printf("f103t_dac_pos_fine_fw_setp = %d\n", f103t_dac_pos_fine_fw_setp);
+	printf("f103t_dac_pos_coarse_fw_setp = %d\n", f103t_dac_pos_coarse_fw_setp);
+	printf("f103t_dac_pos_coarse_bw_setp = %d\n", f103t_dac_pos_coarse_bw_setp);
+	printf("pulse_min = %d\n", f103t_dac_pulse_min);
+	printf("pulse_max = %d\n", f103t_dac_pulse_max);
+	/* 换算粗步长 */
+	 //f103t_dac_pos_coarse_fw_setp =  f103t_dac_pos_coarse_fw_setp * 1.0 / D_DAC_POS_MAX * f103t_dac_pulse_max;
+	//f103t_dac_pos_coarse_fw_setp =  f103t_dac_pos_coarse_fw_setp * 1.0 /  f103t_dac_pulse_max;
+	//f103t_dac_pos_coarse_fw_setp = f103t_dac_pos_coarse_fw_setp * f103t_dac_pulse_max / D_DAC_POS_MAX;
+	//f103t_dac_pos_coarse_bw_setp = f103t_dac_pos_coarse_fw_setp;
+	// 最近距离
+	F103T_BASIC.max_value = f103t_dac_pulse_max;
+	//最远距离
+	F103T_BASIC.coarse_fw_step_num = (f103t_dac_pulse_max - D_DAC_POS_FW_INIT) / f103t_dac_pos_coarse_fw_setp;
+	F103T_BASIC.coarse_bw_step_num = (f103t_dac_pulse_max - D_DAC_POS_MIN) / f103t_dac_pos_coarse_bw_setp;
+	
+
+	//init_T_CAMERA_FOCUS_PARAM( focus_id, prm );
+
+	// for (size_t i = 0; i < 5; i++)
+	// {
+	// 	/* code */
+	// 	Focus_VCM_F103T_ContAPapxABS(0x1C2);
+	// 	OS_User_Dly_Tsk(30);
+	// }
+	//Focus_VCM_F103T_ContAPapxABS(0);
+	OS_User_Dly_Tsk(25);
+	Focus_VCM_F103T_Set_Focal_Length(683);
+    return E_CAMERA_ERR_OK;
+}
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_SetDAC(E_CAMERA_ID focus_id, USHORT dac)
+{
+	//UCHAR	data[2];
+	int ret = 0;
+	int sub = 0;
+	//static int last_dac = 683;
+	if(dac > f103t_dac_pulse_max) dac = f103t_dac_pulse_max; // 10bit resolution
+	
+	if ( dac <  f103t_dac_pulse_min) dac = f103t_dac_pulse_min;
+	//uint32_t f103t_pulse = 2500 - (dac  * 2.395);
+	//uint32_t f103t_pulse = dac ;//* 1.0 / D_DAC_POS_MAX * ( f103t_dac_pulse_max - 50 );
+	// if (f103t_pulse < 50) 
+	// 	f103t_pulse = 50;
+	
+	//ret = Focus_VCM_F103T_FOUCS(f103t_pulse);
+	ret = Focus_VCM_F103T_FOUCS_ABS(dac);
+	sub = SUB_RELATIVE((int32_t)gDacValue_Curr[focus_id] , (int32_t)dac);
+	if ( sub > 3 )
+		OS_User_Dly_Tsk( sub* 1);
+	else
+	{
+		//OS_User_Dly_Tsk( sub* 1 );
+	}
+
+	gDacValue_Curr[focus_id] = dac;
+	
+	return ret;
+}
+
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_Move(E_CAMERA_ID focus_id, E_CAMERA_FOCUS_MOVE_DIR dir, BOOL is_coarse, USHORT* value)
+{
+	E_CAMERA_ERR_CODE	ret = E_CAMERA_ERR_OK;
+	USHORT step_val;
+	int32_t 	temp_step_val_interval = 0;
+    // static int frameskip = 0;
+	// if (frameskip<2)
+	// {
+	// 	frameskip++;
+	// 	return E_CAMERA_ERR_OK;
+	// } 
+	// frameskip = 0;
+#if 0
+	switch(dir)
+	{
+		case E_CAMERA_FOCUS_MOVE_DIR_FORWARD:
+
+			if(is_coarse){
+				step_val = f103t_dac_pos_coarse_fw_setp;
+			}else{
+				step_val = D_DAC_POS_FINE_FW_SETP;
+			}
+			
+			if((gDacValue_Curr[focus_id] + step_val) > f103t_dac_pulse_max){
+				*value = gDacValue_Curr[focus_id];
+				return E_CAMERA_ERR_NG;
+			}else{
+				gDacValue_Curr[focus_id] = gDacValue_Curr[focus_id] + step_val;
+			}
+		break;
+		case E_CAMERA_FOCUS_MOVE_DIR_BACKWARD:
+	
+			if(is_coarse){
+				step_val = f103t_dac_pos_coarse_bw_setp;
+			}else{
+				step_val = D_DAC_POS_FINE_BW_SETP;
+			}
+			
+			if(gDacValue_Curr[focus_id] < (step_val + D_DAC_POS_MIN)){
+				*value = gDacValue_Curr[focus_id];
+				return E_CAMERA_ERR_NG;
+			}else{
+				gDacValue_Curr[focus_id] = gDacValue_Curr[focus_id] - step_val;
+			}
+		
+		break;
+		case E_CAMERA_FOCUS_MOVE_DIR_FORWARD_INIT:
+			//gDacValue_Curr[focus_id] = D_DAC_POS_FW_INIT;
+			gDacValue_Curr[focus_id] = f103t_dac_pulse_min;
+		break;
+		case E_CAMERA_FOCUS_MOVE_DIR_BACKWARD_INIT:
+			gDacValue_Curr[focus_id] = f103t_dac_pulse_max;
+			//gDacValue_Curr[focus_id] = D_DAC_POS_FW_INIT;
+		break;
+		default:
+			gDacValue_Curr[focus_id] = f103t_dac_pulse_min;
+		break;
+	}
+#else
+	switch(dir)
+	{
+		case E_CAMERA_FOCUS_MOVE_DIR_FORWARD:
+
+			if(is_coarse){
+				step_val = f103t_dac_pos_coarse_fw_setp;
+			}else{
+				step_val = D_DAC_POS_FINE_FW_SETP;
+			}
+			
+			if((gDacValue_Curr[focus_id] + step_val) > f103t_dac_pulse_max){
+				*value = gDacValue_Curr[focus_id];
+				return E_CAMERA_ERR_NG;
+			}else{
+				//gDacValue_Curr[focus_id] = gDacValue_Curr[focus_id] + step_val;
+				
+				ret = Focus_VCM_F103T_SetDAC(focus_id, gDacValue_Curr[focus_id] + step_val);
+			}
+			
+
+		break;
+		case E_CAMERA_FOCUS_MOVE_DIR_BACKWARD:
+	
+			if(is_coarse){
+				step_val = f103t_dac_pos_coarse_bw_setp;
+			}else{
+				step_val = D_DAC_POS_FINE_BW_SETP;
+			}
+			
+			if(gDacValue_Curr[focus_id] < (step_val + f103t_dac_pulse_min)){
+				*value = gDacValue_Curr[focus_id];
+				return E_CAMERA_ERR_NG;
+			}else{
+				//gDacValue_Curr[focus_id] = gDacValue_Curr[focus_id] - step_val;
+				ret = Focus_VCM_F103T_SetDAC(focus_id, gDacValue_Curr[focus_id] - step_val);
+			}
+			
+		//ret = Focus_VCM_F103T_SetDAC(focus_id, gDacValue_Curr[focus_id]);
+		
+		break;
+		case E_CAMERA_FOCUS_MOVE_DIR_FORWARD_INIT:
+			// //gDacValue_Curr[focus_id] = D_DAC_POS_FW_INIT;
+			// SUB_RELATIVE((int32_t)gDacValue_Curr[focus_id], f103t_dac_pulse_min) ;
+			// temp_step_val_interval = 
+			//gDacValue_Curr[focus_id] = f103t_dac_pulse_min;
+			ret = Focus_VCM_F103T_SetDAC(focus_id, f103t_dac_pulse_min);
+			//OS_User_Dly_Tsk(temp_step_val_interval*3);
+		break;
+		case E_CAMERA_FOCUS_MOVE_DIR_BACKWARD_INIT:
+
+			//temp_step_val_interval = SUB_RELATIVE((int32_t)gDacValue_Curr[focus_id], f103t_dac_pulse_max) ;
+		//	gDacValue_Curr[focus_id] = f103t_dac_pulse_max;
+			//gDacValue_Curr[focus_id] = D_DAC_POS_FW_INIT;
+			
+			ret = Focus_VCM_F103T_SetDAC(focus_id, f103t_dac_pulse_max);
+			//OS_User_Dly_Tsk(temp_step_val_interval*3);
+		break;
+		default:
+			//temp_step_val_interval = SUB_RELATIVE((int32_t)gDacValue_Curr[focus_id], f103t_dac_pulse_min) ;
+			//gDacValue_Curr[focus_id] = f103t_dac_pulse_min;
+			ret = Focus_VCM_F103T_SetDAC(focus_id, f103t_dac_pulse_min);
+			//OS_User_Dly_Tsk(temp_step_val_interval*3);
+		break;
+	}
+#endif
+//	OS_User_Slp_Tsk();
+	
+	//ret = Focus_VCM_F103T_FOUCS(gDacValue_Curr[focus_id]);
+
+	*value = gDacValue_Curr[focus_id];
+
+	return ret;
+
+}
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_CalcDAC(E_CAMERA_ID focus_id, T_CAMERA_FOCUS_PARAM* prm, UCHAR convert)
+{
+	FLOAT work;
+	
+	if( convert == D_FOCUS_DAC2LENS ){
+		prm->now_um = prm->kando_slope * prm->now_dac + prm->kando_intercept;
+	}else if( convert == D_FOCUS_LENS2DAC ){
+//		now_um = prm->now_um;
+		work = (prm->now_um - prm->kando_intercept ) / prm->kando_slope;
+		// printf("now_um %f", prm->now_um);
+		// printf("intercept %f", prm->kando_intercept);
+		// printf("slope %f", prm->kando_slope);
+		// printf("work %f", work);
+		// printf("min %d", CAMERA.focus[focus_id].basic->mini_value);
+		// printf("max %d\n", CAMERA.focus[focus_id].basic->max_value);
+		if( work < CAMERA.focus[focus_id].basic->mini_value ){
+			work = CAMERA.focus[focus_id].basic->mini_value;
+		}
+		if( work > CAMERA.focus[focus_id].basic->max_value ){
+			work = CAMERA.focus[focus_id].basic->max_value;
+		}
+		prm->now_dac = (USHORT) work;
+		// Recalculation for DAC clipping
+		prm->now_um = prm->kando_slope * prm->now_dac + prm->kando_intercept;
+//		now_dac = prm->now_dac;
+	}
+// 	if( convert == D_FOCUS_DAC2LENS ){
+// 		prm->now_um = prm->now_dac ;
+// 	}else if( convert == D_FOCUS_LENS2DAC ){
+// //		now_um = prm->now_um;
+// 		work = prm->now_um ;
+// 		printf("now_um %f", prm->now_um);
+// 		printf("intercept %f", prm->kando_intercept);
+// 		printf("slope %f", prm->kando_slope);
+// 		printf("work %f", work);
+// 		printf("min %d", CAMERA.focus[focus_id].basic->mini_value);
+// 		printf("max %d\n", CAMERA.focus[focus_id].basic->max_value);
+// 		if( work < CAMERA.focus[focus_id].basic->mini_value ){
+// 			work = CAMERA.focus[focus_id].basic->mini_value;
+// 		}
+// 		if( work > CAMERA.focus[focus_id].basic->max_value ){
+// 			work = CAMERA.focus[focus_id].basic->max_value;
+// 		}
+// 		prm->now_dac = (USHORT) work;
+// 		// Recalculation for DAC clipping
+// 		prm->now_um = prm->now_dac;
+// //		now_dac = prm->now_dac;
+// 	}
+	return E_CAMERA_ERR_OK;
+}
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_GetDAC(E_CAMERA_ID focus_id, USHORT* value)
+{
+	*value = gDacValue_Curr[focus_id];
+
+	return E_CAMERA_ERR_OK;
+}
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_StartMF(bool mf_stat)
+{
+
+    int ret = 0;
+	UCHAR c1[2] = {F103T_CMD_StartMF};
+
+    c1[1] = mf_stat;
+    ret =i2c_write(c1, 2);
+	if (  ret != 0 )
+	{
+		return E_CAMERA_ERR_NG;
+	}
+    return E_CAMERA_ERR_OK; 
+}
+
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_ContAPapxABS(uint16_t targetAperure)
+{
+
+    int ret = 0;
+	UCHAR c1[3] = {F103T_CMD_ContAPapxABS};
+
+    c1[1] = targetAperure & 0xFF;
+    c1[2] = (targetAperure >> 8) & 0xff;
+    ret =i2c_write(c1, 3);
+	if (  ret != 0 )
+	{
+
+		return E_CAMERA_ERR_NG;
+	}
+    return E_CAMERA_ERR_OK; 
+}
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_FOUCS(uint16_t abs_distance)
+{
+
+    int ret = 0;
+	UCHAR c1[3] = {F103T_CMD_ContLDdstABS};
+#if 1
+	/* 0-310 */
+	if ( abs_distance < 0 || abs_distance > (f103t_dac_pulse_max-f103t_dac_pulse_min+1) )
+	{
+		return E_CAMERA_ERR_NG;
+	}
+	
+	abs_distance = f103t_dac_pulse_min + abs_distance;
+	
+#endif
+    c1[1] = abs_distance & 0xFF;
+    c1[2] = (abs_distance  >> 8) & 0xff;
+    ret =i2c_write(c1, 3);
+	if (  ret != 0 )
+	{
+
+		return E_CAMERA_ERR_NG;
+	}
+	//OS_User_Dly_Tsk(30);
+    return E_CAMERA_ERR_OK; 
+}
+
+E_CAMERA_ERR_CODE	Focus_VCM_F103T_FOUCS_ABS(uint16_t abs_distance)
+{
+
+    int ret = 0;
+	UCHAR c1[3] = {F103T_CMD_ContLDdstABS};
+
+    c1[1] = abs_distance & 0xFF;
+    c1[2] = (abs_distance  >> 8) & 0xff;
+	
+    ret =i2c_write(c1, 3);
+	if (  ret != 0 )
+	{
+
+		return E_CAMERA_ERR_NG;
+	}
+	//OS_User_Dly_Tsk(30);
+    return E_CAMERA_ERR_OK; 
+}
+
+
+
+#define FOCUS_OFFSET 15 
+/* | focal length |  Z1-Step | Z2-Step | F-Step | Focus 1000m ... 0.5m |*/
+E_CAMERA_ERR_CODE    Focus_VCM_F103T_Set_Focal_Length(int32_t flen)
+{
+	static int32_t last_flen = 683;
+	static int32_t last_zoom1 = 1228;
+	static int32_t last_zoom2 = 1068;
+	static int32_t last_focus = 1017;
+
+	int32_t cur_zoom1 = 0;
+	int32_t cur_zoom2 = 0;
+	int32_t cur_focus = 0;
+
+	int16_t* index_array_last = NULL; // 保存上一次的变焦参数 
+	int16_t* index_array_next = NULL;
+	
+	uint32_t f103t_array_size =  sizeof(f103t_table)/sizeof(f103t_table[0]);
+	if ( flen < 683 || flen >  11994)
+	{
+		return E_CAMERA_ERR_NG;
+	}
+	for (size_t i = 0; i < (f103t_array_size ); i++)
+	{
+		/* code */
+		_index_array = &f103t_table[i][0];
+		/* 匹配到配置组 */
+		if ( _index_array[FOCAL_LENGTH_ITEM] > flen ||  i == (f103t_array_size-1))
+		{
+			/* 1. 在调焦的时候先停止自动对焦 */
+
+			if (i == (f103t_array_size-1) )
+			{
+				
+			}
+			else
+			{
+				/* 计算 : (current - last ) 与 (next - current) 那个小  */
+				index_array_next = &f103t_table[i+1][0];
+				if ( (_index_array[FOCAL_LENGTH_ITEM] - index_array_last[FOCAL_LENGTH_ITEM]) < (index_array_next[FOCAL_LENGTH_ITEM] -_index_array[FOCAL_LENGTH_ITEM] ) )
+				{
+					_index_array	= index_array_last;
+				}
+				else
+				{
+					_index_array	= index_array_next;
+				}
+			}
+			
+			int ret = 0;
+			UCHAR c1[7] = {F130T_CMD_FOCUS_CTRL};//zoom1 zoom2 focus 
+
+			cur_zoom1 = _index_array[ZOOM1_STEP_ITEM];
+			cur_zoom2 = _index_array[ZOOM2_STEP_ITEM];
+			cur_focus = _index_array[FOCUS_STEP_ITEM]+495 +FOCUS_OFFSET+10;
+
+			c1[1] = cur_zoom1 & 0xFF;
+			c1[2] = (cur_zoom1 >> 8) & 0xff;
+			
+			c1[3] = cur_zoom2 & 0xFF;
+			c1[4] = (cur_zoom2 >> 8) & 0xff;
+
+			c1[5] = (cur_focus ) & 0xFF;
+			c1[6] = ( (cur_focus ) >> 8) & 0xff;
+			
+			
+			//return E_CAMERA_ERR_OK; 
+
+			/* 5. 设置指定的foucs 参数 */
+
+			f103t_dac_pulse_min = _index_array[FOCUS_STEP_NEAR_ITEM]+495;
+			if (f103t_dac_pulse_min < 0)
+			{
+				f103t_dac_pulse_min= _index_array[FOCUS_STEP_NEAR_ITEM-1]+495 ;
+				if ( f103t_dac_pulse_min < 0 )
+				{
+					f103t_dac_pulse_min= _index_array[FOCUS_STEP_NEAR_ITEM-2]+495;
+				}
+			}
+			/* 超过3970mm焦距，  只取2m及以上 对焦距离 */
+			if ( flen > 6000 )
+			{
+
+				f103t_dac_pulse_min =  _index_array[FOCUS_STEP_NEAR_ITEM-4]+495;				
+			}
+			if ( flen > 4781 )
+			{
+
+				f103t_dac_pulse_min =  _index_array[FOCUS_STEP_NEAR_ITEM-3]+495;
+			}
+			
+			// if ( flen < 900 )
+			// {
+			// 	 f103t_dac_pos_coarse_fw_setp = 1;
+ 			// 	f103t_dac_pos_coarse_bw_setp = 1;
+			// }
+			// else
+			// {
+			// 	f103t_dac_pos_coarse_fw_setp = 1;
+ 			// 	f103t_dac_pos_coarse_bw_setp = 1;
+			// }
+			if (  flen > 1000  )
+				f103t_dac_pulse_max = _index_array[FOCUS_STEP_ITEM]+495 +30;
+			else
+				f103t_dac_pulse_max = _index_array[FOCUS_STEP_ITEM]+495 +FOCUS_OFFSET+10;
+
+		//if ( f103t_dac_pulse_min > 20 )
+			{
+				f103t_dac_pulse_min -= 10;
+			}
+			if ( f103t_dac_pulse_min < 10 )
+			{
+				f103t_dac_pulse_min = 10;
+			}
+			printf("pulse_min = %d\n", f103t_dac_pulse_min);
+			printf("pulse_max = %d\n", f103t_dac_pulse_max);
+			// 最近距离
+			F103T_BASIC.max_value = f103t_dac_pulse_max;
+			F103T_BASIC.mini_value = f103t_dac_pulse_min;
+			//最远距离
+			f103t_dac_pos_coarse_fw_setp = 3;
+ 			f103t_dac_pos_coarse_bw_setp = 3;
+			F103T_BASIC.coarse_fw_step_num = (f103t_dac_pulse_max - f103t_dac_pulse_min) / f103t_dac_pos_coarse_fw_setp;
+			F103T_BASIC.coarse_bw_step_num = (f103t_dac_pulse_max - f103t_dac_pulse_min) / f103t_dac_pos_coarse_bw_setp;
+			F103T_BASIC.fine_fw_step_num = f103t_dac_pos_coarse_fw_setp;
+			F103T_BASIC.fine_bw_step_num = f103t_dac_pos_coarse_fw_setp;
+
+			//F103T_BASIC.cur_focus_value = gDacValue_Curr[_camera_focus_id];
+			
+			if (_camera_focus_prm )
+			{
+				init_T_CAMERA_FOCUS_PARAM( _camera_focus_id, _camera_focus_prm );
+				gDacValue_Curr[_camera_focus_id]=f103t_dac_pulse_max; // 重置对焦参数
+			}
+			ULONG param[4] = {};
+			param[0] = 0;
+			param[1] = f103t_dac_pulse_max - f103t_dac_pulse_min;
+			//UPRINTF("1------------------send event Notify start !\n");
+			OS_IF_Rtos_Event_Notify(E_CPU_IF_COMMAND_SET_NOTIFY_EVENT_STATUS_CHANGED, E_CPU_IF_COMMAND_NOTIFY_EVENT_CAMERA_FOCUS_RANGE_CHANGED, param);
+			//UPRINTF("2------------------send event Notify end !\n");
+			ret =i2c_write(c1, 7);
+
+			OS_User_Dly_Tsk(SUB_RELATIVE(last_zoom1, cur_zoom1)* 3.3);
+			OS_User_Dly_Tsk(SUB_RELATIVE(last_zoom2, cur_zoom2)* 3.3);
+			OS_User_Dly_Tsk(SUB_RELATIVE(last_focus, cur_focus)* 3.3);
+			last_zoom1 = cur_zoom1;
+			last_zoom2 = cur_zoom2;
+			last_focus = cur_focus;
+			//ret = Focus_VCM_F103T_SetDAC(_camera_focus_id, cur_focus);
+		//	gDacValue_Curr[_camera_focus_id] = _index_array[FOCUS_STEP_ITEM]+495 + FOCUS_OFFSET;
+			//last_flen = flen;
+			//UPRINTF("3------------------send delay end !\n");
+			if (  ret != 0 )
+			{
+
+				return E_CAMERA_ERR_NG;
+			} 	
+			return E_CAMERA_ERR_OK;
+
+			/* 6. 恢复自动对焦 */
+		}
+		index_array_last = _index_array; // 记录上一次的状态
+	}
+
+}
+
+
+E_CAMERA_ERR_CODE    Focus_VCM_F103T_Set_F130T_PARAM (int zoom1 , int zoom2 , int focusNear, int focusFar)
+{
+	int ret = 0;
+	static int32_t last_flen = 683;
+
+	static int32_t last_zoom1 = 1228;
+	static int32_t last_zoom2 = 1068;
+	static int32_t last_focus = 1017;
+
+	int32_t cur_zoom1 = 0;
+	int32_t cur_zoom2 = 0;
+	int32_t cur_focus = 0;
+
+	UCHAR c1[7] = {F130T_CMD_FOCUS_CTRL};//zoom1 zoom2 focus 
+
+
+	cur_zoom1 = zoom1;
+	cur_zoom2 = zoom2;
+	cur_focus = focusFar;
+	
+	c1[1] = zoom1 & 0xFF;
+	c1[2] = (zoom1 >> 8) & 0xff;
+	
+	c1[3] = zoom2 & 0xFF;
+	c1[4] = (zoom2 >> 8) & 0xff;
+
+	c1[5] = (focusFar) & 0xFF;
+	c1[6] = (focusFar >> 8) & 0xff;
+
+	f103t_dac_pulse_min = focusNear;
+	f103t_dac_pulse_max = focusFar;
+
+	printf("zoom1 = %d,zoom2 = %d, focusNear = %d,focusFar = %d\n",zoom1,zoom2,  focusNear, focusFar);
+
+	// 最近距离
+	F103T_BASIC.max_value = f103t_dac_pulse_max;
+	F103T_BASIC.mini_value = f103t_dac_pulse_min;
+	//最远距离
+	f103t_dac_pos_coarse_fw_setp = 3;
+	f103t_dac_pos_coarse_bw_setp = 3;
+	F103T_BASIC.coarse_fw_step_num = (f103t_dac_pulse_max - f103t_dac_pulse_min) / f103t_dac_pos_coarse_fw_setp;
+	F103T_BASIC.coarse_bw_step_num = (f103t_dac_pulse_max - f103t_dac_pulse_min) / f103t_dac_pos_coarse_bw_setp;
+	F103T_BASIC.fine_fw_step_num = f103t_dac_pos_coarse_fw_setp;
+	F103T_BASIC.fine_bw_step_num = f103t_dac_pos_coarse_fw_setp;
+
+	//F103T_BASIC.cur_focus_value = gDacValue_Curr[_camera_focus_id];
+			
+//	init_T_CAMERA_FOCUS_PARAM( focus_id, prm );
+	if (_camera_focus_prm )
+	{
+		init_T_CAMERA_FOCUS_PARAM( _camera_focus_id, _camera_focus_prm );
+		gDacValue_Curr[_camera_focus_id]=f103t_dac_pulse_max; // 重置对焦参数
+	}
+	ULONG param[4] = {};
+	param[0] = 0;
+	param[1] = f103t_dac_pulse_max - f103t_dac_pulse_min;
+	UPRINTF("1------------------send event Notify start !\n");
+	OS_IF_Rtos_Event_Notify(E_CPU_IF_COMMAND_SET_NOTIFY_EVENT_STATUS_CHANGED, E_CPU_IF_COMMAND_NOTIFY_EVENT_CAMERA_FOCUS_RANGE_CHANGED, param);
+	UPRINTF("2------------------send event Notify end !\n");
+	ret =i2c_write(c1, 7);
+	
+	OS_User_Dly_Tsk(SUB_RELATIVE(last_zoom1, cur_zoom1)* 3.3);
+	OS_User_Dly_Tsk(SUB_RELATIVE(last_zoom2, cur_zoom2)* 3.3);
+	OS_User_Dly_Tsk(SUB_RELATIVE(last_focus, cur_focus)* 3.3);
+	last_zoom1 = cur_zoom1;
+	last_zoom2 = cur_zoom2;
+	last_focus = cur_focus;
+	//ret = Focus_VCM_F103T_SetDAC(_camera_focus_id, cur_focus);
+	//OS_User_Dly_Tsk(SUB_RELATIVE(last_flen, focusFar)* 1.30);
+	//gDacValue_Curr[_camera_focus_id] = focusFar;
+	//last_flen = focusFar;
+    return E_CAMERA_ERR_OK; 
+}
+E_CAMERA_ERR_CODE    Focus_VCM_F103T_Get_Cur_Focus_Value(uint16_t* focus_Value)
+{
+	*focus_Value =  gDacValue_Curr[_camera_focus_id];
+	return E_CAMERA_ERR_OK; 
+}
+E_CAMERA_ERR_CODE    Focus_VCM_F103T_Set_IR_CUT (int mode)
+{
+	int ret = 0;
+	UCHAR c1[2] = {F130T_CMD_IR_CUT};
+
+    c1[1] = mode & 0xFF;
+    ret =i2c_write(c1, 2);
+	if (  ret != 0 )
+	{
+
+		return E_CAMERA_ERR_NG;
+	}
+    return E_CAMERA_ERR_OK; 
+}
+E_CAMERA_ERR_CODE    Focus_VCM_F103T_Set_PARAM (F130T_PARAM_MODE mode, int param)
+{
+	static int zoom1 = 1228;
+	static int zoom2 = 1068;
+	static int focus_near = 1030;
+	static int focus_far = 1007;
+	switch (mode)
+	{
+	case F130T_PARAM_ZOOM1:
+	{
+		zoom1 = param;
+	}
+	break;
+	case F130T_PARAM_ZOOM2:
+	{
+		zoom2 = param;
+	}
+	break;
+	case F130T_PARAM_FOCUS_NEAR:
+	{
+		focus_near = param;
+	}
+	break;
+	case F130T_PARAM_FOCUS_FAR:
+	{
+		focus_far = param;
+	}
+	break;
+	case F130T_PARAM_ENABLE:
+	{
+		Focus_VCM_F103T_Set_F130T_PARAM(zoom1,zoom2, focus_near, focus_far);
+	}
+	break;
+	default:
+		break;
+	}
+}
+static E_CAMERA_ERR_CODE	init_T_CAMERA_FOCUS_PARAM( E_CAMERA_ID focus_id, T_CAMERA_FOCUS_PARAM* prm )
+{
+	float lens_10cm;
+	float lens_1000cm;
+
+	//prm->inf_dac = D_DAC_POS_FW_INIT;	// Please set this parameter by using Calibration data.
+	prm->inf_dac = f103t_dac_pulse_min;	// Please set this parameter by using Calibration data.
+	prm->mac_dac = f103t_dac_pulse_max;	// Please set this parameter by using Calibration data.
+	
+	prm->sta_dac = prm->inf_dac;		// This parameter is not used..
+	prm->end_dac = prm->mac_dac;		// This parameter is not used..
+	prm->ini_dac = prm->sta_dac;		// This parameter is not used..
+	prm->pos_dac = 0;
+	
+	lens_10cm   = CAMERA.focus[focus_id].dof[E_CAMERA_FOCUS_DOF_10CM].lens_um;
+	lens_1000cm = CAMERA.focus[focus_id].dof[E_CAMERA_FOCUS_DOF_INF].lens_um;
+	prm->kando_slope = (lens_10cm - lens_1000cm) / (prm->mac_dac - prm->inf_dac);
+	prm->kando_intercept = lens_10cm - (prm->mac_dac *  prm->kando_slope);
+/*	
+	printf("***** Lens Paarameters\n ***");
+	printf("  inf_dac:0x%x\n", prm->inf_dac);
+	printf("  mac_dac:0x%x\n", prm->mac_dac);
+	printf("  sta_dac:0x%x\n", prm->sta_dac);
+	printf("  end_dac:0x%x\n", prm->end_dac);
+	printf("  pos_dac:0x%x\n", prm->pos_dac);
+	printf("  kando_slope:%f\n", prm->kando_slope);
+	printf("  kando_intercept:%f\n", prm->kando_intercept);
+	printf("  lens_10cm:%f\n", lens_10cm);
+	printf("  lens_1000cm:%f\n", lens_1000cm);
+*/	
+	return E_CAMERA_ERR_OK;
+}

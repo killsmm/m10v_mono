@@ -1,0 +1,14306 @@
+/**
+ * @file		im_r2y.c
+ * @brief		Bayer to YUV comversion
+ * @note		None
+ * @attention	None
+ * 
+ * <B><I>Copyright 2015 Socionext Inc.</I></B>
+ */
+
+
+#include "im_r2y.h"
+
+#include <string.h>
+//#if defined(CO_ACT_CLOCK) || defined(CO_ACT_ICLOCK) || defined(CO_ACT_HCLOCK) || defined(CO_ACT_PCLOCK)
+#include "dd_top.h"
+//#endif
+#include "dd_arm.h"
+
+#include "jdsr2y.h"
+//#include "im_rdma.h"
+
+/*----------------------------------------------------------------------*/
+/* Definition															*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+
+#if defined(CO_ACT_CLOCK) || defined(CO_ACT_IMAGE_CLOCK)
+#define CO_ACT_R2Y_CLOCK
+#endif	// CO_ACT_PCLOCK
+#if defined(CO_ACT_HCLOCK) || defined(CO_ACT_IMAGE_HCLOCK)
+#define CO_ACT_R2Y_HCLOCK
+#endif	// CO_ACT_HCLOCK
+#if defined(CO_ACT_PCLOCK) || defined(CO_ACT_IMAGE_PCLOCK)
+#define CO_ACT_R2Y_PCLOCK
+#endif	// CO_ACT_PCLOCK
+#if defined(CO_ACT_ICLOCK) || defined(CO_ACT_IMAGE_ICLOCK)
+#define CO_ACT_R2Y_ICLOCK
+#endif	// CO_ACT_ICLOCK
+
+//#define CO_R2Y_RDMA_ON
+
+#define Im_R2Y_Dsb()	Dd_ARM_Dsb_Pou()
+
+#define D_IM_R2Y1_CLK_REG_ADDR	(&Dd_Top_Get_CLKSTOP11())
+#define D_IM_R2Y1_HCLK_REG_ADDR	(&Dd_Top_Get_CLKSTOP11())
+#define D_IM_R2Y1_PCLK_REG_ADDR	(&Dd_Top_Get_CLKSTOP11())
+#define D_IM_R2Y1_ICLK_REG_ADDR	(&Dd_Top_Get_CLKSTOP11())
+
+#define D_IM_R2Y2_CLK_REG_ADDR	(&Dd_Top_Get_CLKSTOP13())
+#define D_IM_R2Y2_HCLK_REG_ADDR	(&Dd_Top_Get_CLKSTOP13())
+#define D_IM_R2Y2_PCLK_REG_ADDR	(&Dd_Top_Get_CLKSTOP13())
+#define D_IM_R2Y2_ICLK_REG_ADDR	(&Dd_Top_Get_CLKSTOP13())
+
+#define D_IM_R2Y1_CLK_REG_BIT	D_DD_TOP_R2Y1CK_BIT
+#define D_IM_R2Y1_HCLK_REG_BIT	D_DD_TOP_R2Y1AH_BIT
+#define D_IM_R2Y1_PCLK_REG_BIT	D_DD_TOP_R2Y1AP_BIT
+#define D_IM_R2Y1_ICLK_REG_BIT	D_DD_TOP_R2Y1AX_BIT
+
+#define D_IM_R2Y2_CLK_REG_BIT	D_DD_TOP_R2Y2CK_BIT
+#define D_IM_R2Y2_HCLK_REG_BIT	D_DD_TOP_R2Y2AH_BIT
+#define D_IM_R2Y2_PCLK_REG_BIT	D_DD_TOP_R2Y2AP_BIT
+#define D_IM_R2Y2_ICLK_REG_BIT	D_DD_TOP_R2Y2AX_BIT
+
+
+/* debug print switch  for im_r2y.c developping/debugging person.
+ * (not im_r2y user)
+ */
+//#define IM_R2Y_DEBUG_PRINT
+//#define IM_R2Y_STATUS_PRINT
+//#define IM_R2Y_REG_TYPE_CHECK
+
+// True/False (UCHAR)
+#define D_IM_R2Y_TRUE					((UCHAR)1)
+#define D_IM_R2Y_FALSE					((UCHAR)0)
+
+// PIPE count
+#define D_IM_R2Y_PIPE_COUNT				(2)
+
+// Driver state of Starting flag
+#define D_IM_R2Y_STATE_IDLE				(0x00)
+#define D_IM_R2Y_STATE_BUSY_F_R2Y		(0x01)
+#define D_IM_R2Y_STATE_BUSY_YYR			(0x02)
+#define D_IM_R2Y_STATE_BUSY_YYW0		(0x04)
+#define D_IM_R2Y_STATE_BUSY_YYW0A		(0x08)
+#define D_IM_R2Y_STATE_BUSY_YYW1		(0x10)
+#define D_IM_R2Y_STATE_BUSY_YYW2		(0x20)
+#define D_IM_R2Y_STATE_BUSY_ALL			(D_IM_R2Y_STATE_BUSY_F_R2Y | D_IM_R2Y_STATE_BUSY_YYR | D_IM_R2Y_STATE_BUSY_YYW0 | D_IM_R2Y_STATE_BUSY_YYW0A | D_IM_R2Y_STATE_BUSY_YYW1 | D_IM_R2Y_STATE_BUSY_YYW2)
+
+// YYINTE value
+#define D_IM_R2Y_YYINTE_YYW0_ENABLE		(0x00337131)	// YYR, YYW0, YYW0a, AXI
+#define D_IM_R2Y_YYINTE_YYW1_ENABLE		(0x00337141)	// YYR, YYW1, AXI
+#define D_IM_R2Y_YYINTE_YYW2_ENABLE		(0x00337181)	// YYR, YYW1, AXI
+#define D_IM_R2Y_YYINTE_DISABLE			(0x00000000)
+// YINTF value
+#define D_IM_R2Y_YYINTF_ALL_CLR			(0x003371F1)	// YYR, YYW0, YYW0a, YYW1, YYW2, AXI
+
+// R2YINTE value
+#define D_IM_R2Y_R2YINTE_ALL_ENABLE		(0x0111)
+#define D_IM_R2Y_R2YINTE_DISABLE		(0x0000)
+
+// R2YINTF value
+#define D_IM_R2Y_R2YINTF_ALL_CLR		(0x0111)
+
+// register bit pattern
+#define D_IM_R2Y_FR2YTRG_OFF			(0)
+#define D_IM_R2Y_FR2YTRG_ON				(1)
+#define D_IM_R2Y_FR2YTRG_IDLE			(2)
+#define D_IM_R2Y_FR2YTRG_BUSY			(3)
+
+#define D_IM_R2Y_YYRTRG_OFF				(0)
+#define D_IM_R2Y_YYRTRG_ON				(1)
+#define D_IM_R2Y_YYRTRG_IDLE			(2)
+#define D_IM_R2Y_YYRTRG_BUSY			(3)
+
+#define D_IM_R2Y_YYWTRG_OFF				(0)
+#define D_IM_R2Y_YYWTRG_ON				(1)
+#define D_IM_R2Y_YYWTRG_IDLE			(2)
+#define D_IM_R2Y_YYWTRG_BUSY			(3)
+
+#define D_IM_R2Y_PACK10_MSB_CYCLE_PIXS	(4)
+#define D_IM_R2Y_PACK12_MSB_CYCLE_PIXS	(2)
+
+// YYRHSIZ register value
+#define D_IM_R2Y_YYRHSIZ_MIN			(96)
+#define D_IM_R2Y_YYRHSIZ_MAX			(2360)
+
+// YYRVSIZ register value
+#define D_IM_R2Y_YYRVSIZ_MIN			(72)
+#define D_IM_R2Y_YYRVSIZ_MAX			(8960)
+
+// HSTHSTA register value
+#define D_IM_R2Y_HSTHSTA_MIN			(0)
+#define D_IM_R2Y_HSTHSTA_MAX			(2262)
+
+// HSTHSIZ register value
+#define D_IM_R2Y_HSTHSIZ_MIN			(96)
+#define D_IM_R2Y_HSTHSIZ_MAX			(2360)
+
+// HSTVSTA register value
+#define D_IM_R2Y_HSTVSTA_MIN			(0)
+#define D_IM_R2Y_HSTVSTA_MAX			(8886)
+
+// HSTVSIZ register value
+#define D_IM_R2Y_HSTVSIZ_MIN			(72)
+#define D_IM_R2Y_HSTVSIZ_MAX			(8960)
+
+// TRMxHSTA register value
+#define D_IM_R2Y_TRMHSTA_MIN			(0)
+#define D_IM_R2Y_TRMHSTA_MAX			(2262)
+
+// TRMxHSIZ register value
+#define D_IM_R2Y_TRMHSIZ_MIN			(96)
+#define D_IM_R2Y_TRMHSIZ_MAX			(2360)
+
+// TRMxVSTA register value
+#define D_IM_R2Y_TRMVSTA_MIN			(0)
+#define D_IM_R2Y_TRMVSTA_MAX			(8886)
+
+// TRMxVSIZ register value
+#define D_IM_R2Y_TRMVSIZ_MIN			(72)
+#define D_IM_R2Y_TRMVSIZ_MAX			(8960)
+
+// R2Y Photo/Video mode(DINCTL.B2RDIN)
+#define D_IM_R2Y_MODE_SDRAM_INPUT		(0)
+#define D_IM_R2Y_MODE_DIRECT			(1)
+
+#define D_IM_R2Y_SRAM_WAIT_USEC			(1)
+
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+// Nothing Special
+#endif
+
+static volatile struct io_r2y*			gIM_Io_R2y_Reg_Ptr[D_IM_R2Y_PIPE_MAX] = { &IO_R2Y_P1, &IO_R2Y_P2, &IO_R2Y_P3 };
+static volatile struct io_r2y_sram*		gIM_Io_R2y_Tbl_Ptr[D_IM_R2Y_PIPE_MAX] = { &IO_R2Y_TBL_P1, &IO_R2Y_TBL_P2, &IO_R2Y_TBL_P3 };
+
+/*----------------------------------------------------------------------*/
+/* Macro																*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+#define im_r2y_inc_bank_index(bank_index, max)	(((bank_index) + 1) % (max))
+
+// Check R2Y activate
+#define im_r2y_yyr_is_activated(a)				(gIM_Io_R2y_Reg_Ptr[a]->YYR.YYRTRG.bit.YYRTRG != D_IM_R2Y_YYRTRG_IDLE)
+#define im_r2y_yyw_is_activated(a)				(gIM_Io_R2y_Reg_Ptr[a]->YYW.YYWTRG.bit.YYWTRG != D_IM_R2Y_YYWTRG_IDLE)
+
+#define im_r2y_rounddown_2(a)					(((a) >> 1) << 1)					// for 2 byte alignment
+
+#define im_r2y_max( a, b )						(((a) > (b)) ? (a) : (b))
+#define im_r2y_min( a, b )						(((a) < (b)) ? (a) : (b))
+
+#define im_r2y_check_target_pipe_no_1(a)		(((a) + 1) & (D_IM_R2Y_PIPE1 + 1))
+#define im_r2y_check_target_pipe_no_2(a)		(((a) + 1) & (D_IM_R2Y_PIPE2 + 1))
+
+// The structure type matching check.
+#ifdef IM_R2Y_REG_TYPE_CHECK
+#define im_r2y_check_reg_type( dst, src )	(dst) = (src);
+#else
+#define im_r2y_check_reg_type( dst, src )
+#endif
+
+
+
+// Signed register access macros.
+#define im_r2y_set_reg_signed( reg, type, member, val )		\
+		{ \
+			type work = { .word = 0UL }; \
+			work.bit.member = (val); \
+			(reg).bit.member = work.bit.member; \
+			im_r2y_check_reg_type( work, (reg) );	/* The structure type matching check. */ \
+		}
+
+#define im_r2y_set_reg_signed_a( reg, type, member, val )		\
+		{ \
+			type work = { .word[0] = 0xFFFFFFFFUL }; \
+			work.bit.member = (val); \
+			(reg).bit.member = work.bit.member; \
+			im_r2y_check_reg_type( work, (reg) );	/* The structure type matching check. */ \
+		}
+
+
+// wait usec
+#define im_r2y_wait_usec( usec )				Dd_ARM_Wait_ns( (usec) * 1000 )
+
+
+#ifdef CO_ASSERT_ON
+#define M_IM_R2Y_ASSETION_MSG( msg )		(msg)
+#else
+#define M_IM_R2Y_ASSETION_MSG( msg )		("")
+#endif
+
+
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+// Nothing Special
+#endif
+
+/*----------------------------------------------------------------------*/
+/* Enumeration															*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+// Nothing Special
+
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+// Nothing Special
+#endif
+
+/*----------------------------------------------------------------------*/
+/* Structure  															*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+
+// Ring pixel information
+typedef struct {
+	UCHAR					pad_enable;
+	UCHAR					ring_pixs;
+	UCHAR					pad_pixs;
+	UCHAR					ref_pixs;
+} T_IM_R2Y_RING_PIXS;
+
+// control information
+typedef struct {
+	UCHAR					was_started;									// 1st call Im_R2Y_Start() after Im_R2Y_Stop() or Im_R2Y_Init()
+	UCHAR					video_photo_mode;								// Now operation mode(Photo/Video)
+	UCHAR					busy_state;										// Starting state for YYR/YYW/F_R2Y
+	UCHAR					ycf_bypass;										// YCF bypass mode
+	UCHAR					ycf_padding;									// YCF padding mode
+	UCHAR					mcc_select;										// MCC process select
+	UCHAR					mcc_bit_shift;									// MCC bit shift mode
+	UCHAR					resize_mode[D_IM_R2Y_YYW_CH_MAX - 1];			// Resize mode
+	UCHAR					pix_avg_reduct_mode[D_IM_R2Y_YYW_CH_MAX - 1];	// Pixel average reduction mode
+	UCHAR					pix_avg_reduct_en[D_IM_R2Y_YYW_CH_MAX - 1];		// Pixel average reduction enable
+	UCHAR					output_mode_0a;									// Output channel 0a mode
+	UINT32					int_status;										// Interrupt status
+	VOID					(*r2y_user_handler)(UINT32* int_status, UINT32 user_param);					// Interrupt Handler
+	UINT32					user_param;										// return to callback argument value when interrupt occurs
+	UCHAR					input_dtype;									// input dtype
+	ULONG					in_addr[D_IM_R2Y_PORT_MAX];						// input image address
+	USHORT					input_global;									// RGB global width(16bytes align)
+	UCHAR					top_offset[D_IM_R2Y_PORT_MAX];					// RGB Top area bit offset
+	UCHAR					yyw_enable[D_IM_R2Y_YYW_CH_MAX - 1];			// YYW0(&0a)/1/2 enable
+	UCHAR					yyw_rect_valid;									// validation of yyw_width and yyw_lines
+	USHORT					yyw_width[D_IM_R2Y_YYW_CH_MAX];					// output image width for YYW0/1/2
+	USHORT					yyw_lines[D_IM_R2Y_YYW_CH_MAX];					// output image lines for YYW0/1/2
+	T_IM_R2Y_RING_PIXS		ring_pixs_info;									// Ring pixel information
+	T_IM_R2Y_RECT			input_size;										// YYR input size
+	T_IM_R2Y_CTRL_TRIMMING	trim[D_IM_R2Y_YYW_CH_MAX - 1];					// trim macro setting
+	T_IM_R2Y_CTRL_TRIMMING_EXT	trim_ext;									// trim macro setting(external)
+} T_IM_R2Y_STATE_MNG;
+
+// Output address management information
+typedef struct {
+	T_IM_R2Y_OUTBANK_INFO	bank_info;		// Output bank information
+	UCHAR					latest_idx;		// Latest Output bank index.
+	T_IM_R2Y_OUTADDR_INFO	latest_addr;	// Latest Output address.
+} T_IM_R2Y_OUTPUT_MNG;
+
+typedef struct {
+	ULONG					x_start_pos;	// resize horizontal start pos		@RSZ0HSTA, @RSZ1HSTA, @RSZ2HSTA
+	ULONG					x_pitch;		// resize horizontal pitch			@RSZ0HPIT, @RSZ1HPIT, @RSZ2HPIT
+	ULONG					y_start_pos;	// resize vertical start pos		@RSZ0VSTA, @RSZ1VSTA, @RSZ2VSTA
+	ULONG					y_pitch;		// resize vertical pitch			@RSZ0VPIT, @RSZ1VPIT, @RSZ2VPIT
+} T_IM_R2Y_OUT_PITCH;
+
+typedef struct {
+	USHORT					ofs_x_pixs;
+	USHORT					ofs_y_pixs;
+	ULONG					ofs_bytes;
+} T_IM_R2Y_YYRA_OFS_INFO;
+
+// Interrupt parameter table
+typedef struct {
+	ULONG					flg_bitmask;		// Bitmask of interrupt flag.
+	ULONG					ena_bitmask;		// Bitmask of inaerrupt enable.
+	ULONG					waitflg;			// Value of set_flg.
+	ULONG					int_status;			// Value of gIM_R2Y_State.int_status.
+	ULONG					busy_state;			// Value of gIM_R2Y_State.busy_state.
+} T_IM_R2Y_INTFLG_TBL;
+
+// Access enable register management
+typedef struct {
+	UCHAR					ctrl_cnt[D_IM_R2Y_PIPE_COUNT];
+	VOID					(*reg_set_func)( UCHAR pipe_no, UCHAR enable );
+} T_IM_R2Y_ACCESS_ENABLE_MANAGE;
+
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+// Nothing Special
+#endif
+
+/*----------------------------------------------------------------------*/
+/* Global Data															*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+// R2Y status
+static volatile T_IM_R2Y_STATE_MNG gIM_R2Y_State[D_IM_R2Y_PIPE_COUNT];
+
+// Resize parameter
+static volatile T_IM_R2Y_RESIZE_PARAM gIM_R2Y_Resize_Param[D_IM_R2Y_PIPE_COUNT];
+
+// Output parameter
+static volatile T_IM_R2Y_OUTPUT_MNG gIM_R2Y_Out_Mng[D_IM_R2Y_PIPE_COUNT][D_IM_R2Y_YYW_CH_MAX];
+
+// YYRA offset information
+static volatile T_IM_R2Y_YYRA_OFS_INFO gIM_R2Y_yyra_ofs_info[D_IM_R2Y_PIPE_COUNT];
+
+
+// Clock control counter
+#ifdef CO_ACT_R2Y_CLOCK
+static volatile UCHAR gIM_R2Y_Clk_Ctrl_Cnt[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif	// CO_ACT_R2Y_CLOCK
+#ifdef CO_ACT_R2Y_HCLOCK
+static volatile UCHAR gIM_R2Y_Hclk_Ctrl_Cnt[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif	// CO_ACT_R2Y_HCLOCK
+#ifdef CO_ACT_R2Y_PCLOCK
+static volatile UCHAR gIM_R2Y_Pclk_Ctrl_Cnt[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif	// CO_ACT_R2Y_PCLOCK
+#ifdef CO_ACT_R2Y_ICLOCK
+static volatile UCHAR gIM_R2Y_Iclk_Ctrl_Cnt[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif	// CO_ACT_R2Y_ICLOCK
+
+
+// clock off control is disabled(for register dump on debugger)
+#ifdef CO_ACT_R2Y_CLOCK
+static volatile UINT32 gIM_R2Y_Clk_Ctrl_Disable[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif	// CO_ACT_R2Y_CLOCK
+#ifdef CO_ACT_R2Y_HCLOCK
+static volatile UINT32 gIM_R2Y_Hclk_Ctrl_Disable[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif	// CO_ACT_R2Y_HCLOCK
+#ifdef CO_ACT_R2Y_PCLOCK
+static volatile UINT32 gIM_R2Y_Pclk_Ctrl_Disable[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif	// CO_ACT_R2Y_PCLOCK
+#ifdef CO_ACT_R2Y_ICLOCK
+static volatile UINT32 gIM_R2Y_Iclk_Ctrl_Disable[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif	// CO_ACT_R2Y_ICLOCK
+
+
+#ifdef D_IM_R2Y_DEBUG_ON_PC
+volatile UCHAR gIM_R2Y_macro_fake_finish[D_IM_R2Y_PIPE_COUNT] = {0,0};
+#endif
+
+
+static volatile UCHAR gim_r2y_yyw_param_hold_ctrl_cnt[D_IM_R2Y_PIPE_COUNT] = {0,0};
+
+static ULONG gOsUsr_Spin_Lock __attribute__((section(".LOCK_SECTION"), aligned(64)));
+
+//
+// Interrupt parameter table
+//
+static const T_IM_R2Y_INTFLG_TBL gim_r2y_inttbl_jdsr2y[D_IM_R2Y_PIPE_COUNT][13] = {
+	{
+		{ 0x00000001, 0x00000001, D_IM_R2Y1_INT_FLG_YYR_END,    D_IM_R2Y1_INT_STATE_YYR_END,    D_IM_R2Y_STATE_BUSY_YYR },		// YYREE
+		{ 0x00000010, 0x00000010, D_IM_R2Y1_INT_FLG_YYW0_END,   D_IM_R2Y1_INT_STATE_YYW0_END,   D_IM_R2Y_STATE_BUSY_YYW0 },		// YYW0EE
+		{ 0x00000020, 0x00000020, D_IM_R2Y1_INT_FLG_YYW0A_END,  D_IM_R2Y1_INT_STATE_YYW0A_END,  D_IM_R2Y_STATE_BUSY_YYW0A },	// YYWAEE
+		{ 0x00000040, 0x00000040, D_IM_R2Y1_INT_FLG_YYW1_END,   D_IM_R2Y1_INT_STATE_YYW1_END,   D_IM_R2Y_STATE_BUSY_YYW1 },		// YYW1EE
+		{ 0x00000080, 0x00000080, D_IM_R2Y1_INT_FLG_YYW2_END,   D_IM_R2Y1_INT_STATE_YYW2_END,   D_IM_R2Y_STATE_BUSY_YYW2 },		// YYW2EE
+		{ 0x00000100, 0x00000100, D_IM_R2Y1_INT_FLG_YYWALL_END, D_IM_R2Y1_INT_STATE_YYWALL_END, (D_IM_R2Y_STATE_BUSY_YYW0 | D_IM_R2Y_STATE_BUSY_YYW0A | D_IM_R2Y_STATE_BUSY_YYW1 | D_IM_R2Y_STATE_BUSY_YYW2 ) },	// YYWEE
+		{ 0x00001000, 0x00001000, D_IM_R2Y1_INT_FLG_LINE0_END,  D_IM_R2Y1_INT_STATE_LINE0_END,  0 },	// LINT0E
+		{ 0x00002000, 0x00002000, D_IM_R2Y1_INT_FLG_LINE1_END,  D_IM_R2Y1_INT_STATE_LINE1_END,  0 },	// LINT1E
+		{ 0x00004000, 0x00004000, D_IM_R2Y1_INT_FLG_LINE2_END,  D_IM_R2Y1_INT_STATE_LINE2_END,  0 },	// LINT2E
+		{ 0x00010000, 0x00010000, D_IM_R2Y1_INT_FLG_YYR_ERR,    D_IM_R2Y1_INT_STATE_YYR_ERR,    D_IM_R2Y_STATE_BUSY_YYR },		// YYRERE
+		{ 0x00020000, 0x00020000, D_IM_R2Y1_INT_FLG_YYW_ERR,    D_IM_R2Y1_INT_STATE_YYW_ERR,    (D_IM_R2Y_STATE_BUSY_YYW0 | D_IM_R2Y_STATE_BUSY_YYW0A | D_IM_R2Y_STATE_BUSY_YYW1 | D_IM_R2Y_STATE_BUSY_YYW2) },	// YYWERE
+		{ 0x00100000, 0x00100000, D_IM_R2Y1_INT_FLG_AXR_ERR,    D_IM_R2Y1_INT_STATE_AXR_ERR,    0 },	// AXRERE
+		{ 0x00200000, 0x00200000, D_IM_R2Y1_INT_FLG_AXW_ERR,    D_IM_R2Y1_INT_STATE_AXW_ERR,    0 },	// AXWERE
+	},
+	{
+		{ 0x00000001, 0x00000001, D_IM_R2Y2_INT_FLG_YYR_END,    D_IM_R2Y2_INT_STATE_YYR_END,    D_IM_R2Y_STATE_BUSY_YYR },		// YYREE
+		{ 0x00000010, 0x00000010, D_IM_R2Y2_INT_FLG_YYW0_END,   D_IM_R2Y2_INT_STATE_YYW0_END,   D_IM_R2Y_STATE_BUSY_YYW0 },		// YYW0EE
+		{ 0x00000020, 0x00000020, D_IM_R2Y2_INT_FLG_YYW0A_END,  D_IM_R2Y2_INT_STATE_YYW0A_END,  D_IM_R2Y_STATE_BUSY_YYW0A },	// YYWAEE
+		{ 0x00000040, 0x00000040, D_IM_R2Y2_INT_FLG_YYW1_END,   D_IM_R2Y2_INT_STATE_YYW1_END,   D_IM_R2Y_STATE_BUSY_YYW1 },		// YYW1EE
+		{ 0x00000080, 0x00000080, D_IM_R2Y2_INT_FLG_YYW2_END,   D_IM_R2Y2_INT_STATE_YYW2_END,   D_IM_R2Y_STATE_BUSY_YYW2 },		// YYW2EE
+		{ 0x00000100, 0x00000100, D_IM_R2Y2_INT_FLG_YYWALL_END, D_IM_R2Y2_INT_STATE_YYWALL_END, (D_IM_R2Y_STATE_BUSY_YYW0 | D_IM_R2Y_STATE_BUSY_YYW0A | D_IM_R2Y_STATE_BUSY_YYW1 | D_IM_R2Y_STATE_BUSY_YYW2 ) },	// YYWEE
+		{ 0x00001000, 0x00001000, D_IM_R2Y2_INT_FLG_LINE0_END,  D_IM_R2Y2_INT_STATE_LINE0_END,  0 },	// LINT0E
+		{ 0x00002000, 0x00002000, D_IM_R2Y2_INT_FLG_LINE1_END,  D_IM_R2Y2_INT_STATE_LINE1_END,  0 },	// LINT1E
+		{ 0x00004000, 0x00004000, D_IM_R2Y2_INT_FLG_LINE2_END,  D_IM_R2Y2_INT_STATE_LINE2_END,  0 },	// LINT2E
+		{ 0x00010000, 0x00010000, D_IM_R2Y2_INT_FLG_YYR_ERR,    D_IM_R2Y2_INT_STATE_YYR_ERR,    D_IM_R2Y_STATE_BUSY_YYR },		// YYRERE
+		{ 0x00020000, 0x00020000, D_IM_R2Y2_INT_FLG_YYW_ERR,    D_IM_R2Y2_INT_STATE_YYW_ERR,    (D_IM_R2Y_STATE_BUSY_YYW0 | D_IM_R2Y_STATE_BUSY_YYW0A | D_IM_R2Y_STATE_BUSY_YYW1 | D_IM_R2Y_STATE_BUSY_YYW2) },	// YYWERE
+		{ 0x00100000, 0x00100000, D_IM_R2Y2_INT_FLG_AXR_ERR,    D_IM_R2Y2_INT_STATE_AXR_ERR,    0 },	// AXRERE
+		{ 0x00200000, 0x00200000, D_IM_R2Y2_INT_FLG_AXW_ERR,    D_IM_R2Y2_INT_STATE_AXW_ERR,    0 },	// AXWERE
+	},
+};
+
+static const T_IM_R2Y_INTFLG_TBL gim_r2y_inttbl_fr2y[D_IM_R2Y_PIPE_COUNT][3] = {
+	{
+		{ 0x00000001, 0x00000001, D_IM_R2Y1_INT_FLG_YCFERR_ERR, D_IM_R2Y1_INT_STATE_YCFERR_ERR, 0 },	// YCFERE
+		{ 0x00000010, 0x00000010, D_IM_R2Y1_INT_FLG_TCT_END,    D_IM_R2Y1_INT_STATE_TCT_END,    0 },	// TCTEE
+		{ 0x00000100, 0x00000100, D_IM_R2Y1_INT_FLG_TCHS_END,   D_IM_R2Y1_INT_STATE_TCHS_END,   0 },	// TCHSEE
+	},
+	{
+		{ 0x00000001, 0x00000001, D_IM_R2Y2_INT_FLG_YCFERR_ERR, D_IM_R2Y2_INT_STATE_YCFERR_ERR, 0 },	// YCFERE
+		{ 0x00000010, 0x00000010, D_IM_R2Y2_INT_FLG_TCT_END,    D_IM_R2Y2_INT_STATE_TCT_END,    0 },	// TCTEE
+		{ 0x00000100, 0x00000100, D_IM_R2Y2_INT_FLG_TCHS_END,   D_IM_R2Y2_INT_STATE_TCHS_END,   0 },	// TCHSEE
+	},
+};
+
+
+//
+// Access enable register manager
+//
+static VOID im_r2y_set_histogram_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_histogram_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_histogram_access_enable,
+};
+
+static VOID im_r2y_set_rgb_deknee_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_rgb_deknee_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_rgb_deknee_access_enable,
+};
+
+static VOID im_r2y_set_tct_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_tct_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_tct_access_enable,
+};
+
+static VOID im_r2y_set_btc_histogram_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_btc_histogram_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_btc_histogram_access_enable,
+};
+
+static VOID im_r2y_set_high_edge_scl_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_high_edge_scl_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_high_edge_scl_tbl_access_enable,
+};
+
+static VOID im_r2y_set_high_edge_step_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_high_edge_step_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_high_edge_step_tbl_access_enable,
+};
+
+static VOID im_r2y_set_medium_edge_scl_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_medium_edge_scl_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_medium_edge_scl_tbl_access_enable,
+};
+
+static VOID im_r2y_set_medium_edge_step_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_medium_edge_step_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_medium_edge_step_tbl_access_enable,
+};
+
+static VOID im_r2y_set_low_edge_scl_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_low_edge_scl_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_low_edge_scl_tbl_access_enable,
+};
+
+static VOID im_r2y_set_low_edge_step_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_low_edge_step_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_low_edge_step_tbl_access_enable,
+};
+
+static VOID im_r2y_set_map_scl_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_map_scl_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_map_scl_tbl_access_enable,
+};
+
+static VOID im_r2y_set_tone_control_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_tone_control_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_tone_control_tbl_access_enable,
+};
+
+static VOID im_r2y_set_gamma_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_gamma_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_gamma_tbl_access_enable,
+};
+
+static VOID im_r2y_set_gamma_yb_tbl_access_enable( UCHAR pipe_no, const UCHAR enable );
+static volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE gim_r2y_gamma_yb_tbl_accen_ctrl = {
+	.ctrl_cnt = { 0, 0 },
+	.reg_set_func = im_r2y_set_gamma_yb_tbl_access_enable,
+};
+
+
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+static const T_IM_R2Y_CTRL_RDMA_EE0_ADDR	gIM_R2Y_EE0_Addr[3] = {
+	{
+		0x2841C400, 0x2841C408, 0x2841C40C, 0x2841C410, 0x2841C414, 0x2841C418, 0x2841C41C, 0x2841C420,
+		0x2841C424, 0x2841C428, 0x2841C42C, 0x2841C430, 0x2841C434, 0x2841C438, 0x2841C440, 0x2841C444,
+		0x2841C448, 0x2841C44C, 0x2841C450, 0x2841C460, 0x2841C464, 0x2841C468, 0x2841C470, 0x2841C474,
+		0x2841C478, 0x2841C480, 0x2841C484, 0x2841C488, 0x2841C48C, 0x2841C490, 0x2841C4A0, 0x2841C4A4,
+		0x2841C4A8, 0x2841C4B0, 0x2841C4B4, 0x2841C4C0, 0x2841C4C4, 0x2841C4C8, 0x2841C4D0, 0x2841C4D8,
+		0x2841C4DC, 0x2841C4E0, 0x2841C4E4, 0x2841C4E8, 0x2841C4F0, 0x2841C4F4, 0x2841C4F8, 0x2841C4FC,
+		0x2841C500, 0x2841C504, 0x2841C508,
+	},
+	{
+		0x2851C400, 0x2851C408, 0x2851C40C, 0x2851C410, 0x2851C414, 0x2851C418, 0x2851C41C, 0x2851C420,
+		0x2851C424, 0x2851C428, 0x2851C42C, 0x2851C430, 0x2851C434, 0x2851C438, 0x2851C440, 0x2851C444,
+		0x2851C448, 0x2851C44C, 0x2851C450, 0x2851C460, 0x2851C464, 0x2851C468, 0x2851C470, 0x2851C474,
+		0x2851C478, 0x2851C480, 0x2851C484, 0x2851C488, 0x2851C48C, 0x2851C490, 0x2851C4A0, 0x2851C4A4,
+		0x2851C4A8, 0x2851C4B0, 0x2851C4B4, 0x2851C4C0, 0x2851C4C4, 0x2851C4C8, 0x2851C4D0, 0x2851C4D8,
+		0x2851C4DC, 0x2851C4E0, 0x2851C4E4, 0x2851C4E8, 0x2851C4F0, 0x2851C4F4, 0x2851C4F8, 0x2851C4FC,
+		0x2851C500, 0x2851C504, 0x2851C508,
+	},
+	{
+		0x2861C400, 0x2861C408, 0x2861C40C, 0x2861C410, 0x2861C414, 0x2861C418, 0x2861C41C, 0x2861C420,
+		0x2861C424, 0x2861C428, 0x2861C42C, 0x2861C430, 0x2861C434, 0x2861C438, 0x2861C440, 0x2861C444,
+		0x2861C448, 0x2861C44C, 0x2861C450, 0x2861C460, 0x2861C464, 0x2861C468, 0x2861C470, 0x2861C474,
+		0x2861C478, 0x2861C480, 0x2861C484, 0x2861C488, 0x2861C48C, 0x2861C490, 0x2861C4A0, 0x2861C4A4,
+		0x2861C4A8, 0x2861C4B0, 0x2861C4B4, 0x2861C4C0, 0x2861C4C4, 0x2861C4C8, 0x2861C4D0, 0x2861C4D8,
+		0x2861C4DC, 0x2861C4E0, 0x2861C4E4, 0x2861C4E8, 0x2861C4F0, 0x2861C4F4, 0x2861C4F8, 0x2861C4FC,
+		0x2861C500, 0x2861C504, 0x2861C508,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EE1_ADDR	gIM_R2Y_EE1_Addr[3] = {
+	{
+		0x2841C600, 0x2841C608, 0x2841C60C, 0x2841C610, 0x2841C618, 0x2841C61C, 0x2841C620, 0x2841C628,
+		0x2841C62C, 0x2841C630, 0x2841C634, 0x2841C638, 0x2841C640, 0x2841C644, 0x2841C648, 0x2841C650,
+		0x2841C654, 0x2841C658, 0x2841C660, 0x2841C664, 0x2841C668, 0x2841C66C, 0x2841C670, 0x2841C680,
+		0x2841C684, 0x2841C688, 0x2841C68C, 0x2841C690, 0x2841C6A0, 0x2841C6A4, 0x2841C6A8, 0x2841C6C0,
+		0x2841C6C4, 0x2841C6C8, 0x2841C6CC, 0x2841C6D0, 0x2841C6E0, 0x2841C6E4, 0x2841C6E8, 0x2841C6EC,
+		0x2841C6F0, 0x2841C700, 0x2841C704, 0x2841C708, 0x2841C710, 0x2841C714, 0x2841C718, 0x2841C720,
+		0x2841C724, 0x2841C730, 0x2841C734, 0x2841C738, 0x2841C740, 0x2841C744, 0x2841C748, 0x2841C750,
+		0x2841C754, 0x2841C758, 0x2841C75C, 0x2841C760, 0x2841C764, 0x2841C768, 0x2841C76C, 0x2841C770,
+		0x2841C774,
+	},
+	{
+		0x2851C600, 0x2851C608, 0x2851C60C, 0x2851C610, 0x2851C618, 0x2851C61C, 0x2851C620, 0x2851C628,
+		0x2851C62C, 0x2851C630, 0x2851C634, 0x2851C638, 0x2851C640, 0x2851C644, 0x2851C648, 0x2851C650,
+		0x2851C654, 0x2851C658, 0x2851C660, 0x2851C664, 0x2851C668, 0x2851C66C, 0x2851C670, 0x2851C680,
+		0x2851C684, 0x2851C688, 0x2851C68C, 0x2851C690, 0x2851C6A0, 0x2851C6A4, 0x2851C6A8, 0x2851C6C0,
+		0x2851C6C4, 0x2851C6C8, 0x2851C6CC, 0x2851C6D0, 0x2851C6E0, 0x2851C6E4, 0x2851C6E8, 0x2851C6EC,
+		0x2851C6F0, 0x2851C700, 0x2851C704, 0x2851C708, 0x2851C710, 0x2851C714, 0x2851C718, 0x2851C720,
+		0x2851C724, 0x2851C730, 0x2851C734, 0x2851C738, 0x2851C740, 0x2851C744, 0x2851C748, 0x2851C750,
+		0x2851C754, 0x2851C758, 0x2851C75C, 0x2851C760, 0x2851C764, 0x2851C768, 0x2851C76C, 0x2851C770,
+		0x2851C774,
+	},
+	{
+		0x2861C600, 0x2861C608, 0x2861C60C, 0x2861C610, 0x2861C618, 0x2861C61C, 0x2861C620, 0x2861C628,
+		0x2861C62C, 0x2861C630, 0x2861C634, 0x2861C638, 0x2861C640, 0x2861C644, 0x2861C648, 0x2861C650,
+		0x2861C654, 0x2861C658, 0x2861C660, 0x2861C664, 0x2861C668, 0x2861C66C, 0x2861C670, 0x2861C680,
+		0x2861C684, 0x2861C688, 0x2861C68C, 0x2861C690, 0x2861C6A0, 0x2861C6A4, 0x2861C6A8, 0x2861C6C0,
+		0x2861C6C4, 0x2861C6C8, 0x2861C6CC, 0x2861C6D0, 0x2861C6E0, 0x2861C6E4, 0x2861C6E8, 0x2861C6EC,
+		0x2861C6F0, 0x2861C700, 0x2861C704, 0x2861C708, 0x2861C710, 0x2861C714, 0x2861C718, 0x2861C720,
+		0x2861C724, 0x2861C730, 0x2861C734, 0x2861C738, 0x2861C740, 0x2861C744, 0x2861C748, 0x2861C750,
+		0x2861C754, 0x2861C758, 0x2861C75C, 0x2861C760, 0x2861C764, 0x2861C768, 0x2861C76C, 0x2861C770,
+		0x2861C774,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_DEKNEE_TBL_ADDR	gIM_R2Y_Deknee_Tbl_R_Addr[3] = {
+	{
+		{
+			0x294AE000, 0x294AE004, 0x294AE008, 0x294AE00C, 0x294AE010, 0x294AE014, 0x294AE018, 0x294AE01C,
+			0x294AE020, 0x294AE024, 0x294AE028, 0x294AE02C, 0x294AE030, 0x294AE034, 0x294AE038, 0x294AE03C,
+			0x294AE040, 0x294AE044, 0x294AE048, 0x294AE04C, 0x294AE050, 0x294AE054, 0x294AE058, 0x294AE05C,
+			0x294AE060, 0x294AE064, 0x294AE068, 0x294AE06C, 0x294AE070, 0x294AE074, 0x294AE078, 0x294AE07C,
+			0x294AE080, 0x294AE084, 0x294AE088, 0x294AE08C, 0x294AE090, 0x294AE094, 0x294AE098, 0x294AE09C,
+			0x294AE0A0, 0x294AE0A4, 0x294AE0A8, 0x294AE0AC, 0x294AE0B0, 0x294AE0B4, 0x294AE0B8, 0x294AE0BC,
+			0x294AE0C0, 0x294AE0C4, 0x294AE0C8, 0x294AE0CC, 0x294AE0D0, 0x294AE0D4, 0x294AE0D8, 0x294AE0DC,
+			0x294AE0E0, 0x294AE0E4, 0x294AE0E8, 0x294AE0EC, 0x294AE0F0, 0x294AE0F4, 0x294AE0F8, 0x294AE0FC,
+			0x294AE100, 0x294AE104, 0x294AE108, 0x294AE10C, 0x294AE110, 0x294AE114, 0x294AE118, 0x294AE11C,
+			0x294AE120, 0x294AE124, 0x294AE128, 0x294AE12C, 0x294AE130, 0x294AE134, 0x294AE138, 0x294AE13C,
+			0x294AE140, 0x294AE144, 0x294AE148, 0x294AE14C, 0x294AE150, 0x294AE154, 0x294AE158, 0x294AE15C,
+			0x294AE160, 0x294AE164, 0x294AE168, 0x294AE16C, 0x294AE170, 0x294AE174, 0x294AE178, 0x294AE17C,
+			0x294AE180, 0x294AE184, 0x294AE188, 0x294AE18C, 0x294AE190, 0x294AE194, 0x294AE198, 0x294AE19C,
+			0x294AE1A0, 0x294AE1A4, 0x294AE1A8, 0x294AE1AC, 0x294AE1B0, 0x294AE1B4, 0x294AE1B8, 0x294AE1BC,
+			0x294AE1C0, 0x294AE1C4, 0x294AE1C8, 0x294AE1CC, 0x294AE1D0, 0x294AE1D4, 0x294AE1D8, 0x294AE1DC,
+			0x294AE1E0, 0x294AE1E4, 0x294AE1E8, 0x294AE1EC, 0x294AE1F0, 0x294AE1F4, 0x294AE1F8, 0x294AE1FC,
+		},
+	},
+	{
+		{
+			0x295AE000, 0x295AE004, 0x295AE008, 0x295AE00C, 0x295AE010, 0x295AE014, 0x295AE018, 0x295AE01C,
+			0x295AE020, 0x295AE024, 0x295AE028, 0x295AE02C, 0x295AE030, 0x295AE034, 0x295AE038, 0x295AE03C,
+			0x295AE040, 0x295AE044, 0x295AE048, 0x295AE04C, 0x295AE050, 0x295AE054, 0x295AE058, 0x295AE05C,
+			0x295AE060, 0x295AE064, 0x295AE068, 0x295AE06C, 0x295AE070, 0x295AE074, 0x295AE078, 0x295AE07C,
+			0x295AE080, 0x295AE084, 0x295AE088, 0x295AE08C, 0x295AE090, 0x295AE094, 0x295AE098, 0x295AE09C,
+			0x295AE0A0, 0x295AE0A4, 0x295AE0A8, 0x295AE0AC, 0x295AE0B0, 0x295AE0B4, 0x295AE0B8, 0x295AE0BC,
+			0x295AE0C0, 0x295AE0C4, 0x295AE0C8, 0x295AE0CC, 0x295AE0D0, 0x295AE0D4, 0x295AE0D8, 0x295AE0DC,
+			0x295AE0E0, 0x295AE0E4, 0x295AE0E8, 0x295AE0EC, 0x295AE0F0, 0x295AE0F4, 0x295AE0F8, 0x295AE0FC,
+			0x295AE100, 0x295AE104, 0x295AE108, 0x295AE10C, 0x295AE110, 0x295AE114, 0x295AE118, 0x295AE11C,
+			0x295AE120, 0x295AE124, 0x295AE128, 0x295AE12C, 0x295AE130, 0x295AE134, 0x295AE138, 0x295AE13C,
+			0x295AE140, 0x295AE144, 0x295AE148, 0x295AE14C, 0x295AE150, 0x295AE154, 0x295AE158, 0x295AE15C,
+			0x295AE160, 0x295AE164, 0x295AE168, 0x295AE16C, 0x295AE170, 0x295AE174, 0x295AE178, 0x295AE17C,
+			0x295AE180, 0x295AE184, 0x295AE188, 0x295AE18C, 0x295AE190, 0x295AE194, 0x295AE198, 0x295AE19C,
+			0x295AE1A0, 0x295AE1A4, 0x295AE1A8, 0x295AE1AC, 0x295AE1B0, 0x295AE1B4, 0x295AE1B8, 0x295AE1BC,
+			0x295AE1C0, 0x295AE1C4, 0x295AE1C8, 0x295AE1CC, 0x295AE1D0, 0x295AE1D4, 0x295AE1D8, 0x295AE1DC,
+			0x295AE1E0, 0x295AE1E4, 0x295AE1E8, 0x295AE1EC, 0x295AE1F0, 0x295AE1F4, 0x295AE1F8, 0x295AE1FC,
+		},
+	},
+	{
+		{
+			0x296AE000, 0x296AE004, 0x296AE008, 0x296AE00C, 0x296AE010, 0x296AE014, 0x296AE018, 0x296AE01C,
+			0x296AE020, 0x296AE024, 0x296AE028, 0x296AE02C, 0x296AE030, 0x296AE034, 0x296AE038, 0x296AE03C,
+			0x296AE040, 0x296AE044, 0x296AE048, 0x296AE04C, 0x296AE050, 0x296AE054, 0x296AE058, 0x296AE05C,
+			0x296AE060, 0x296AE064, 0x296AE068, 0x296AE06C, 0x296AE070, 0x296AE074, 0x296AE078, 0x296AE07C,
+			0x296AE080, 0x296AE084, 0x296AE088, 0x296AE08C, 0x296AE090, 0x296AE094, 0x296AE098, 0x296AE09C,
+			0x296AE0A0, 0x296AE0A4, 0x296AE0A8, 0x296AE0AC, 0x296AE0B0, 0x296AE0B4, 0x296AE0B8, 0x296AE0BC,
+			0x296AE0C0, 0x296AE0C4, 0x296AE0C8, 0x296AE0CC, 0x296AE0D0, 0x296AE0D4, 0x296AE0D8, 0x296AE0DC,
+			0x296AE0E0, 0x296AE0E4, 0x296AE0E8, 0x296AE0EC, 0x296AE0F0, 0x296AE0F4, 0x296AE0F8, 0x296AE0FC,
+			0x296AE100, 0x296AE104, 0x296AE108, 0x296AE10C, 0x296AE110, 0x296AE114, 0x296AE118, 0x296AE11C,
+			0x296AE120, 0x296AE124, 0x296AE128, 0x296AE12C, 0x296AE130, 0x296AE134, 0x296AE138, 0x296AE13C,
+			0x296AE140, 0x296AE144, 0x296AE148, 0x296AE14C, 0x296AE150, 0x296AE154, 0x296AE158, 0x296AE15C,
+			0x296AE160, 0x296AE164, 0x296AE168, 0x296AE16C, 0x296AE170, 0x296AE174, 0x296AE178, 0x296AE17C,
+			0x296AE180, 0x296AE184, 0x296AE188, 0x296AE18C, 0x296AE190, 0x296AE194, 0x296AE198, 0x296AE19C,
+			0x296AE1A0, 0x296AE1A4, 0x296AE1A8, 0x296AE1AC, 0x296AE1B0, 0x296AE1B4, 0x296AE1B8, 0x296AE1BC,
+			0x296AE1C0, 0x296AE1C4, 0x296AE1C8, 0x296AE1CC, 0x296AE1D0, 0x296AE1D4, 0x296AE1D8, 0x296AE1DC,
+			0x296AE1E0, 0x296AE1E4, 0x296AE1E8, 0x296AE1EC, 0x296AE1F0, 0x296AE1F4, 0x296AE1F8, 0x296AE1FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_DEKNEE_TBL_ADDR	gIM_R2Y_Deknee_Tbl_G_Addr[3] = {
+	{
+		{
+			0x294AE200, 0x294AE204, 0x294AE208, 0x294AE20C, 0x294AE210, 0x294AE214, 0x294AE218, 0x294AE21C,
+			0x294AE220, 0x294AE224, 0x294AE228, 0x294AE22C, 0x294AE230, 0x294AE234, 0x294AE238, 0x294AE23C,
+			0x294AE240, 0x294AE244, 0x294AE248, 0x294AE24C, 0x294AE250, 0x294AE254, 0x294AE258, 0x294AE25C,
+			0x294AE260, 0x294AE264, 0x294AE268, 0x294AE26C, 0x294AE270, 0x294AE274, 0x294AE278, 0x294AE27C,
+			0x294AE280, 0x294AE284, 0x294AE288, 0x294AE28C, 0x294AE290, 0x294AE294, 0x294AE298, 0x294AE29C,
+			0x294AE2A0, 0x294AE2A4, 0x294AE2A8, 0x294AE2AC, 0x294AE2B0, 0x294AE2B4, 0x294AE2B8, 0x294AE2BC,
+			0x294AE2C0, 0x294AE2C4, 0x294AE2C8, 0x294AE2CC, 0x294AE2D0, 0x294AE2D4, 0x294AE2D8, 0x294AE2DC,
+			0x294AE2E0, 0x294AE2E4, 0x294AE2E8, 0x294AE2EC, 0x294AE2F0, 0x294AE2F4, 0x294AE2F8, 0x294AE2FC,
+			0x294AE300, 0x294AE304, 0x294AE308, 0x294AE30C, 0x294AE310, 0x294AE314, 0x294AE318, 0x294AE31C,
+			0x294AE320, 0x294AE324, 0x294AE328, 0x294AE32C, 0x294AE330, 0x294AE334, 0x294AE338, 0x294AE33C,
+			0x294AE340, 0x294AE344, 0x294AE348, 0x294AE34C, 0x294AE350, 0x294AE354, 0x294AE358, 0x294AE35C,
+			0x294AE360, 0x294AE364, 0x294AE368, 0x294AE36C, 0x294AE370, 0x294AE374, 0x294AE378, 0x294AE37C,
+			0x294AE380, 0x294AE384, 0x294AE388, 0x294AE38C, 0x294AE390, 0x294AE394, 0x294AE398, 0x294AE39C,
+			0x294AE3A0, 0x294AE3A4, 0x294AE3A8, 0x294AE3AC, 0x294AE3B0, 0x294AE3B4, 0x294AE3B8, 0x294AE3BC,
+			0x294AE3C0, 0x294AE3C4, 0x294AE3C8, 0x294AE3CC, 0x294AE3D0, 0x294AE3D4, 0x294AE3D8, 0x294AE3DC,
+			0x294AE3E0, 0x294AE3E4, 0x294AE3E8, 0x294AE3EC, 0x294AE3F0, 0x294AE3F4, 0x294AE3F8, 0x294AE3FC,
+		},
+	},
+	{
+		{
+			0x295AE200, 0x295AE204, 0x295AE208, 0x295AE20C, 0x295AE210, 0x295AE214, 0x295AE218, 0x295AE21C,
+			0x295AE220, 0x295AE224, 0x295AE228, 0x295AE22C, 0x295AE230, 0x295AE234, 0x295AE238, 0x295AE23C,
+			0x295AE240, 0x295AE244, 0x295AE248, 0x295AE24C, 0x295AE250, 0x295AE254, 0x295AE258, 0x295AE25C,
+			0x295AE260, 0x295AE264, 0x295AE268, 0x295AE26C, 0x295AE270, 0x295AE274, 0x295AE278, 0x295AE27C,
+			0x295AE280, 0x295AE284, 0x295AE288, 0x295AE28C, 0x295AE290, 0x295AE294, 0x295AE298, 0x295AE29C,
+			0x295AE2A0, 0x295AE2A4, 0x295AE2A8, 0x295AE2AC, 0x295AE2B0, 0x295AE2B4, 0x295AE2B8, 0x295AE2BC,
+			0x295AE2C0, 0x295AE2C4, 0x295AE2C8, 0x295AE2CC, 0x295AE2D0, 0x295AE2D4, 0x295AE2D8, 0x295AE2DC,
+			0x295AE2E0, 0x295AE2E4, 0x295AE2E8, 0x295AE2EC, 0x295AE2F0, 0x295AE2F4, 0x295AE2F8, 0x295AE2FC,
+			0x295AE300, 0x295AE304, 0x295AE308, 0x295AE30C, 0x295AE310, 0x295AE314, 0x295AE318, 0x295AE31C,
+			0x295AE320, 0x295AE324, 0x295AE328, 0x295AE32C, 0x295AE330, 0x295AE334, 0x295AE338, 0x295AE33C,
+			0x295AE340, 0x295AE344, 0x295AE348, 0x295AE34C, 0x295AE350, 0x295AE354, 0x295AE358, 0x295AE35C,
+			0x295AE360, 0x295AE364, 0x295AE368, 0x295AE36C, 0x295AE370, 0x295AE374, 0x295AE378, 0x295AE37C,
+			0x295AE380, 0x295AE384, 0x295AE388, 0x295AE38C, 0x295AE390, 0x295AE394, 0x295AE398, 0x295AE39C,
+			0x295AE3A0, 0x295AE3A4, 0x295AE3A8, 0x295AE3AC, 0x295AE3B0, 0x295AE3B4, 0x295AE3B8, 0x295AE3BC,
+			0x295AE3C0, 0x295AE3C4, 0x295AE3C8, 0x295AE3CC, 0x295AE3D0, 0x295AE3D4, 0x295AE3D8, 0x295AE3DC,
+			0x295AE3E0, 0x295AE3E4, 0x295AE3E8, 0x295AE3EC, 0x295AE3F0, 0x295AE3F4, 0x295AE3F8, 0x295AE3FC,
+		},
+	},
+	{
+		{
+			0x296AE200, 0x296AE204, 0x296AE208, 0x296AE20C, 0x296AE210, 0x296AE214, 0x296AE218, 0x296AE21C,
+			0x296AE220, 0x296AE224, 0x296AE228, 0x296AE22C, 0x296AE230, 0x296AE234, 0x296AE238, 0x296AE23C,
+			0x296AE240, 0x296AE244, 0x296AE248, 0x296AE24C, 0x296AE250, 0x296AE254, 0x296AE258, 0x296AE25C,
+			0x296AE260, 0x296AE264, 0x296AE268, 0x296AE26C, 0x296AE270, 0x296AE274, 0x296AE278, 0x296AE27C,
+			0x296AE280, 0x296AE284, 0x296AE288, 0x296AE28C, 0x296AE290, 0x296AE294, 0x296AE298, 0x296AE29C,
+			0x296AE2A0, 0x296AE2A4, 0x296AE2A8, 0x296AE2AC, 0x296AE2B0, 0x296AE2B4, 0x296AE2B8, 0x296AE2BC,
+			0x296AE2C0, 0x296AE2C4, 0x296AE2C8, 0x296AE2CC, 0x296AE2D0, 0x296AE2D4, 0x296AE2D8, 0x296AE2DC,
+			0x296AE2E0, 0x296AE2E4, 0x296AE2E8, 0x296AE2EC, 0x296AE2F0, 0x296AE2F4, 0x296AE2F8, 0x296AE2FC,
+			0x296AE300, 0x296AE304, 0x296AE308, 0x296AE30C, 0x296AE310, 0x296AE314, 0x296AE318, 0x296AE31C,
+			0x296AE320, 0x296AE324, 0x296AE328, 0x296AE32C, 0x296AE330, 0x296AE334, 0x296AE338, 0x296AE33C,
+			0x296AE340, 0x296AE344, 0x296AE348, 0x296AE34C, 0x296AE350, 0x296AE354, 0x296AE358, 0x296AE35C,
+			0x296AE360, 0x296AE364, 0x296AE368, 0x296AE36C, 0x296AE370, 0x296AE374, 0x296AE378, 0x296AE37C,
+			0x296AE380, 0x296AE384, 0x296AE388, 0x296AE38C, 0x296AE390, 0x296AE394, 0x296AE398, 0x296AE39C,
+			0x296AE3A0, 0x296AE3A4, 0x296AE3A8, 0x296AE3AC, 0x296AE3B0, 0x296AE3B4, 0x296AE3B8, 0x296AE3BC,
+			0x296AE3C0, 0x296AE3C4, 0x296AE3C8, 0x296AE3CC, 0x296AE3D0, 0x296AE3D4, 0x296AE3D8, 0x296AE3DC,
+			0x296AE3E0, 0x296AE3E4, 0x296AE3E8, 0x296AE3EC, 0x296AE3F0, 0x296AE3F4, 0x296AE3F8, 0x296AE3FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_DEKNEE_TBL_ADDR	gIM_R2Y_Deknee_Tbl_B_Addr[3] = {
+	{
+		{
+			0x294AE400, 0x294AE404, 0x294AE408, 0x294AE40C, 0x294AE410, 0x294AE414, 0x294AE418, 0x294AE41C,
+			0x294AE420, 0x294AE424, 0x294AE428, 0x294AE42C, 0x294AE430, 0x294AE434, 0x294AE438, 0x294AE43C,
+			0x294AE440, 0x294AE444, 0x294AE448, 0x294AE44C, 0x294AE450, 0x294AE454, 0x294AE458, 0x294AE45C,
+			0x294AE460, 0x294AE464, 0x294AE468, 0x294AE46C, 0x294AE470, 0x294AE474, 0x294AE478, 0x294AE47C,
+			0x294AE480, 0x294AE484, 0x294AE488, 0x294AE48C, 0x294AE490, 0x294AE494, 0x294AE498, 0x294AE49C,
+			0x294AE4A0, 0x294AE4A4, 0x294AE4A8, 0x294AE4AC, 0x294AE4B0, 0x294AE4B4, 0x294AE4B8, 0x294AE4BC,
+			0x294AE4C0, 0x294AE4C4, 0x294AE4C8, 0x294AE4CC, 0x294AE4D0, 0x294AE4D4, 0x294AE4D8, 0x294AE4DC,
+			0x294AE4E0, 0x294AE4E4, 0x294AE4E8, 0x294AE4EC, 0x294AE4F0, 0x294AE4F4, 0x294AE4F8, 0x294AE4FC,
+			0x294AE500, 0x294AE504, 0x294AE508, 0x294AE50C, 0x294AE510, 0x294AE514, 0x294AE518, 0x294AE51C,
+			0x294AE520, 0x294AE524, 0x294AE528, 0x294AE52C, 0x294AE530, 0x294AE534, 0x294AE538, 0x294AE53C,
+			0x294AE540, 0x294AE544, 0x294AE548, 0x294AE54C, 0x294AE550, 0x294AE554, 0x294AE558, 0x294AE55C,
+			0x294AE560, 0x294AE564, 0x294AE568, 0x294AE56C, 0x294AE570, 0x294AE574, 0x294AE578, 0x294AE57C,
+			0x294AE580, 0x294AE584, 0x294AE588, 0x294AE58C, 0x294AE590, 0x294AE594, 0x294AE598, 0x294AE59C,
+			0x294AE5A0, 0x294AE5A4, 0x294AE5A8, 0x294AE5AC, 0x294AE5B0, 0x294AE5B4, 0x294AE5B8, 0x294AE5BC,
+			0x294AE5C0, 0x294AE5C4, 0x294AE5C8, 0x294AE5CC, 0x294AE5D0, 0x294AE5D4, 0x294AE5D8, 0x294AE5DC,
+			0x294AE5E0, 0x294AE5E4, 0x294AE5E8, 0x294AE5EC, 0x294AE5F0, 0x294AE5F4, 0x294AE5F8, 0x294AE5FC,
+		},
+	},
+	{
+		{
+			0x295AE400, 0x295AE404, 0x295AE408, 0x295AE40C, 0x295AE410, 0x295AE414, 0x295AE418, 0x295AE41C,
+			0x295AE420, 0x295AE424, 0x295AE428, 0x295AE42C, 0x295AE430, 0x295AE434, 0x295AE438, 0x295AE43C,
+			0x295AE440, 0x295AE444, 0x295AE448, 0x295AE44C, 0x295AE450, 0x295AE454, 0x295AE458, 0x295AE45C,
+			0x295AE460, 0x295AE464, 0x295AE468, 0x295AE46C, 0x295AE470, 0x295AE474, 0x295AE478, 0x295AE47C,
+			0x295AE480, 0x295AE484, 0x295AE488, 0x295AE48C, 0x295AE490, 0x295AE494, 0x295AE498, 0x295AE49C,
+			0x295AE4A0, 0x295AE4A4, 0x295AE4A8, 0x295AE4AC, 0x295AE4B0, 0x295AE4B4, 0x295AE4B8, 0x295AE4BC,
+			0x295AE4C0, 0x295AE4C4, 0x295AE4C8, 0x295AE4CC, 0x295AE4D0, 0x295AE4D4, 0x295AE4D8, 0x295AE4DC,
+			0x295AE4E0, 0x295AE4E4, 0x295AE4E8, 0x295AE4EC, 0x295AE4F0, 0x295AE4F4, 0x295AE4F8, 0x295AE4FC,
+			0x295AE500, 0x295AE504, 0x295AE508, 0x295AE50C, 0x295AE510, 0x295AE514, 0x295AE518, 0x295AE51C,
+			0x295AE520, 0x295AE524, 0x295AE528, 0x295AE52C, 0x295AE530, 0x295AE534, 0x295AE538, 0x295AE53C,
+			0x295AE540, 0x295AE544, 0x295AE548, 0x295AE54C, 0x295AE550, 0x295AE554, 0x295AE558, 0x295AE55C,
+			0x295AE560, 0x295AE564, 0x295AE568, 0x295AE56C, 0x295AE570, 0x295AE574, 0x295AE578, 0x295AE57C,
+			0x295AE580, 0x295AE584, 0x295AE588, 0x295AE58C, 0x295AE590, 0x295AE594, 0x295AE598, 0x295AE59C,
+			0x295AE5A0, 0x295AE5A4, 0x295AE5A8, 0x295AE5AC, 0x295AE5B0, 0x295AE5B4, 0x295AE5B8, 0x295AE5BC,
+			0x295AE5C0, 0x295AE5C4, 0x295AE5C8, 0x295AE5CC, 0x295AE5D0, 0x295AE5D4, 0x295AE5D8, 0x295AE5DC,
+			0x295AE5E0, 0x295AE5E4, 0x295AE5E8, 0x295AE5EC, 0x295AE5F0, 0x295AE5F4, 0x295AE5F8, 0x295AE5FC,
+		},
+	},
+	{
+		{
+			0x296AE400, 0x296AE404, 0x296AE408, 0x296AE40C, 0x296AE410, 0x296AE414, 0x296AE418, 0x296AE41C,
+			0x296AE420, 0x296AE424, 0x296AE428, 0x296AE42C, 0x296AE430, 0x296AE434, 0x296AE438, 0x296AE43C,
+			0x296AE440, 0x296AE444, 0x296AE448, 0x296AE44C, 0x296AE450, 0x296AE454, 0x296AE458, 0x296AE45C,
+			0x296AE460, 0x296AE464, 0x296AE468, 0x296AE46C, 0x296AE470, 0x296AE474, 0x296AE478, 0x296AE47C,
+			0x296AE480, 0x296AE484, 0x296AE488, 0x296AE48C, 0x296AE490, 0x296AE494, 0x296AE498, 0x296AE49C,
+			0x296AE4A0, 0x296AE4A4, 0x296AE4A8, 0x296AE4AC, 0x296AE4B0, 0x296AE4B4, 0x296AE4B8, 0x296AE4BC,
+			0x296AE4C0, 0x296AE4C4, 0x296AE4C8, 0x296AE4CC, 0x296AE4D0, 0x296AE4D4, 0x296AE4D8, 0x296AE4DC,
+			0x296AE4E0, 0x296AE4E4, 0x296AE4E8, 0x296AE4EC, 0x296AE4F0, 0x296AE4F4, 0x296AE4F8, 0x296AE4FC,
+			0x296AE500, 0x296AE504, 0x296AE508, 0x296AE50C, 0x296AE510, 0x296AE514, 0x296AE518, 0x296AE51C,
+			0x296AE520, 0x296AE524, 0x296AE528, 0x296AE52C, 0x296AE530, 0x296AE534, 0x296AE538, 0x296AE53C,
+			0x296AE540, 0x296AE544, 0x296AE548, 0x296AE54C, 0x296AE550, 0x296AE554, 0x296AE558, 0x296AE55C,
+			0x296AE560, 0x296AE564, 0x296AE568, 0x296AE56C, 0x296AE570, 0x296AE574, 0x296AE578, 0x296AE57C,
+			0x296AE580, 0x296AE584, 0x296AE588, 0x296AE58C, 0x296AE590, 0x296AE594, 0x296AE598, 0x296AE59C,
+			0x296AE5A0, 0x296AE5A4, 0x296AE5A8, 0x296AE5AC, 0x296AE5B0, 0x296AE5B4, 0x296AE5B8, 0x296AE5BC,
+			0x296AE5C0, 0x296AE5C4, 0x296AE5C8, 0x296AE5CC, 0x296AE5D0, 0x296AE5D4, 0x296AE5D8, 0x296AE5DC,
+			0x296AE5E0, 0x296AE5E4, 0x296AE5E8, 0x296AE5EC, 0x296AE5F0, 0x296AE5F4, 0x296AE5F8, 0x296AE5FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_OFST_ADDR	gIM_R2Y_OFST_Addr[3] = {
+	{
+		0x28418020, 0x28418024,
+	},
+	{
+		0x28518020, 0x28518024,
+	},
+	{
+		0x28618020, 0x28618024,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_WB_CLIP_ADDR	gIM_R2Y_WB_CLIP_Addr[3] = {
+	{
+		0x28418030, 0x28418034,
+	},
+	{
+		0x28518030, 0x28518034,
+	},
+	{
+		0x28618030, 0x28618034,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_CC0_ADDR	gIM_R2Y_CC0_Addr[3] = {
+	{
+		0x28418080, 0x284180A0, 0x284180A4, 0x284180A8, 0x284180AC, 0x284180B0, 0x284180C0, 0x284180C4,
+		0x284180C8, 0x284180CC, 0x284180D0, 0x284180D4,
+	},
+	{
+		0x28518080, 0x285180A0, 0x285180A4, 0x285180A8, 0x285180AC, 0x285180B0, 0x285180C0, 0x285180C4,
+		0x285180C8, 0x285180CC, 0x285180D0, 0x285180D4,
+	},
+	{
+		0x28618080, 0x286180A0, 0x286180A4, 0x286180A8, 0x286180AC, 0x286180B0, 0x286180C0, 0x286180C4,
+		0x286180C8, 0x286180CC, 0x286180D0, 0x286180D4,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_CC0_COEF_ADDR	gIM_R2Y_CC0_COEF_Addr[3] = {
+	{
+		0x284180A0, 0x284180A4, 0x284180A8, 0x284180AC, 0x284180B0,
+	},
+	{
+		0x285180A0, 0x285180A4, 0x285180A8, 0x285180AC, 0x285180B0,
+	},
+	{
+		0x286180A0, 0x286180A4, 0x286180A8, 0x286180AC, 0x286180B0,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_MCYC_ADDR	gIM_R2Y_MCYC_Addr[3] = {
+	{
+		0x28419000, 0x28419004, 0x28419008, 0x2841900C, 0x28419010, 0x28419020, 0x28419024, 0x28419028,
+		0x2841902C, 0x28419030, 0x28419034, 0x28419038, 0x2841903C, 0x28419040, 0x28419044, 0x28419048,
+		0x2841904C, 0x28419080, 0x28419084, 0x28419088, 0x2841908C, 0x28419090, 0x28419094, 0x28419098,
+		0x2841909C, 0x284190A0, 0x284190A4, 0x284190A8, 0x284190AC, 0x284190B0, 0x284190B4, 0x284190B8,
+		0x284190BC, 0x284190C0, 0x284190C4, 0x284190C8, 0x284190CC, 0x284190D0, 0x284190D4, 0x284190D8,
+		0x284190DC, 0x284190E0, 0x28419100, 0x28419104, 0x28419108, 0x2841910C, 0x28419110, 0x28419114,
+		0x28419118, 0x2841911C, 0x28419120, 0x28419124, 0x28419128, 0x2841912C, 0x28419130, 0x28419134,
+		0x28419138, 0x2841913C, 0x28419140, 0x28419144, 0x28419148, 0x2841914C, 0x28419150, 0x28419154,
+		0x28419158, 0x2841915C, 0x28419160, 0x28419180, 0x28419184, 0x28419188, 0x2841918C, 0x28419190,
+		0x28419194, 0x28419198, 0x2841919C, 0x284191A0, 0x284191A4, 0x284191A8, 0x284191AC, 0x284191B0,
+		0x284191B4, 0x284191B8, 0x284191BC, 0x284191C0, 0x284191C4, 0x284191C8, 0x284191CC, 0x284191D0,
+		0x284191D4, 0x284191D8, 0x284191DC, 0x284191E0, 0x28419200, 0x28419204, 0x28419208, 0x2841920C,
+		0x28419210, 0x28419214, 0x28419218, 0x2841921C, 0x28419220, 0x28419224, 0x28419228, 0x2841922C,
+		0x28419230, 0x28419234, 0x28419238, 0x2841923C, 0x28419240, 0x28419244, 0x28419248, 0x2841924C,
+		0x28419250, 0x28419254, 0x28419258, 0x2841925C, 0x28419260, 0x28419280, 0x28419284, 0x28419288,
+		0x2841928C, 0x28419290, 0x28419294, 0x28419298, 0x2841929C, 0x284192A0, 0x284192A4, 0x284192A8,
+		0x284192AC, 0x284192B0, 0x284192B4, 0x284192B8, 0x284192BC, 0x284192C0, 0x284192C4, 0x284192C8,
+		0x284192CC, 0x284192D0, 0x284192D4, 0x284192D8, 0x284192DC, 0x284192E0, 0x28419300, 0x28419304,
+		0x28419308, 0x2841930C, 0x28419310, 0x28419314, 0x28419318, 0x2841931C, 0x28419320, 0x28419324,
+		0x28419328, 0x2841932C, 0x28419330, 0x28419334, 0x28419338, 0x2841933C, 0x28419340, 0x28419344,
+		0x28419348, 0x2841934C, 0x28419350, 0x28419354, 0x28419358, 0x2841935C, 0x28419360, 0x28419380,
+		0x28419384, 0x28419388, 0x2841938C, 0x28419390, 0x28419394, 0x28419398, 0x2841939C, 0x284193A0,
+		0x284193A4, 0x284193A8, 0x284193AC, 0x284193B0, 0x284193B4, 0x284193B8, 0x284193BC, 0x284193C0,
+		0x284193C4, 0x284193C8, 0x284193CC, 0x284193D0, 0x284193D4, 0x284193D8, 0x284193DC, 0x284193E0,
+		0x28419400, 0x28419404, 0x28419408, 0x2841940C, 0x28419410, 0x28419414, 0x28419418, 0x2841941C,
+		0x28419420, 0x28419424, 0x28419428, 0x2841942C, 0x28419430, 0x28419434, 0x28419438, 0x2841943C,
+		0x28419440, 0x28419444, 0x28419448, 0x2841944C, 0x28419450, 0x28419454, 0x28419458, 0x2841945C,
+		0x28419460, 0x28419480, 0x28419484, 0x28419488, 0x2841948C, 0x28419490, 0x28419494, 0x28419498,
+		0x2841949C, 0x284194A0, 0x284194A4, 0x284194A8, 0x284194AC, 0x284194B0, 0x284194B4, 0x284194B8,
+		0x284194BC, 0x284194C0, 0x284194C4, 0x284194C8, 0x284194CC, 0x284194D0, 0x284194D4, 0x284194D8,
+		0x284194DC, 0x284194E0, 0x28419500, 0x28419504, 0x28419508, 0x2841950C, 0x28419510, 0x28419514,
+		0x28419518, 0x2841951C, 0x28419520, 0x28419524, 0x28419528, 0x2841952C, 0x28419530, 0x28419534,
+		0x28419538, 0x2841953C, 0x28419540, 0x28419544, 0x28419548, 0x2841954C, 0x28419550, 0x28419554,
+		0x28419558, 0x2841955C, 0x28419560, 0x28419580, 0x28419584, 0x28419588, 0x2841958C, 0x28419590,
+		0x28419594, 0x28419598, 0x2841959C, 0x284195A0, 0x284195A4, 0x284195A8, 0x284195AC, 0x284195B0,
+		0x284195B4, 0x284195B8, 0x284195BC, 0x284195C0, 0x284195C4, 0x284195C8, 0x284195CC, 0x284195D0,
+		0x284195D4, 0x284195D8, 0x284195DC, 0x284195E0, 0x28419600, 0x28419604, 0x28419608, 0x2841960C,
+		0x28419610, 0x28419614, 0x28419618, 0x2841961C, 0x28419620, 0x28419624, 0x28419628, 0x2841962C,
+		0x28419630, 0x28419634, 0x28419638, 0x2841963C, 0x28419640, 0x28419644, 0x28419648, 0x2841964C,
+		0x28419650, 0x28419654, 0x28419658, 0x2841965C, 0x28419660, 0x28419680, 0x28419684, 0x28419688,
+		0x2841968C, 0x28419690, 0x28419694, 0x28419698, 0x2841969C, 0x284196A0, 0x284196A4, 0x284196A8,
+		0x284196AC, 0x284196B0, 0x284196B4, 0x284196B8, 0x284196C0, 0x284196C4, 0x284196C8, 0x284196CC,
+		0x284196D0, 0x284196D4, 0x284196D8, 0x284196DC, 0x284196E0, 0x284196E4, 0x284196E8, 0x284196EC,
+		0x284196F0, 0x284196F4, 0x284196F8, 0x28419700, 0x28419704, 0x28419708, 0x2841970C, 0x28419710,
+		0x28419714, 0x28419718, 0x2841971C, 0x28419720, 0x28419724, 0x28419728, 0x2841972C, 0x28419730,
+		0x28419734, 0x28419738, 0x28419740, 0x28419744, 0x28419748, 0x2841974C, 0x28419750, 0x28419754,
+		0x28419758, 0x2841975C, 0x28419760, 0x28419764, 0x28419768, 0x2841976C, 0x28419770, 0x28419774,
+		0x28419778, 0x28419780, 0x28419784, 0x28419788, 0x2841978C, 0x28419790, 0x28419794, 0x28419798,
+		0x2841979C, 0x284197A0, 0x284197A4, 0x284197A8, 0x284197AC, 0x284197B0, 0x284197B4, 0x284197B8,
+		0x284197C0, 0x284197C4, 0x284197C8, 0x284197CC, 0x284197D0, 0x284197D4, 0x284197D8, 0x284197DC,
+		0x284197E0, 0x284197E4, 0x284197E8, 0x284197EC, 0x284197F0, 0x284197F4, 0x284197F8, 0x28419800,
+		0x28419804, 0x28419808, 0x2841980C, 0x28419810, 0x28419814, 0x28419818, 0x2841981C, 0x28419820,
+		0x28419824, 0x28419828, 0x2841982C, 0x28419830, 0x28419834, 0x28419838, 0x28419840, 0x28419844,
+		0x28419848, 0x2841984C, 0x28419850, 0x28419854, 0x28419858, 0x2841985C, 0x28419860, 0x28419864,
+		0x28419868, 0x2841986C, 0x28419870, 0x28419874, 0x28419878, 0x28419880, 0x28419884, 0x28419888,
+		0x2841988C, 0x28419890, 0x28419894, 0x28419898, 0x2841989C, 0x284198A0, 0x284198A4, 0x284198A8,
+		0x284198AC, 0x284198B0, 0x284198B4, 0x284198B8, 0x284198C0, 0x284198C4, 0x284198C8, 0x284198CC,
+		0x284198D0, 0x284198D4, 0x284198D8, 0x284198DC, 0x284198E0, 0x284198E4, 0x284198E8, 0x284198EC,
+		0x284198F0, 0x284198F4, 0x284198F8, 0x28419900, 0x28419904, 0x28419908, 0x2841990C, 0x28419910,
+		0x28419914, 0x28419918, 0x2841991C, 0x28419920, 0x28419924, 0x28419928, 0x2841992C, 0x28419930,
+		0x28419934, 0x28419938, 0x28419940, 0x28419944, 0x28419948, 0x2841994C, 0x28419950, 0x28419954,
+		0x28419958, 0x2841995C, 0x28419960, 0x28419964, 0x28419968, 0x2841996C, 0x28419970, 0x28419974,
+		0x28419978, 0x28419980, 0x28419988, 0x2841998C, 0x28419990, 0x28419994, 0x28419998, 0x284199A0,
+		0x284199A4, 0x284199A8, 0x284199AC, 0x284199B0, 0x284199B4,
+	},
+	{
+		0x28519000, 0x28519004, 0x28519008, 0x2851900C, 0x28519010, 0x28519020, 0x28519024, 0x28519028,
+		0x2851902C, 0x28519030, 0x28519034, 0x28519038, 0x2851903C, 0x28519040, 0x28519044, 0x28519048,
+		0x2851904C, 0x28519080, 0x28519084, 0x28519088, 0x2851908C, 0x28519090, 0x28519094, 0x28519098,
+		0x2851909C, 0x285190A0, 0x285190A4, 0x285190A8, 0x285190AC, 0x285190B0, 0x285190B4, 0x285190B8,
+		0x285190BC, 0x285190C0, 0x285190C4, 0x285190C8, 0x285190CC, 0x285190D0, 0x285190D4, 0x285190D8,
+		0x285190DC, 0x285190E0, 0x28519100, 0x28519104, 0x28519108, 0x2851910C, 0x28519110, 0x28519114,
+		0x28519118, 0x2851911C, 0x28519120, 0x28519124, 0x28519128, 0x2851912C, 0x28519130, 0x28519134,
+		0x28519138, 0x2851913C, 0x28519140, 0x28519144, 0x28519148, 0x2851914C, 0x28519150, 0x28519154,
+		0x28519158, 0x2851915C, 0x28519160, 0x28519180, 0x28519184, 0x28519188, 0x2851918C, 0x28519190,
+		0x28519194, 0x28519198, 0x2851919C, 0x285191A0, 0x285191A4, 0x285191A8, 0x285191AC, 0x285191B0,
+		0x285191B4, 0x285191B8, 0x285191BC, 0x285191C0, 0x285191C4, 0x285191C8, 0x285191CC, 0x285191D0,
+		0x285191D4, 0x285191D8, 0x285191DC, 0x285191E0, 0x28519200, 0x28519204, 0x28519208, 0x2851920C,
+		0x28519210, 0x28519214, 0x28519218, 0x2851921C, 0x28519220, 0x28519224, 0x28519228, 0x2851922C,
+		0x28519230, 0x28519234, 0x28519238, 0x2851923C, 0x28519240, 0x28519244, 0x28519248, 0x2851924C,
+		0x28519250, 0x28519254, 0x28519258, 0x2851925C, 0x28519260, 0x28519280, 0x28519284, 0x28519288,
+		0x2851928C, 0x28519290, 0x28519294, 0x28519298, 0x2851929C, 0x285192A0, 0x285192A4, 0x285192A8,
+		0x285192AC, 0x285192B0, 0x285192B4, 0x285192B8, 0x285192BC, 0x285192C0, 0x285192C4, 0x285192C8,
+		0x285192CC, 0x285192D0, 0x285192D4, 0x285192D8, 0x285192DC, 0x285192E0, 0x28519300, 0x28519304,
+		0x28519308, 0x2851930C, 0x28519310, 0x28519314, 0x28519318, 0x2851931C, 0x28519320, 0x28519324,
+		0x28519328, 0x2851932C, 0x28519330, 0x28519334, 0x28519338, 0x2851933C, 0x28519340, 0x28519344,
+		0x28519348, 0x2851934C, 0x28519350, 0x28519354, 0x28519358, 0x2851935C, 0x28519360, 0x28519380,
+		0x28519384, 0x28519388, 0x2851938C, 0x28519390, 0x28519394, 0x28519398, 0x2851939C, 0x285193A0,
+		0x285193A4, 0x285193A8, 0x285193AC, 0x285193B0, 0x285193B4, 0x285193B8, 0x285193BC, 0x285193C0,
+		0x285193C4, 0x285193C8, 0x285193CC, 0x285193D0, 0x285193D4, 0x285193D8, 0x285193DC, 0x285193E0,
+		0x28519400, 0x28519404, 0x28519408, 0x2851940C, 0x28519410, 0x28519414, 0x28519418, 0x2851941C,
+		0x28519420, 0x28519424, 0x28519428, 0x2851942C, 0x28519430, 0x28519434, 0x28519438, 0x2851943C,
+		0x28519440, 0x28519444, 0x28519448, 0x2851944C, 0x28519450, 0x28519454, 0x28519458, 0x2851945C,
+		0x28519460, 0x28519480, 0x28519484, 0x28519488, 0x2851948C, 0x28519490, 0x28519494, 0x28519498,
+		0x2851949C, 0x285194A0, 0x285194A4, 0x285194A8, 0x285194AC, 0x285194B0, 0x285194B4, 0x285194B8,
+		0x285194BC, 0x285194C0, 0x285194C4, 0x285194C8, 0x285194CC, 0x285194D0, 0x285194D4, 0x285194D8,
+		0x285194DC, 0x285194E0, 0x28519500, 0x28519504, 0x28519508, 0x2851950C, 0x28519510, 0x28519514,
+		0x28519518, 0x2851951C, 0x28519520, 0x28519524, 0x28519528, 0x2851952C, 0x28519530, 0x28519534,
+		0x28519538, 0x2851953C, 0x28519540, 0x28519544, 0x28519548, 0x2851954C, 0x28519550, 0x28519554,
+		0x28519558, 0x2851955C, 0x28519560, 0x28519580, 0x28519584, 0x28519588, 0x2851958C, 0x28519590,
+		0x28519594, 0x28519598, 0x2851959C, 0x285195A0, 0x285195A4, 0x285195A8, 0x285195AC, 0x285195B0,
+		0x285195B4, 0x285195B8, 0x285195BC, 0x285195C0, 0x285195C4, 0x285195C8, 0x285195CC, 0x285195D0,
+		0x285195D4, 0x285195D8, 0x285195DC, 0x285195E0, 0x28519600, 0x28519604, 0x28519608, 0x2851960C,
+		0x28519610, 0x28519614, 0x28519618, 0x2851961C, 0x28519620, 0x28519624, 0x28519628, 0x2851962C,
+		0x28519630, 0x28519634, 0x28519638, 0x2851963C, 0x28519640, 0x28519644, 0x28519648, 0x2851964C,
+		0x28519650, 0x28519654, 0x28519658, 0x2851965C, 0x28519660, 0x28519680, 0x28519684, 0x28519688,
+		0x2851968C, 0x28519690, 0x28519694, 0x28519698, 0x2851969C, 0x285196A0, 0x285196A4, 0x285196A8,
+		0x285196AC, 0x285196B0, 0x285196B4, 0x285196B8, 0x285196C0, 0x285196C4, 0x285196C8, 0x285196CC,
+		0x285196D0, 0x285196D4, 0x285196D8, 0x285196DC, 0x285196E0, 0x285196E4, 0x285196E8, 0x285196EC,
+		0x285196F0, 0x285196F4, 0x285196F8, 0x28519700, 0x28519704, 0x28519708, 0x2851970C, 0x28519710,
+		0x28519714, 0x28519718, 0x2851971C, 0x28519720, 0x28519724, 0x28519728, 0x2851972C, 0x28519730,
+		0x28519734, 0x28519738, 0x28519740, 0x28519744, 0x28519748, 0x2851974C, 0x28519750, 0x28519754,
+		0x28519758, 0x2851975C, 0x28519760, 0x28519764, 0x28519768, 0x2851976C, 0x28519770, 0x28519774,
+		0x28519778, 0x28519780, 0x28519784, 0x28519788, 0x2851978C, 0x28519790, 0x28519794, 0x28519798,
+		0x2851979C, 0x285197A0, 0x285197A4, 0x285197A8, 0x285197AC, 0x285197B0, 0x285197B4, 0x285197B8,
+		0x285197C0, 0x285197C4, 0x285197C8, 0x285197CC, 0x285197D0, 0x285197D4, 0x285197D8, 0x285197DC,
+		0x285197E0, 0x285197E4, 0x285197E8, 0x285197EC, 0x285197F0, 0x285197F4, 0x285197F8, 0x28519800,
+		0x28519804, 0x28519808, 0x2851980C, 0x28519810, 0x28519814, 0x28519818, 0x2851981C, 0x28519820,
+		0x28519824, 0x28519828, 0x2851982C, 0x28519830, 0x28519834, 0x28519838, 0x28519840, 0x28519844,
+		0x28519848, 0x2851984C, 0x28519850, 0x28519854, 0x28519858, 0x2851985C, 0x28519860, 0x28519864,
+		0x28519868, 0x2851986C, 0x28519870, 0x28519874, 0x28519878, 0x28519880, 0x28519884, 0x28519888,
+		0x2851988C, 0x28519890, 0x28519894, 0x28519898, 0x2851989C, 0x285198A0, 0x285198A4, 0x285198A8,
+		0x285198AC, 0x285198B0, 0x285198B4, 0x285198B8, 0x285198C0, 0x285198C4, 0x285198C8, 0x285198CC,
+		0x285198D0, 0x285198D4, 0x285198D8, 0x285198DC, 0x285198E0, 0x285198E4, 0x285198E8, 0x285198EC,
+		0x285198F0, 0x285198F4, 0x285198F8, 0x28519900, 0x28519904, 0x28519908, 0x2851990C, 0x28519910,
+		0x28519914, 0x28519918, 0x2851991C, 0x28519920, 0x28519924, 0x28519928, 0x2851992C, 0x28519930,
+		0x28519934, 0x28519938, 0x28519940, 0x28519944, 0x28519948, 0x2851994C, 0x28519950, 0x28519954,
+		0x28519958, 0x2851995C, 0x28519960, 0x28519964, 0x28519968, 0x2851996C, 0x28519970, 0x28519974,
+		0x28519978, 0x28519980, 0x28519988, 0x2851998C, 0x28519990, 0x28519994, 0x28519998, 0x285199A0,
+		0x285199A4, 0x285199A8, 0x285199AC, 0x285199B0, 0x285199B4,
+	},
+	{
+		0x28619000, 0x28619004, 0x28619008, 0x2861900C, 0x28619010, 0x28619020, 0x28619024, 0x28619028,
+		0x2861902C, 0x28619030, 0x28619034, 0x28619038, 0x2861903C, 0x28619040, 0x28619044, 0x28619048,
+		0x2861904C, 0x28619080, 0x28619084, 0x28619088, 0x2861908C, 0x28619090, 0x28619094, 0x28619098,
+		0x2861909C, 0x286190A0, 0x286190A4, 0x286190A8, 0x286190AC, 0x286190B0, 0x286190B4, 0x286190B8,
+		0x286190BC, 0x286190C0, 0x286190C4, 0x286190C8, 0x286190CC, 0x286190D0, 0x286190D4, 0x286190D8,
+		0x286190DC, 0x286190E0, 0x28619100, 0x28619104, 0x28619108, 0x2861910C, 0x28619110, 0x28619114,
+		0x28619118, 0x2861911C, 0x28619120, 0x28619124, 0x28619128, 0x2861912C, 0x28619130, 0x28619134,
+		0x28619138, 0x2861913C, 0x28619140, 0x28619144, 0x28619148, 0x2861914C, 0x28619150, 0x28619154,
+		0x28619158, 0x2861915C, 0x28619160, 0x28619180, 0x28619184, 0x28619188, 0x2861918C, 0x28619190,
+		0x28619194, 0x28619198, 0x2861919C, 0x286191A0, 0x286191A4, 0x286191A8, 0x286191AC, 0x286191B0,
+		0x286191B4, 0x286191B8, 0x286191BC, 0x286191C0, 0x286191C4, 0x286191C8, 0x286191CC, 0x286191D0,
+		0x286191D4, 0x286191D8, 0x286191DC, 0x286191E0, 0x28619200, 0x28619204, 0x28619208, 0x2861920C,
+		0x28619210, 0x28619214, 0x28619218, 0x2861921C, 0x28619220, 0x28619224, 0x28619228, 0x2861922C,
+		0x28619230, 0x28619234, 0x28619238, 0x2861923C, 0x28619240, 0x28619244, 0x28619248, 0x2861924C,
+		0x28619250, 0x28619254, 0x28619258, 0x2861925C, 0x28619260, 0x28619280, 0x28619284, 0x28619288,
+		0x2861928C, 0x28619290, 0x28619294, 0x28619298, 0x2861929C, 0x286192A0, 0x286192A4, 0x286192A8,
+		0x286192AC, 0x286192B0, 0x286192B4, 0x286192B8, 0x286192BC, 0x286192C0, 0x286192C4, 0x286192C8,
+		0x286192CC, 0x286192D0, 0x286192D4, 0x286192D8, 0x286192DC, 0x286192E0, 0x28619300, 0x28619304,
+		0x28619308, 0x2861930C, 0x28619310, 0x28619314, 0x28619318, 0x2861931C, 0x28619320, 0x28619324,
+		0x28619328, 0x2861932C, 0x28619330, 0x28619334, 0x28619338, 0x2861933C, 0x28619340, 0x28619344,
+		0x28619348, 0x2861934C, 0x28619350, 0x28619354, 0x28619358, 0x2861935C, 0x28619360, 0x28619380,
+		0x28619384, 0x28619388, 0x2861938C, 0x28619390, 0x28619394, 0x28619398, 0x2861939C, 0x286193A0,
+		0x286193A4, 0x286193A8, 0x286193AC, 0x286193B0, 0x286193B4, 0x286193B8, 0x286193BC, 0x286193C0,
+		0x286193C4, 0x286193C8, 0x286193CC, 0x286193D0, 0x286193D4, 0x286193D8, 0x286193DC, 0x286193E0,
+		0x28619400, 0x28619404, 0x28619408, 0x2861940C, 0x28619410, 0x28619414, 0x28619418, 0x2861941C,
+		0x28619420, 0x28619424, 0x28619428, 0x2861942C, 0x28619430, 0x28619434, 0x28619438, 0x2861943C,
+		0x28619440, 0x28619444, 0x28619448, 0x2861944C, 0x28619450, 0x28619454, 0x28619458, 0x2861945C,
+		0x28619460, 0x28619480, 0x28619484, 0x28619488, 0x2861948C, 0x28619490, 0x28619494, 0x28619498,
+		0x2861949C, 0x286194A0, 0x286194A4, 0x286194A8, 0x286194AC, 0x286194B0, 0x286194B4, 0x286194B8,
+		0x286194BC, 0x286194C0, 0x286194C4, 0x286194C8, 0x286194CC, 0x286194D0, 0x286194D4, 0x286194D8,
+		0x286194DC, 0x286194E0, 0x28619500, 0x28619504, 0x28619508, 0x2861950C, 0x28619510, 0x28619514,
+		0x28619518, 0x2861951C, 0x28619520, 0x28619524, 0x28619528, 0x2861952C, 0x28619530, 0x28619534,
+		0x28619538, 0x2861953C, 0x28619540, 0x28619544, 0x28619548, 0x2861954C, 0x28619550, 0x28619554,
+		0x28619558, 0x2861955C, 0x28619560, 0x28619580, 0x28619584, 0x28619588, 0x2861958C, 0x28619590,
+		0x28619594, 0x28619598, 0x2861959C, 0x286195A0, 0x286195A4, 0x286195A8, 0x286195AC, 0x286195B0,
+		0x286195B4, 0x286195B8, 0x286195BC, 0x286195C0, 0x286195C4, 0x286195C8, 0x286195CC, 0x286195D0,
+		0x286195D4, 0x286195D8, 0x286195DC, 0x286195E0, 0x28619600, 0x28619604, 0x28619608, 0x2861960C,
+		0x28619610, 0x28619614, 0x28619618, 0x2861961C, 0x28619620, 0x28619624, 0x28619628, 0x2861962C,
+		0x28619630, 0x28619634, 0x28619638, 0x2861963C, 0x28619640, 0x28619644, 0x28619648, 0x2861964C,
+		0x28619650, 0x28619654, 0x28619658, 0x2861965C, 0x28619660, 0x28619680, 0x28619684, 0x28619688,
+		0x2861968C, 0x28619690, 0x28619694, 0x28619698, 0x2861969C, 0x286196A0, 0x286196A4, 0x286196A8,
+		0x286196AC, 0x286196B0, 0x286196B4, 0x286196B8, 0x286196C0, 0x286196C4, 0x286196C8, 0x286196CC,
+		0x286196D0, 0x286196D4, 0x286196D8, 0x286196DC, 0x286196E0, 0x286196E4, 0x286196E8, 0x286196EC,
+		0x286196F0, 0x286196F4, 0x286196F8, 0x28619700, 0x28619704, 0x28619708, 0x2861970C, 0x28619710,
+		0x28619714, 0x28619718, 0x2861971C, 0x28619720, 0x28619724, 0x28619728, 0x2861972C, 0x28619730,
+		0x28619734, 0x28619738, 0x28619740, 0x28619744, 0x28619748, 0x2861974C, 0x28619750, 0x28619754,
+		0x28619758, 0x2861975C, 0x28619760, 0x28619764, 0x28619768, 0x2861976C, 0x28619770, 0x28619774,
+		0x28619778, 0x28619780, 0x28619784, 0x28619788, 0x2861978C, 0x28619790, 0x28619794, 0x28619798,
+		0x2861979C, 0x286197A0, 0x286197A4, 0x286197A8, 0x286197AC, 0x286197B0, 0x286197B4, 0x286197B8,
+		0x286197C0, 0x286197C4, 0x286197C8, 0x286197CC, 0x286197D0, 0x286197D4, 0x286197D8, 0x286197DC,
+		0x286197E0, 0x286197E4, 0x286197E8, 0x286197EC, 0x286197F0, 0x286197F4, 0x286197F8, 0x28619800,
+		0x28619804, 0x28619808, 0x2861980C, 0x28619810, 0x28619814, 0x28619818, 0x2861981C, 0x28619820,
+		0x28619824, 0x28619828, 0x2861982C, 0x28619830, 0x28619834, 0x28619838, 0x28619840, 0x28619844,
+		0x28619848, 0x2861984C, 0x28619850, 0x28619854, 0x28619858, 0x2861985C, 0x28619860, 0x28619864,
+		0x28619868, 0x2861986C, 0x28619870, 0x28619874, 0x28619878, 0x28619880, 0x28619884, 0x28619888,
+		0x2861988C, 0x28619890, 0x28619894, 0x28619898, 0x2861989C, 0x286198A0, 0x286198A4, 0x286198A8,
+		0x286198AC, 0x286198B0, 0x286198B4, 0x286198B8, 0x286198C0, 0x286198C4, 0x286198C8, 0x286198CC,
+		0x286198D0, 0x286198D4, 0x286198D8, 0x286198DC, 0x286198E0, 0x286198E4, 0x286198E8, 0x286198EC,
+		0x286198F0, 0x286198F4, 0x286198F8, 0x28619900, 0x28619904, 0x28619908, 0x2861990C, 0x28619910,
+		0x28619914, 0x28619918, 0x2861991C, 0x28619920, 0x28619924, 0x28619928, 0x2861992C, 0x28619930,
+		0x28619934, 0x28619938, 0x28619940, 0x28619944, 0x28619948, 0x2861994C, 0x28619950, 0x28619954,
+		0x28619958, 0x2861995C, 0x28619960, 0x28619964, 0x28619968, 0x2861996C, 0x28619970, 0x28619974,
+		0x28619978, 0x28619980, 0x28619988, 0x2861998C, 0x28619990, 0x28619994, 0x28619998, 0x286199A0,
+		0x286199A4, 0x286199A8, 0x286199AC, 0x286199B0, 0x286199B4,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_BTC_TCOF_ADDR	gIM_R2Y_BTC_TCOF_Addr[3] = {
+	{
+		0x2841A000, 0x2841A004,
+	},
+	{
+		0x2851A000, 0x2851A004,
+	},
+	{
+		0x2861A000, 0x2861A004,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_BTC_TCT_ADDR	gIM_R2Y_BTC_TCT_Addr[3] = {
+	{
+		0x2841A008, 0x2841A00C, 0x2841A010,
+	},
+	{
+		0x2851A008, 0x2851A00C, 0x2851A010,
+	},
+	{
+		0x2861A008, 0x2861A00C, 0x2861A010,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_BTC_TCHS_ADDR	gIM_R2Y_BTC_TCHS_Addr[3] = {
+	{
+		0x2841A014, 0x2841A018, 0x2841A01C,
+	},
+	{
+		0x2851A014, 0x2851A018, 0x2851A01C,
+	},
+	{
+		0x2861A014, 0x2861A018, 0x2861A01C,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_TONE_ADDR	gIM_R2Y_TONE_Addr[3] = {
+	{
+		0x2841A040, 0x2841A044, 0x2841A048, 0x2841A04C, 0x2841A050, 0x2841A054, 0x2841A058,
+	},
+	{
+		0x2851A040, 0x2851A044, 0x2851A048, 0x2851A04C, 0x2851A050, 0x2851A054, 0x2851A058,
+	},
+	{
+		0x2861A040, 0x2861A044, 0x2861A048, 0x2861A04C, 0x2861A050, 0x2861A054, 0x2861A058,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GAMMA_ADDR	gIM_R2Y_GAMMA_Addr[3] = {
+	{
+		0x2841A060,
+	},
+	{
+		0x2851A060,
+	},
+	{
+		0x2861A060,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_CC1_ADDR	gIM_R2Y_CC1_Addr[3] = {
+	{
+		0x2841A080, 0x2841A0A0, 0x2841A0A4, 0x2841A0A8, 0x2841A0AC, 0x2841A0B0, 0x2841A0C0, 0x2841A0C4,
+		0x2841A0C8,
+	},
+	{
+		0x2851A080, 0x2851A0A0, 0x2851A0A4, 0x2851A0A8, 0x2851A0AC, 0x2851A0B0, 0x2851A0C0, 0x2851A0C4,
+		0x2851A0C8,
+	},
+	{
+		0x2861A080, 0x2861A0A0, 0x2861A0A4, 0x2861A0A8, 0x2861A0AC, 0x2861A0B0, 0x2861A0C0, 0x2861A0C4,
+		0x2861A0C8,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_CC1_COEF_ADDR	gIM_R2Y_CC1_COEF_Addr[3] = {
+	{
+		0x2841A0A0, 0x2841A0A4, 0x2841A0A8, 0x2841A0AC, 0x2841A0B0,
+	},
+	{
+		0x2851A0A0, 0x2851A0A4, 0x2851A0A8, 0x2851A0AC, 0x2851A0B0,
+	},
+	{
+		0x2861A0A0, 0x2861A0A4, 0x2861A0A8, 0x2861A0AC, 0x2861A0B0,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_YCC_ADDR	gIM_R2Y_YCC_Addr[3] = {
+	{
+		0x2841A100, 0x2841A104, 0x2841A108, 0x2841A10C, 0x2841A110, 0x2841A120,
+	},
+	{
+		0x2851A100, 0x2851A104, 0x2851A108, 0x2851A10C, 0x2851A110, 0x2851A120,
+	},
+	{
+		0x2861A100, 0x2861A104, 0x2861A108, 0x2861A10C, 0x2861A110, 0x2861A120,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_YNR_ADDR	gIM_R2Y_YNR_Addr[3] = {
+	{
+		0x2841A140, 0x2841A148, 0x2841A14C, 0x2841A150, 0x2841A154, 0x2841A158, 0x2841A15C,
+	},
+	{
+		0x2851A140, 0x2851A148, 0x2851A14C, 0x2851A150, 0x2851A154, 0x2851A158, 0x2851A15C,
+	},
+	{
+		0x2861A140, 0x2861A148, 0x2861A14C, 0x2861A150, 0x2861A154, 0x2861A158, 0x2861A15C,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EENR_ADDR	gIM_R2Y_EENR_Addr[3] = {
+	{
+		0x2841A180, 0x2841A184,
+	},
+	{
+		0x2851A180, 0x2851A184,
+	},
+	{
+		0x2861A180, 0x2861A184,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGHW_ADDR	gIM_R2Y_EGHW_Addr[3] = {
+	{
+		0x2841A200, 0x2841A208, 0x2841A20C, 0x2841A210, 0x2841A214, 0x2841A218, 0x2841A220, 0x2841A224,
+		0x2841A228, 0x2841A22C, 0x2841A230, 0x2841A238, 0x2841A23C, 0x2841A240, 0x2841A248, 0x2841A24C,
+		0x2841A250, 0x2841A254, 0x2841A258, 0x2841A25C, 0x2841A260, 0x2841A264,
+	},
+	{
+		0x2851A200, 0x2851A208, 0x2851A20C, 0x2851A210, 0x2851A214, 0x2851A218, 0x2851A220, 0x2851A224,
+		0x2851A228, 0x2851A22C, 0x2851A230, 0x2851A238, 0x2851A23C, 0x2851A240, 0x2851A248, 0x2851A24C,
+		0x2851A250, 0x2851A254, 0x2851A258, 0x2851A25C, 0x2851A260, 0x2851A264,
+	},
+	{
+		0x2861A200, 0x2861A208, 0x2861A20C, 0x2861A210, 0x2861A214, 0x2861A218, 0x2861A220, 0x2861A224,
+		0x2861A228, 0x2861A22C, 0x2861A230, 0x2861A238, 0x2861A23C, 0x2861A240, 0x2861A248, 0x2861A24C,
+		0x2861A250, 0x2861A254, 0x2861A258, 0x2861A25C, 0x2861A260, 0x2861A264,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGMW_ADDR	gIM_R2Y_EGMW_Addr[3] = {
+	{
+		0x2841A280, 0x2841A288, 0x2841A28C, 0x2841A290, 0x2841A294, 0x2841A298, 0x2841A2A0, 0x2841A2A4,
+		0x2841A2A8, 0x2841A2AC, 0x2841A2B0, 0x2841A2B8, 0x2841A2BC, 0x2841A2C0, 0x2841A2C8, 0x2841A2CC,
+		0x2841A2D0, 0x2841A2D4, 0x2841A2D8, 0x2841A2DC, 0x2841A2E0, 0x2841A2E4,
+	},
+	{
+		0x2851A280, 0x2851A288, 0x2851A28C, 0x2851A290, 0x2851A294, 0x2851A298, 0x2851A2A0, 0x2851A2A4,
+		0x2851A2A8, 0x2851A2AC, 0x2851A2B0, 0x2851A2B8, 0x2851A2BC, 0x2851A2C0, 0x2851A2C8, 0x2851A2CC,
+		0x2851A2D0, 0x2851A2D4, 0x2851A2D8, 0x2851A2DC, 0x2851A2E0, 0x2851A2E4,
+	},
+	{
+		0x2861A280, 0x2861A288, 0x2861A28C, 0x2861A290, 0x2861A294, 0x2861A298, 0x2861A2A0, 0x2861A2A4,
+		0x2861A2A8, 0x2861A2AC, 0x2861A2B0, 0x2861A2B8, 0x2861A2BC, 0x2861A2C0, 0x2861A2C8, 0x2861A2CC,
+		0x2861A2D0, 0x2861A2D4, 0x2861A2D8, 0x2861A2DC, 0x2861A2E0, 0x2861A2E4,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGLW_ADDR	gIM_R2Y_EGLW_Addr[3] = {
+	{
+		0x2841A300, 0x2841A310, 0x2841A314, 0x2841A318, 0x2841A320, 0x2841A324, 0x2841A328, 0x2841A330,
+		0x2841A334, 0x2841A338, 0x2841A33C, 0x2841A340, 0x2841A348, 0x2841A34C, 0x2841A350, 0x2841A358,
+		0x2841A35C, 0x2841A360, 0x2841A364, 0x2841A368, 0x2841A36C, 0x2841A370, 0x2841A374,
+	},
+	{
+		0x2851A300, 0x2851A310, 0x2851A314, 0x2851A318, 0x2851A320, 0x2851A324, 0x2851A328, 0x2851A330,
+		0x2851A334, 0x2851A338, 0x2851A33C, 0x2851A340, 0x2851A348, 0x2851A34C, 0x2851A350, 0x2851A358,
+		0x2851A35C, 0x2851A360, 0x2851A364, 0x2851A368, 0x2851A36C, 0x2851A370, 0x2851A374,
+	},
+	{
+		0x2861A300, 0x2861A310, 0x2861A314, 0x2861A318, 0x2861A320, 0x2861A324, 0x2861A328, 0x2861A330,
+		0x2861A334, 0x2861A338, 0x2861A33C, 0x2861A340, 0x2861A348, 0x2861A34C, 0x2861A350, 0x2861A358,
+		0x2861A35C, 0x2861A360, 0x2861A364, 0x2861A368, 0x2861A36C, 0x2861A370, 0x2861A374,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGDT_ADDR	gIM_R2Y_EGDT_Addr[3] = {
+	{
+		0x2841A380, 0x2841A384, 0x2841A388, 0x2841A38C, 0x2841A390,
+	},
+	{
+		0x2851A380, 0x2851A384, 0x2851A388, 0x2851A38C, 0x2851A390,
+	},
+	{
+		0x2861A380, 0x2861A384, 0x2861A388, 0x2861A38C, 0x2861A390,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGCMP_ADDR	gIM_R2Y_EGCMP_Addr[3] = {
+	{
+		0x2841A3C0, 0x2841A3C8, 0x2841A3CC, 0x2841A3D0, 0x2841A3D8, 0x2841A3DC, 0x2841A3E0, 0x2841A3E8,
+		0x2841A3EC, 0x2841A3F0,
+	},
+	{
+		0x2851A3C0, 0x2851A3C8, 0x2851A3CC, 0x2851A3D0, 0x2851A3D8, 0x2851A3DC, 0x2851A3E0, 0x2851A3E8,
+		0x2851A3EC, 0x2851A3F0,
+	},
+	{
+		0x2861A3C0, 0x2861A3C8, 0x2861A3CC, 0x2861A3D0, 0x2861A3D8, 0x2861A3DC, 0x2861A3E0, 0x2861A3E8,
+		0x2861A3EC, 0x2861A3F0,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_CRV_ADDR	gIM_R2Y_CRV_Addr[3] = {
+	{
+		0x2841A400, 0x2841A404,
+	},
+	{
+		0x2851A400, 0x2851A404,
+	},
+	{
+		0x2861A400, 0x2861A404,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGCRV_ADDR	gIM_R2Y_EGCRV_Addr[3] = {
+	{
+		0x2841A440, 0x2841A444, 0x2841A448, 0x2841A44C, 0x2841A450, 0x2841A454, 0x2841A458, 0x2841A45C,
+		0x2841A460, 0x2841A464, 0x2841A468, 0x2841A46C, 0x2841A470, 0x2841A474, 0x2841A478, 0x2841A47C,
+	},
+	{
+		0x2851A440, 0x2851A444, 0x2851A448, 0x2851A44C, 0x2851A450, 0x2851A454, 0x2851A458, 0x2851A45C,
+		0x2851A460, 0x2851A464, 0x2851A468, 0x2851A46C, 0x2851A470, 0x2851A474, 0x2851A478, 0x2851A47C,
+	},
+	{
+		0x2861A440, 0x2861A444, 0x2861A448, 0x2861A44C, 0x2861A450, 0x2861A454, 0x2861A458, 0x2861A45C,
+		0x2861A460, 0x2861A464, 0x2861A468, 0x2861A46C, 0x2861A470, 0x2861A474, 0x2861A478, 0x2861A47C,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_YBCRV_ADDR	gIM_R2Y_YBCRV_Addr[3] = {
+	{
+		0x2841A480, 0x2841A484, 0x2841A488, 0x2841A48C, 0x2841A490, 0x2841A494, 0x2841A498, 0x2841A49C,
+		0x2841A4A0, 0x2841A4A4, 0x2841A4A8, 0x2841A4AC, 0x2841A4B0, 0x2841A4B4, 0x2841A4B8,
+	},
+	{
+		0x2851A480, 0x2851A484, 0x2851A488, 0x2851A48C, 0x2851A490, 0x2851A494, 0x2851A498, 0x2851A49C,
+		0x2851A4A0, 0x2851A4A4, 0x2851A4A8, 0x2851A4AC, 0x2851A4B0, 0x2851A4B4, 0x2851A4B8,
+	},
+	{
+		0x2861A480, 0x2861A484, 0x2861A488, 0x2861A48C, 0x2861A490, 0x2861A494, 0x2861A498, 0x2861A49C,
+		0x2861A4A0, 0x2861A4A4, 0x2861A4A8, 0x2861A4AC, 0x2861A4B0, 0x2861A4B4, 0x2861A4B8,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_CLPF_ADDR	gIM_R2Y_CLPF_Addr[3] = {
+	{
+		0x2841A500, 0x2841A520, 0x2841A524, 0x2841A528, 0x2841A52C, 0x2841A530, 0x2841A540, 0x2841A548,
+		0x2841A54C, 0x2841A550, 0x2841A554,
+	},
+	{
+		0x2851A500, 0x2851A520, 0x2851A524, 0x2851A528, 0x2851A52C, 0x2851A530, 0x2851A540, 0x2851A548,
+		0x2851A54C, 0x2851A550, 0x2851A554,
+	},
+	{
+		0x2861A500, 0x2861A520, 0x2861A524, 0x2861A528, 0x2861A52C, 0x2861A530, 0x2861A540, 0x2861A548,
+		0x2861A54C, 0x2861A550, 0x2861A554,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_CSP_ADDR	gIM_R2Y_CSP_Addr[3] = {
+	{
+		0x2841A580, 0x2841A588, 0x2841A58C, 0x2841A590, 0x2841A594, 0x2841A598, 0x2841A59C, 0x2841A5A0,
+		0x2841A5A4, 0x2841A5A8, 0x2841A5AC,
+	},
+	{
+		0x2851A580, 0x2851A588, 0x2851A58C, 0x2851A590, 0x2851A594, 0x2851A598, 0x2851A59C, 0x2851A5A0,
+		0x2851A5A4, 0x2851A5A8, 0x2851A5AC,
+	},
+	{
+		0x2861A580, 0x2861A588, 0x2861A58C, 0x2861A590, 0x2861A594, 0x2861A598, 0x2861A59C, 0x2861A5A0,
+		0x2861A5A4, 0x2861A5A8, 0x2861A5AC,
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_TONE_TBL_ADDR	gIM_R2Y_TONE_Tbl_Addr[3] = {
+	{
+		{
+			0x294A0000, 0x294A0004, 0x294A0008, 0x294A000C, 0x294A0010, 0x294A0014, 0x294A0018, 0x294A001C,
+			0x294A0020, 0x294A0024, 0x294A0028, 0x294A002C, 0x294A0030, 0x294A0034, 0x294A0038, 0x294A003C,
+			0x294A0040, 0x294A0044, 0x294A0048, 0x294A004C, 0x294A0050, 0x294A0054, 0x294A0058, 0x294A005C,
+			0x294A0060, 0x294A0064, 0x294A0068, 0x294A006C, 0x294A0070, 0x294A0074, 0x294A0078, 0x294A007C,
+			0x294A0080, 0x294A0084, 0x294A0088, 0x294A008C, 0x294A0090, 0x294A0094, 0x294A0098, 0x294A009C,
+			0x294A00A0, 0x294A00A4, 0x294A00A8, 0x294A00AC, 0x294A00B0, 0x294A00B4, 0x294A00B8, 0x294A00BC,
+			0x294A00C0, 0x294A00C4, 0x294A00C8, 0x294A00CC, 0x294A00D0, 0x294A00D4, 0x294A00D8, 0x294A00DC,
+			0x294A00E0, 0x294A00E4, 0x294A00E8, 0x294A00EC, 0x294A00F0, 0x294A00F4, 0x294A00F8, 0x294A00FC,
+			0x294A0100, 0x294A0104, 0x294A0108, 0x294A010C, 0x294A0110, 0x294A0114, 0x294A0118, 0x294A011C,
+			0x294A0120, 0x294A0124, 0x294A0128, 0x294A012C, 0x294A0130, 0x294A0134, 0x294A0138, 0x294A013C,
+			0x294A0140, 0x294A0144, 0x294A0148, 0x294A014C, 0x294A0150, 0x294A0154, 0x294A0158, 0x294A015C,
+			0x294A0160, 0x294A0164, 0x294A0168, 0x294A016C, 0x294A0170, 0x294A0174, 0x294A0178, 0x294A017C,
+			0x294A0180, 0x294A0184, 0x294A0188, 0x294A018C, 0x294A0190, 0x294A0194, 0x294A0198, 0x294A019C,
+			0x294A01A0, 0x294A01A4, 0x294A01A8, 0x294A01AC, 0x294A01B0, 0x294A01B4, 0x294A01B8, 0x294A01BC,
+			0x294A01C0, 0x294A01C4, 0x294A01C8, 0x294A01CC, 0x294A01D0, 0x294A01D4, 0x294A01D8, 0x294A01DC,
+			0x294A01E0, 0x294A01E4, 0x294A01E8, 0x294A01EC, 0x294A01F0, 0x294A01F4, 0x294A01F8, 0x294A01FC,
+			0x294A0200, 0x294A0204, 0x294A0208, 0x294A020C, 0x294A0210, 0x294A0214, 0x294A0218, 0x294A021C,
+			0x294A0220, 0x294A0224, 0x294A0228, 0x294A022C, 0x294A0230, 0x294A0234, 0x294A0238, 0x294A023C,
+			0x294A0240, 0x294A0244, 0x294A0248, 0x294A024C, 0x294A0250, 0x294A0254, 0x294A0258, 0x294A025C,
+			0x294A0260, 0x294A0264, 0x294A0268, 0x294A026C, 0x294A0270, 0x294A0274, 0x294A0278, 0x294A027C,
+			0x294A0280, 0x294A0284, 0x294A0288, 0x294A028C, 0x294A0290, 0x294A0294, 0x294A0298, 0x294A029C,
+			0x294A02A0, 0x294A02A4, 0x294A02A8, 0x294A02AC, 0x294A02B0, 0x294A02B4, 0x294A02B8, 0x294A02BC,
+			0x294A02C0, 0x294A02C4, 0x294A02C8, 0x294A02CC, 0x294A02D0, 0x294A02D4, 0x294A02D8, 0x294A02DC,
+			0x294A02E0, 0x294A02E4, 0x294A02E8, 0x294A02EC, 0x294A02F0, 0x294A02F4, 0x294A02F8, 0x294A02FC,
+			0x294A0300, 0x294A0304, 0x294A0308, 0x294A030C, 0x294A0310, 0x294A0314, 0x294A0318, 0x294A031C,
+			0x294A0320, 0x294A0324, 0x294A0328, 0x294A032C, 0x294A0330, 0x294A0334, 0x294A0338, 0x294A033C,
+			0x294A0340, 0x294A0344, 0x294A0348, 0x294A034C, 0x294A0350, 0x294A0354, 0x294A0358, 0x294A035C,
+			0x294A0360, 0x294A0364, 0x294A0368, 0x294A036C, 0x294A0370, 0x294A0374, 0x294A0378, 0x294A037C,
+			0x294A0380, 0x294A0384, 0x294A0388, 0x294A038C, 0x294A0390, 0x294A0394, 0x294A0398, 0x294A039C,
+			0x294A03A0, 0x294A03A4, 0x294A03A8, 0x294A03AC, 0x294A03B0, 0x294A03B4, 0x294A03B8, 0x294A03BC,
+			0x294A03C0, 0x294A03C4, 0x294A03C8, 0x294A03CC, 0x294A03D0, 0x294A03D4, 0x294A03D8, 0x294A03DC,
+			0x294A03E0, 0x294A03E4, 0x294A03E8, 0x294A03EC, 0x294A03F0, 0x294A03F4, 0x294A03F8, 0x294A03FC,
+			0x294A0400, 0x294A0404, 0x294A0408, 0x294A040C, 0x294A0410, 0x294A0414, 0x294A0418, 0x294A041C,
+			0x294A0420, 0x294A0424, 0x294A0428, 0x294A042C, 0x294A0430, 0x294A0434, 0x294A0438, 0x294A043C,
+			0x294A0440, 0x294A0444, 0x294A0448, 0x294A044C, 0x294A0450, 0x294A0454, 0x294A0458, 0x294A045C,
+			0x294A0460, 0x294A0464, 0x294A0468, 0x294A046C, 0x294A0470, 0x294A0474, 0x294A0478, 0x294A047C,
+			0x294A0480, 0x294A0484, 0x294A0488, 0x294A048C, 0x294A0490, 0x294A0494, 0x294A0498, 0x294A049C,
+			0x294A04A0, 0x294A04A4, 0x294A04A8, 0x294A04AC, 0x294A04B0, 0x294A04B4, 0x294A04B8, 0x294A04BC,
+			0x294A04C0, 0x294A04C4, 0x294A04C8, 0x294A04CC, 0x294A04D0, 0x294A04D4, 0x294A04D8, 0x294A04DC,
+			0x294A04E0, 0x294A04E4, 0x294A04E8, 0x294A04EC, 0x294A04F0, 0x294A04F4, 0x294A04F8, 0x294A04FC,
+			0x294A0500, 0x294A0504, 0x294A0508, 0x294A050C, 0x294A0510, 0x294A0514, 0x294A0518, 0x294A051C,
+			0x294A0520, 0x294A0524, 0x294A0528, 0x294A052C, 0x294A0530, 0x294A0534, 0x294A0538, 0x294A053C,
+			0x294A0540, 0x294A0544, 0x294A0548, 0x294A054C, 0x294A0550, 0x294A0554, 0x294A0558, 0x294A055C,
+			0x294A0560, 0x294A0564, 0x294A0568, 0x294A056C, 0x294A0570, 0x294A0574, 0x294A0578, 0x294A057C,
+			0x294A0580, 0x294A0584, 0x294A0588, 0x294A058C, 0x294A0590, 0x294A0594, 0x294A0598, 0x294A059C,
+			0x294A05A0, 0x294A05A4, 0x294A05A8, 0x294A05AC, 0x294A05B0, 0x294A05B4, 0x294A05B8, 0x294A05BC,
+			0x294A05C0, 0x294A05C4, 0x294A05C8, 0x294A05CC, 0x294A05D0, 0x294A05D4, 0x294A05D8, 0x294A05DC,
+			0x294A05E0, 0x294A05E4, 0x294A05E8, 0x294A05EC, 0x294A05F0, 0x294A05F4, 0x294A05F8, 0x294A05FC,
+			0x294A0600, 0x294A0604, 0x294A0608, 0x294A060C, 0x294A0610, 0x294A0614, 0x294A0618, 0x294A061C,
+			0x294A0620, 0x294A0624, 0x294A0628, 0x294A062C, 0x294A0630, 0x294A0634, 0x294A0638, 0x294A063C,
+			0x294A0640, 0x294A0644, 0x294A0648, 0x294A064C, 0x294A0650, 0x294A0654, 0x294A0658, 0x294A065C,
+			0x294A0660, 0x294A0664, 0x294A0668, 0x294A066C, 0x294A0670, 0x294A0674, 0x294A0678, 0x294A067C,
+			0x294A0680, 0x294A0684, 0x294A0688, 0x294A068C, 0x294A0690, 0x294A0694, 0x294A0698, 0x294A069C,
+			0x294A06A0, 0x294A06A4, 0x294A06A8, 0x294A06AC, 0x294A06B0, 0x294A06B4, 0x294A06B8, 0x294A06BC,
+			0x294A06C0, 0x294A06C4, 0x294A06C8, 0x294A06CC, 0x294A06D0, 0x294A06D4, 0x294A06D8, 0x294A06DC,
+			0x294A06E0, 0x294A06E4, 0x294A06E8, 0x294A06EC, 0x294A06F0, 0x294A06F4, 0x294A06F8, 0x294A06FC,
+			0x294A0700, 0x294A0704, 0x294A0708, 0x294A070C, 0x294A0710, 0x294A0714, 0x294A0718, 0x294A071C,
+			0x294A0720, 0x294A0724, 0x294A0728, 0x294A072C, 0x294A0730, 0x294A0734, 0x294A0738, 0x294A073C,
+			0x294A0740, 0x294A0744, 0x294A0748, 0x294A074C, 0x294A0750, 0x294A0754, 0x294A0758, 0x294A075C,
+			0x294A0760, 0x294A0764, 0x294A0768, 0x294A076C, 0x294A0770, 0x294A0774, 0x294A0778, 0x294A077C,
+			0x294A0780, 0x294A0784, 0x294A0788, 0x294A078C, 0x294A0790, 0x294A0794, 0x294A0798, 0x294A079C,
+			0x294A07A0, 0x294A07A4, 0x294A07A8, 0x294A07AC, 0x294A07B0, 0x294A07B4, 0x294A07B8, 0x294A07BC,
+			0x294A07C0, 0x294A07C4, 0x294A07C8, 0x294A07CC, 0x294A07D0, 0x294A07D4, 0x294A07D8, 0x294A07DC,
+			0x294A07E0, 0x294A07E4, 0x294A07E8, 0x294A07EC, 0x294A07F0, 0x294A07F4, 0x294A07F8, 0x294A07FC,
+		},
+	},
+	{
+		{
+			0x295A0000, 0x295A0004, 0x295A0008, 0x295A000C, 0x295A0010, 0x295A0014, 0x295A0018, 0x295A001C,
+			0x295A0020, 0x295A0024, 0x295A0028, 0x295A002C, 0x295A0030, 0x295A0034, 0x295A0038, 0x295A003C,
+			0x295A0040, 0x295A0044, 0x295A0048, 0x295A004C, 0x295A0050, 0x295A0054, 0x295A0058, 0x295A005C,
+			0x295A0060, 0x295A0064, 0x295A0068, 0x295A006C, 0x295A0070, 0x295A0074, 0x295A0078, 0x295A007C,
+			0x295A0080, 0x295A0084, 0x295A0088, 0x295A008C, 0x295A0090, 0x295A0094, 0x295A0098, 0x295A009C,
+			0x295A00A0, 0x295A00A4, 0x295A00A8, 0x295A00AC, 0x295A00B0, 0x295A00B4, 0x295A00B8, 0x295A00BC,
+			0x295A00C0, 0x295A00C4, 0x295A00C8, 0x295A00CC, 0x295A00D0, 0x295A00D4, 0x295A00D8, 0x295A00DC,
+			0x295A00E0, 0x295A00E4, 0x295A00E8, 0x295A00EC, 0x295A00F0, 0x295A00F4, 0x295A00F8, 0x295A00FC,
+			0x295A0100, 0x295A0104, 0x295A0108, 0x295A010C, 0x295A0110, 0x295A0114, 0x295A0118, 0x295A011C,
+			0x295A0120, 0x295A0124, 0x295A0128, 0x295A012C, 0x295A0130, 0x295A0134, 0x295A0138, 0x295A013C,
+			0x295A0140, 0x295A0144, 0x295A0148, 0x295A014C, 0x295A0150, 0x295A0154, 0x295A0158, 0x295A015C,
+			0x295A0160, 0x295A0164, 0x295A0168, 0x295A016C, 0x295A0170, 0x295A0174, 0x295A0178, 0x295A017C,
+			0x295A0180, 0x295A0184, 0x295A0188, 0x295A018C, 0x295A0190, 0x295A0194, 0x295A0198, 0x295A019C,
+			0x295A01A0, 0x295A01A4, 0x295A01A8, 0x295A01AC, 0x295A01B0, 0x295A01B4, 0x295A01B8, 0x295A01BC,
+			0x295A01C0, 0x295A01C4, 0x295A01C8, 0x295A01CC, 0x295A01D0, 0x295A01D4, 0x295A01D8, 0x295A01DC,
+			0x295A01E0, 0x295A01E4, 0x295A01E8, 0x295A01EC, 0x295A01F0, 0x295A01F4, 0x295A01F8, 0x295A01FC,
+			0x295A0200, 0x295A0204, 0x295A0208, 0x295A020C, 0x295A0210, 0x295A0214, 0x295A0218, 0x295A021C,
+			0x295A0220, 0x295A0224, 0x295A0228, 0x295A022C, 0x295A0230, 0x295A0234, 0x295A0238, 0x295A023C,
+			0x295A0240, 0x295A0244, 0x295A0248, 0x295A024C, 0x295A0250, 0x295A0254, 0x295A0258, 0x295A025C,
+			0x295A0260, 0x295A0264, 0x295A0268, 0x295A026C, 0x295A0270, 0x295A0274, 0x295A0278, 0x295A027C,
+			0x295A0280, 0x295A0284, 0x295A0288, 0x295A028C, 0x295A0290, 0x295A0294, 0x295A0298, 0x295A029C,
+			0x295A02A0, 0x295A02A4, 0x295A02A8, 0x295A02AC, 0x295A02B0, 0x295A02B4, 0x295A02B8, 0x295A02BC,
+			0x295A02C0, 0x295A02C4, 0x295A02C8, 0x295A02CC, 0x295A02D0, 0x295A02D4, 0x295A02D8, 0x295A02DC,
+			0x295A02E0, 0x295A02E4, 0x295A02E8, 0x295A02EC, 0x295A02F0, 0x295A02F4, 0x295A02F8, 0x295A02FC,
+			0x295A0300, 0x295A0304, 0x295A0308, 0x295A030C, 0x295A0310, 0x295A0314, 0x295A0318, 0x295A031C,
+			0x295A0320, 0x295A0324, 0x295A0328, 0x295A032C, 0x295A0330, 0x295A0334, 0x295A0338, 0x295A033C,
+			0x295A0340, 0x295A0344, 0x295A0348, 0x295A034C, 0x295A0350, 0x295A0354, 0x295A0358, 0x295A035C,
+			0x295A0360, 0x295A0364, 0x295A0368, 0x295A036C, 0x295A0370, 0x295A0374, 0x295A0378, 0x295A037C,
+			0x295A0380, 0x295A0384, 0x295A0388, 0x295A038C, 0x295A0390, 0x295A0394, 0x295A0398, 0x295A039C,
+			0x295A03A0, 0x295A03A4, 0x295A03A8, 0x295A03AC, 0x295A03B0, 0x295A03B4, 0x295A03B8, 0x295A03BC,
+			0x295A03C0, 0x295A03C4, 0x295A03C8, 0x295A03CC, 0x295A03D0, 0x295A03D4, 0x295A03D8, 0x295A03DC,
+			0x295A03E0, 0x295A03E4, 0x295A03E8, 0x295A03EC, 0x295A03F0, 0x295A03F4, 0x295A03F8, 0x295A03FC,
+			0x295A0400, 0x295A0404, 0x295A0408, 0x295A040C, 0x295A0410, 0x295A0414, 0x295A0418, 0x295A041C,
+			0x295A0420, 0x295A0424, 0x295A0428, 0x295A042C, 0x295A0430, 0x295A0434, 0x295A0438, 0x295A043C,
+			0x295A0440, 0x295A0444, 0x295A0448, 0x295A044C, 0x295A0450, 0x295A0454, 0x295A0458, 0x295A045C,
+			0x295A0460, 0x295A0464, 0x295A0468, 0x295A046C, 0x295A0470, 0x295A0474, 0x295A0478, 0x295A047C,
+			0x295A0480, 0x295A0484, 0x295A0488, 0x295A048C, 0x295A0490, 0x295A0494, 0x295A0498, 0x295A049C,
+			0x295A04A0, 0x295A04A4, 0x295A04A8, 0x295A04AC, 0x295A04B0, 0x295A04B4, 0x295A04B8, 0x295A04BC,
+			0x295A04C0, 0x295A04C4, 0x295A04C8, 0x295A04CC, 0x295A04D0, 0x295A04D4, 0x295A04D8, 0x295A04DC,
+			0x295A04E0, 0x295A04E4, 0x295A04E8, 0x295A04EC, 0x295A04F0, 0x295A04F4, 0x295A04F8, 0x295A04FC,
+			0x295A0500, 0x295A0504, 0x295A0508, 0x295A050C, 0x295A0510, 0x295A0514, 0x295A0518, 0x295A051C,
+			0x295A0520, 0x295A0524, 0x295A0528, 0x295A052C, 0x295A0530, 0x295A0534, 0x295A0538, 0x295A053C,
+			0x295A0540, 0x295A0544, 0x295A0548, 0x295A054C, 0x295A0550, 0x295A0554, 0x295A0558, 0x295A055C,
+			0x295A0560, 0x295A0564, 0x295A0568, 0x295A056C, 0x295A0570, 0x295A0574, 0x295A0578, 0x295A057C,
+			0x295A0580, 0x295A0584, 0x295A0588, 0x295A058C, 0x295A0590, 0x295A0594, 0x295A0598, 0x295A059C,
+			0x295A05A0, 0x295A05A4, 0x295A05A8, 0x295A05AC, 0x295A05B0, 0x295A05B4, 0x295A05B8, 0x295A05BC,
+			0x295A05C0, 0x295A05C4, 0x295A05C8, 0x295A05CC, 0x295A05D0, 0x295A05D4, 0x295A05D8, 0x295A05DC,
+			0x295A05E0, 0x295A05E4, 0x295A05E8, 0x295A05EC, 0x295A05F0, 0x295A05F4, 0x295A05F8, 0x295A05FC,
+			0x295A0600, 0x295A0604, 0x295A0608, 0x295A060C, 0x295A0610, 0x295A0614, 0x295A0618, 0x295A061C,
+			0x295A0620, 0x295A0624, 0x295A0628, 0x295A062C, 0x295A0630, 0x295A0634, 0x295A0638, 0x295A063C,
+			0x295A0640, 0x295A0644, 0x295A0648, 0x295A064C, 0x295A0650, 0x295A0654, 0x295A0658, 0x295A065C,
+			0x295A0660, 0x295A0664, 0x295A0668, 0x295A066C, 0x295A0670, 0x295A0674, 0x295A0678, 0x295A067C,
+			0x295A0680, 0x295A0684, 0x295A0688, 0x295A068C, 0x295A0690, 0x295A0694, 0x295A0698, 0x295A069C,
+			0x295A06A0, 0x295A06A4, 0x295A06A8, 0x295A06AC, 0x295A06B0, 0x295A06B4, 0x295A06B8, 0x295A06BC,
+			0x295A06C0, 0x295A06C4, 0x295A06C8, 0x295A06CC, 0x295A06D0, 0x295A06D4, 0x295A06D8, 0x295A06DC,
+			0x295A06E0, 0x295A06E4, 0x295A06E8, 0x295A06EC, 0x295A06F0, 0x295A06F4, 0x295A06F8, 0x295A06FC,
+			0x295A0700, 0x295A0704, 0x295A0708, 0x295A070C, 0x295A0710, 0x295A0714, 0x295A0718, 0x295A071C,
+			0x295A0720, 0x295A0724, 0x295A0728, 0x295A072C, 0x295A0730, 0x295A0734, 0x295A0738, 0x295A073C,
+			0x295A0740, 0x295A0744, 0x295A0748, 0x295A074C, 0x295A0750, 0x295A0754, 0x295A0758, 0x295A075C,
+			0x295A0760, 0x295A0764, 0x295A0768, 0x295A076C, 0x295A0770, 0x295A0774, 0x295A0778, 0x295A077C,
+			0x295A0780, 0x295A0784, 0x295A0788, 0x295A078C, 0x295A0790, 0x295A0794, 0x295A0798, 0x295A079C,
+			0x295A07A0, 0x295A07A4, 0x295A07A8, 0x295A07AC, 0x295A07B0, 0x295A07B4, 0x295A07B8, 0x295A07BC,
+			0x295A07C0, 0x295A07C4, 0x295A07C8, 0x295A07CC, 0x295A07D0, 0x295A07D4, 0x295A07D8, 0x295A07DC,
+			0x295A07E0, 0x295A07E4, 0x295A07E8, 0x295A07EC, 0x295A07F0, 0x295A07F4, 0x295A07F8, 0x295A07FC,
+		},
+	},
+	{
+		{
+			0x296A0000, 0x296A0004, 0x296A0008, 0x296A000C, 0x296A0010, 0x296A0014, 0x296A0018, 0x296A001C,
+			0x296A0020, 0x296A0024, 0x296A0028, 0x296A002C, 0x296A0030, 0x296A0034, 0x296A0038, 0x296A003C,
+			0x296A0040, 0x296A0044, 0x296A0048, 0x296A004C, 0x296A0050, 0x296A0054, 0x296A0058, 0x296A005C,
+			0x296A0060, 0x296A0064, 0x296A0068, 0x296A006C, 0x296A0070, 0x296A0074, 0x296A0078, 0x296A007C,
+			0x296A0080, 0x296A0084, 0x296A0088, 0x296A008C, 0x296A0090, 0x296A0094, 0x296A0098, 0x296A009C,
+			0x296A00A0, 0x296A00A4, 0x296A00A8, 0x296A00AC, 0x296A00B0, 0x296A00B4, 0x296A00B8, 0x296A00BC,
+			0x296A00C0, 0x296A00C4, 0x296A00C8, 0x296A00CC, 0x296A00D0, 0x296A00D4, 0x296A00D8, 0x296A00DC,
+			0x296A00E0, 0x296A00E4, 0x296A00E8, 0x296A00EC, 0x296A00F0, 0x296A00F4, 0x296A00F8, 0x296A00FC,
+			0x296A0100, 0x296A0104, 0x296A0108, 0x296A010C, 0x296A0110, 0x296A0114, 0x296A0118, 0x296A011C,
+			0x296A0120, 0x296A0124, 0x296A0128, 0x296A012C, 0x296A0130, 0x296A0134, 0x296A0138, 0x296A013C,
+			0x296A0140, 0x296A0144, 0x296A0148, 0x296A014C, 0x296A0150, 0x296A0154, 0x296A0158, 0x296A015C,
+			0x296A0160, 0x296A0164, 0x296A0168, 0x296A016C, 0x296A0170, 0x296A0174, 0x296A0178, 0x296A017C,
+			0x296A0180, 0x296A0184, 0x296A0188, 0x296A018C, 0x296A0190, 0x296A0194, 0x296A0198, 0x296A019C,
+			0x296A01A0, 0x296A01A4, 0x296A01A8, 0x296A01AC, 0x296A01B0, 0x296A01B4, 0x296A01B8, 0x296A01BC,
+			0x296A01C0, 0x296A01C4, 0x296A01C8, 0x296A01CC, 0x296A01D0, 0x296A01D4, 0x296A01D8, 0x296A01DC,
+			0x296A01E0, 0x296A01E4, 0x296A01E8, 0x296A01EC, 0x296A01F0, 0x296A01F4, 0x296A01F8, 0x296A01FC,
+			0x296A0200, 0x296A0204, 0x296A0208, 0x296A020C, 0x296A0210, 0x296A0214, 0x296A0218, 0x296A021C,
+			0x296A0220, 0x296A0224, 0x296A0228, 0x296A022C, 0x296A0230, 0x296A0234, 0x296A0238, 0x296A023C,
+			0x296A0240, 0x296A0244, 0x296A0248, 0x296A024C, 0x296A0250, 0x296A0254, 0x296A0258, 0x296A025C,
+			0x296A0260, 0x296A0264, 0x296A0268, 0x296A026C, 0x296A0270, 0x296A0274, 0x296A0278, 0x296A027C,
+			0x296A0280, 0x296A0284, 0x296A0288, 0x296A028C, 0x296A0290, 0x296A0294, 0x296A0298, 0x296A029C,
+			0x296A02A0, 0x296A02A4, 0x296A02A8, 0x296A02AC, 0x296A02B0, 0x296A02B4, 0x296A02B8, 0x296A02BC,
+			0x296A02C0, 0x296A02C4, 0x296A02C8, 0x296A02CC, 0x296A02D0, 0x296A02D4, 0x296A02D8, 0x296A02DC,
+			0x296A02E0, 0x296A02E4, 0x296A02E8, 0x296A02EC, 0x296A02F0, 0x296A02F4, 0x296A02F8, 0x296A02FC,
+			0x296A0300, 0x296A0304, 0x296A0308, 0x296A030C, 0x296A0310, 0x296A0314, 0x296A0318, 0x296A031C,
+			0x296A0320, 0x296A0324, 0x296A0328, 0x296A032C, 0x296A0330, 0x296A0334, 0x296A0338, 0x296A033C,
+			0x296A0340, 0x296A0344, 0x296A0348, 0x296A034C, 0x296A0350, 0x296A0354, 0x296A0358, 0x296A035C,
+			0x296A0360, 0x296A0364, 0x296A0368, 0x296A036C, 0x296A0370, 0x296A0374, 0x296A0378, 0x296A037C,
+			0x296A0380, 0x296A0384, 0x296A0388, 0x296A038C, 0x296A0390, 0x296A0394, 0x296A0398, 0x296A039C,
+			0x296A03A0, 0x296A03A4, 0x296A03A8, 0x296A03AC, 0x296A03B0, 0x296A03B4, 0x296A03B8, 0x296A03BC,
+			0x296A03C0, 0x296A03C4, 0x296A03C8, 0x296A03CC, 0x296A03D0, 0x296A03D4, 0x296A03D8, 0x296A03DC,
+			0x296A03E0, 0x296A03E4, 0x296A03E8, 0x296A03EC, 0x296A03F0, 0x296A03F4, 0x296A03F8, 0x296A03FC,
+			0x296A0400, 0x296A0404, 0x296A0408, 0x296A040C, 0x296A0410, 0x296A0414, 0x296A0418, 0x296A041C,
+			0x296A0420, 0x296A0424, 0x296A0428, 0x296A042C, 0x296A0430, 0x296A0434, 0x296A0438, 0x296A043C,
+			0x296A0440, 0x296A0444, 0x296A0448, 0x296A044C, 0x296A0450, 0x296A0454, 0x296A0458, 0x296A045C,
+			0x296A0460, 0x296A0464, 0x296A0468, 0x296A046C, 0x296A0470, 0x296A0474, 0x296A0478, 0x296A047C,
+			0x296A0480, 0x296A0484, 0x296A0488, 0x296A048C, 0x296A0490, 0x296A0494, 0x296A0498, 0x296A049C,
+			0x296A04A0, 0x296A04A4, 0x296A04A8, 0x296A04AC, 0x296A04B0, 0x296A04B4, 0x296A04B8, 0x296A04BC,
+			0x296A04C0, 0x296A04C4, 0x296A04C8, 0x296A04CC, 0x296A04D0, 0x296A04D4, 0x296A04D8, 0x296A04DC,
+			0x296A04E0, 0x296A04E4, 0x296A04E8, 0x296A04EC, 0x296A04F0, 0x296A04F4, 0x296A04F8, 0x296A04FC,
+			0x296A0500, 0x296A0504, 0x296A0508, 0x296A050C, 0x296A0510, 0x296A0514, 0x296A0518, 0x296A051C,
+			0x296A0520, 0x296A0524, 0x296A0528, 0x296A052C, 0x296A0530, 0x296A0534, 0x296A0538, 0x296A053C,
+			0x296A0540, 0x296A0544, 0x296A0548, 0x296A054C, 0x296A0550, 0x296A0554, 0x296A0558, 0x296A055C,
+			0x296A0560, 0x296A0564, 0x296A0568, 0x296A056C, 0x296A0570, 0x296A0574, 0x296A0578, 0x296A057C,
+			0x296A0580, 0x296A0584, 0x296A0588, 0x296A058C, 0x296A0590, 0x296A0594, 0x296A0598, 0x296A059C,
+			0x296A05A0, 0x296A05A4, 0x296A05A8, 0x296A05AC, 0x296A05B0, 0x296A05B4, 0x296A05B8, 0x296A05BC,
+			0x296A05C0, 0x296A05C4, 0x296A05C8, 0x296A05CC, 0x296A05D0, 0x296A05D4, 0x296A05D8, 0x296A05DC,
+			0x296A05E0, 0x296A05E4, 0x296A05E8, 0x296A05EC, 0x296A05F0, 0x296A05F4, 0x296A05F8, 0x296A05FC,
+			0x296A0600, 0x296A0604, 0x296A0608, 0x296A060C, 0x296A0610, 0x296A0614, 0x296A0618, 0x296A061C,
+			0x296A0620, 0x296A0624, 0x296A0628, 0x296A062C, 0x296A0630, 0x296A0634, 0x296A0638, 0x296A063C,
+			0x296A0640, 0x296A0644, 0x296A0648, 0x296A064C, 0x296A0650, 0x296A0654, 0x296A0658, 0x296A065C,
+			0x296A0660, 0x296A0664, 0x296A0668, 0x296A066C, 0x296A0670, 0x296A0674, 0x296A0678, 0x296A067C,
+			0x296A0680, 0x296A0684, 0x296A0688, 0x296A068C, 0x296A0690, 0x296A0694, 0x296A0698, 0x296A069C,
+			0x296A06A0, 0x296A06A4, 0x296A06A8, 0x296A06AC, 0x296A06B0, 0x296A06B4, 0x296A06B8, 0x296A06BC,
+			0x296A06C0, 0x296A06C4, 0x296A06C8, 0x296A06CC, 0x296A06D0, 0x296A06D4, 0x296A06D8, 0x296A06DC,
+			0x296A06E0, 0x296A06E4, 0x296A06E8, 0x296A06EC, 0x296A06F0, 0x296A06F4, 0x296A06F8, 0x296A06FC,
+			0x296A0700, 0x296A0704, 0x296A0708, 0x296A070C, 0x296A0710, 0x296A0714, 0x296A0718, 0x296A071C,
+			0x296A0720, 0x296A0724, 0x296A0728, 0x296A072C, 0x296A0730, 0x296A0734, 0x296A0738, 0x296A073C,
+			0x296A0740, 0x296A0744, 0x296A0748, 0x296A074C, 0x296A0750, 0x296A0754, 0x296A0758, 0x296A075C,
+			0x296A0760, 0x296A0764, 0x296A0768, 0x296A076C, 0x296A0770, 0x296A0774, 0x296A0778, 0x296A077C,
+			0x296A0780, 0x296A0784, 0x296A0788, 0x296A078C, 0x296A0790, 0x296A0794, 0x296A0798, 0x296A079C,
+			0x296A07A0, 0x296A07A4, 0x296A07A8, 0x296A07AC, 0x296A07B0, 0x296A07B4, 0x296A07B8, 0x296A07BC,
+			0x296A07C0, 0x296A07C4, 0x296A07C8, 0x296A07CC, 0x296A07D0, 0x296A07D4, 0x296A07D8, 0x296A07DC,
+			0x296A07E0, 0x296A07E4, 0x296A07E8, 0x296A07EC, 0x296A07F0, 0x296A07F4, 0x296A07F8, 0x296A07FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMDF_TBL_ADDR	gIM_R2Y_GMRGBDF_Tbl_Addr[3] = {
+	{
+		{
+			0x294A8000, 0x294A8004, 0x294A8008, 0x294A800C, 0x294A8010, 0x294A8014, 0x294A8018, 0x294A801C,
+			0x294A8020, 0x294A8024, 0x294A8028, 0x294A802C, 0x294A8030, 0x294A8034, 0x294A8038, 0x294A803C,
+			0x294A8040, 0x294A8044, 0x294A8048, 0x294A804C, 0x294A8050, 0x294A8054, 0x294A8058, 0x294A805C,
+			0x294A8060, 0x294A8064, 0x294A8068, 0x294A806C, 0x294A8070, 0x294A8074, 0x294A8078, 0x294A807C,
+			0x294A8080, 0x294A8084, 0x294A8088, 0x294A808C, 0x294A8090, 0x294A8094, 0x294A8098, 0x294A809C,
+			0x294A80A0, 0x294A80A4, 0x294A80A8, 0x294A80AC, 0x294A80B0, 0x294A80B4, 0x294A80B8, 0x294A80BC,
+			0x294A80C0, 0x294A80C4, 0x294A80C8, 0x294A80CC, 0x294A80D0, 0x294A80D4, 0x294A80D8, 0x294A80DC,
+			0x294A80E0, 0x294A80E4, 0x294A80E8, 0x294A80EC, 0x294A80F0, 0x294A80F4, 0x294A80F8, 0x294A80FC,
+			0x294A8100, 0x294A8104, 0x294A8108, 0x294A810C, 0x294A8110, 0x294A8114, 0x294A8118, 0x294A811C,
+			0x294A8120, 0x294A8124, 0x294A8128, 0x294A812C, 0x294A8130, 0x294A8134, 0x294A8138, 0x294A813C,
+			0x294A8140, 0x294A8144, 0x294A8148, 0x294A814C, 0x294A8150, 0x294A8154, 0x294A8158, 0x294A815C,
+			0x294A8160, 0x294A8164, 0x294A8168, 0x294A816C, 0x294A8170, 0x294A8174, 0x294A8178, 0x294A817C,
+			0x294A8180, 0x294A8184, 0x294A8188, 0x294A818C, 0x294A8190, 0x294A8194, 0x294A8198, 0x294A819C,
+			0x294A81A0, 0x294A81A4, 0x294A81A8, 0x294A81AC, 0x294A81B0, 0x294A81B4, 0x294A81B8, 0x294A81BC,
+			0x294A81C0, 0x294A81C4, 0x294A81C8, 0x294A81CC, 0x294A81D0, 0x294A81D4, 0x294A81D8, 0x294A81DC,
+			0x294A81E0, 0x294A81E4, 0x294A81E8, 0x294A81EC, 0x294A81F0, 0x294A81F4, 0x294A81F8, 0x294A81FC,
+			0x294A8200, 0x294A8204, 0x294A8208, 0x294A820C, 0x294A8210, 0x294A8214, 0x294A8218, 0x294A821C,
+			0x294A8220, 0x294A8224, 0x294A8228, 0x294A822C, 0x294A8230, 0x294A8234, 0x294A8238, 0x294A823C,
+			0x294A8240, 0x294A8244, 0x294A8248, 0x294A824C, 0x294A8250, 0x294A8254, 0x294A8258, 0x294A825C,
+			0x294A8260, 0x294A8264, 0x294A8268, 0x294A826C, 0x294A8270, 0x294A8274, 0x294A8278, 0x294A827C,
+			0x294A8280, 0x294A8284, 0x294A8288, 0x294A828C, 0x294A8290, 0x294A8294, 0x294A8298, 0x294A829C,
+			0x294A82A0, 0x294A82A4, 0x294A82A8, 0x294A82AC, 0x294A82B0, 0x294A82B4, 0x294A82B8, 0x294A82BC,
+			0x294A82C0, 0x294A82C4, 0x294A82C8, 0x294A82CC, 0x294A82D0, 0x294A82D4, 0x294A82D8, 0x294A82DC,
+			0x294A82E0, 0x294A82E4, 0x294A82E8, 0x294A82EC, 0x294A82F0, 0x294A82F4, 0x294A82F8, 0x294A82FC,
+			0x294A8300, 0x294A8304, 0x294A8308, 0x294A830C, 0x294A8310, 0x294A8314, 0x294A8318, 0x294A831C,
+			0x294A8320, 0x294A8324, 0x294A8328, 0x294A832C, 0x294A8330, 0x294A8334, 0x294A8338, 0x294A833C,
+			0x294A8340, 0x294A8344, 0x294A8348, 0x294A834C, 0x294A8350, 0x294A8354, 0x294A8358, 0x294A835C,
+			0x294A8360, 0x294A8364, 0x294A8368, 0x294A836C, 0x294A8370, 0x294A8374, 0x294A8378, 0x294A837C,
+			0x294A8380, 0x294A8384, 0x294A8388, 0x294A838C, 0x294A8390, 0x294A8394, 0x294A8398, 0x294A839C,
+			0x294A83A0, 0x294A83A4, 0x294A83A8, 0x294A83AC, 0x294A83B0, 0x294A83B4, 0x294A83B8, 0x294A83BC,
+			0x294A83C0, 0x294A83C4, 0x294A83C8, 0x294A83CC, 0x294A83D0, 0x294A83D4, 0x294A83D8, 0x294A83DC,
+			0x294A83E0, 0x294A83E4, 0x294A83E8, 0x294A83EC, 0x294A83F0, 0x294A83F4, 0x294A83F8, 0x294A83FC,
+			0x294A8400, 0x294A8404, 0x294A8408, 0x294A840C, 0x294A8410, 0x294A8414, 0x294A8418, 0x294A841C,
+			0x294A8420, 0x294A8424, 0x294A8428, 0x294A842C, 0x294A8430, 0x294A8434, 0x294A8438, 0x294A843C,
+			0x294A8440, 0x294A8444, 0x294A8448, 0x294A844C, 0x294A8450, 0x294A8454, 0x294A8458, 0x294A845C,
+			0x294A8460, 0x294A8464, 0x294A8468, 0x294A846C, 0x294A8470, 0x294A8474, 0x294A8478, 0x294A847C,
+			0x294A8480, 0x294A8484, 0x294A8488, 0x294A848C, 0x294A8490, 0x294A8494, 0x294A8498, 0x294A849C,
+			0x294A84A0, 0x294A84A4, 0x294A84A8, 0x294A84AC, 0x294A84B0, 0x294A84B4, 0x294A84B8, 0x294A84BC,
+			0x294A84C0, 0x294A84C4, 0x294A84C8, 0x294A84CC, 0x294A84D0, 0x294A84D4, 0x294A84D8, 0x294A84DC,
+			0x294A84E0, 0x294A84E4, 0x294A84E8, 0x294A84EC, 0x294A84F0, 0x294A84F4, 0x294A84F8, 0x294A84FC,
+			0x294A8500, 0x294A8504, 0x294A8508, 0x294A850C, 0x294A8510, 0x294A8514, 0x294A8518, 0x294A851C,
+			0x294A8520, 0x294A8524, 0x294A8528, 0x294A852C, 0x294A8530, 0x294A8534, 0x294A8538, 0x294A853C,
+			0x294A8540, 0x294A8544, 0x294A8548, 0x294A854C, 0x294A8550, 0x294A8554, 0x294A8558, 0x294A855C,
+			0x294A8560, 0x294A8564, 0x294A8568, 0x294A856C, 0x294A8570, 0x294A8574, 0x294A8578, 0x294A857C,
+			0x294A8580, 0x294A8584, 0x294A8588, 0x294A858C, 0x294A8590, 0x294A8594, 0x294A8598, 0x294A859C,
+			0x294A85A0, 0x294A85A4, 0x294A85A8, 0x294A85AC, 0x294A85B0, 0x294A85B4, 0x294A85B8, 0x294A85BC,
+			0x294A85C0, 0x294A85C4, 0x294A85C8, 0x294A85CC, 0x294A85D0, 0x294A85D4, 0x294A85D8, 0x294A85DC,
+			0x294A85E0, 0x294A85E4, 0x294A85E8, 0x294A85EC, 0x294A85F0, 0x294A85F4, 0x294A85F8, 0x294A85FC,
+			0x294A8600, 0x294A8604, 0x294A8608, 0x294A860C, 0x294A8610, 0x294A8614, 0x294A8618, 0x294A861C,
+			0x294A8620, 0x294A8624, 0x294A8628, 0x294A862C, 0x294A8630, 0x294A8634, 0x294A8638, 0x294A863C,
+			0x294A8640, 0x294A8644, 0x294A8648, 0x294A864C, 0x294A8650, 0x294A8654, 0x294A8658, 0x294A865C,
+			0x294A8660, 0x294A8664, 0x294A8668, 0x294A866C, 0x294A8670, 0x294A8674, 0x294A8678, 0x294A867C,
+			0x294A8680, 0x294A8684, 0x294A8688, 0x294A868C, 0x294A8690, 0x294A8694, 0x294A8698, 0x294A869C,
+			0x294A86A0, 0x294A86A4, 0x294A86A8, 0x294A86AC, 0x294A86B0, 0x294A86B4, 0x294A86B8, 0x294A86BC,
+			0x294A86C0, 0x294A86C4, 0x294A86C8, 0x294A86CC, 0x294A86D0, 0x294A86D4, 0x294A86D8, 0x294A86DC,
+			0x294A86E0, 0x294A86E4, 0x294A86E8, 0x294A86EC, 0x294A86F0, 0x294A86F4, 0x294A86F8, 0x294A86FC,
+			0x294A8700, 0x294A8704, 0x294A8708, 0x294A870C, 0x294A8710, 0x294A8714, 0x294A8718, 0x294A871C,
+			0x294A8720, 0x294A8724, 0x294A8728, 0x294A872C, 0x294A8730, 0x294A8734, 0x294A8738, 0x294A873C,
+			0x294A8740, 0x294A8744, 0x294A8748, 0x294A874C, 0x294A8750, 0x294A8754, 0x294A8758, 0x294A875C,
+			0x294A8760, 0x294A8764, 0x294A8768, 0x294A876C, 0x294A8770, 0x294A8774, 0x294A8778, 0x294A877C,
+			0x294A8780, 0x294A8784, 0x294A8788, 0x294A878C, 0x294A8790, 0x294A8794, 0x294A8798, 0x294A879C,
+			0x294A87A0, 0x294A87A4, 0x294A87A8, 0x294A87AC, 0x294A87B0, 0x294A87B4, 0x294A87B8, 0x294A87BC,
+			0x294A87C0, 0x294A87C4, 0x294A87C8, 0x294A87CC, 0x294A87D0, 0x294A87D4, 0x294A87D8, 0x294A87DC,
+			0x294A87E0, 0x294A87E4, 0x294A87E8, 0x294A87EC, 0x294A87F0, 0x294A87F4, 0x294A87F8, 0x294A87FC,
+		},
+	},
+	{
+		{
+			0x295A8000, 0x295A8004, 0x295A8008, 0x295A800C, 0x295A8010, 0x295A8014, 0x295A8018, 0x295A801C,
+			0x295A8020, 0x295A8024, 0x295A8028, 0x295A802C, 0x295A8030, 0x295A8034, 0x295A8038, 0x295A803C,
+			0x295A8040, 0x295A8044, 0x295A8048, 0x295A804C, 0x295A8050, 0x295A8054, 0x295A8058, 0x295A805C,
+			0x295A8060, 0x295A8064, 0x295A8068, 0x295A806C, 0x295A8070, 0x295A8074, 0x295A8078, 0x295A807C,
+			0x295A8080, 0x295A8084, 0x295A8088, 0x295A808C, 0x295A8090, 0x295A8094, 0x295A8098, 0x295A809C,
+			0x295A80A0, 0x295A80A4, 0x295A80A8, 0x295A80AC, 0x295A80B0, 0x295A80B4, 0x295A80B8, 0x295A80BC,
+			0x295A80C0, 0x295A80C4, 0x295A80C8, 0x295A80CC, 0x295A80D0, 0x295A80D4, 0x295A80D8, 0x295A80DC,
+			0x295A80E0, 0x295A80E4, 0x295A80E8, 0x295A80EC, 0x295A80F0, 0x295A80F4, 0x295A80F8, 0x295A80FC,
+			0x295A8100, 0x295A8104, 0x295A8108, 0x295A810C, 0x295A8110, 0x295A8114, 0x295A8118, 0x295A811C,
+			0x295A8120, 0x295A8124, 0x295A8128, 0x295A812C, 0x295A8130, 0x295A8134, 0x295A8138, 0x295A813C,
+			0x295A8140, 0x295A8144, 0x295A8148, 0x295A814C, 0x295A8150, 0x295A8154, 0x295A8158, 0x295A815C,
+			0x295A8160, 0x295A8164, 0x295A8168, 0x295A816C, 0x295A8170, 0x295A8174, 0x295A8178, 0x295A817C,
+			0x295A8180, 0x295A8184, 0x295A8188, 0x295A818C, 0x295A8190, 0x295A8194, 0x295A8198, 0x295A819C,
+			0x295A81A0, 0x295A81A4, 0x295A81A8, 0x295A81AC, 0x295A81B0, 0x295A81B4, 0x295A81B8, 0x295A81BC,
+			0x295A81C0, 0x295A81C4, 0x295A81C8, 0x295A81CC, 0x295A81D0, 0x295A81D4, 0x295A81D8, 0x295A81DC,
+			0x295A81E0, 0x295A81E4, 0x295A81E8, 0x295A81EC, 0x295A81F0, 0x295A81F4, 0x295A81F8, 0x295A81FC,
+			0x295A8200, 0x295A8204, 0x295A8208, 0x295A820C, 0x295A8210, 0x295A8214, 0x295A8218, 0x295A821C,
+			0x295A8220, 0x295A8224, 0x295A8228, 0x295A822C, 0x295A8230, 0x295A8234, 0x295A8238, 0x295A823C,
+			0x295A8240, 0x295A8244, 0x295A8248, 0x295A824C, 0x295A8250, 0x295A8254, 0x295A8258, 0x295A825C,
+			0x295A8260, 0x295A8264, 0x295A8268, 0x295A826C, 0x295A8270, 0x295A8274, 0x295A8278, 0x295A827C,
+			0x295A8280, 0x295A8284, 0x295A8288, 0x295A828C, 0x295A8290, 0x295A8294, 0x295A8298, 0x295A829C,
+			0x295A82A0, 0x295A82A4, 0x295A82A8, 0x295A82AC, 0x295A82B0, 0x295A82B4, 0x295A82B8, 0x295A82BC,
+			0x295A82C0, 0x295A82C4, 0x295A82C8, 0x295A82CC, 0x295A82D0, 0x295A82D4, 0x295A82D8, 0x295A82DC,
+			0x295A82E0, 0x295A82E4, 0x295A82E8, 0x295A82EC, 0x295A82F0, 0x295A82F4, 0x295A82F8, 0x295A82FC,
+			0x295A8300, 0x295A8304, 0x295A8308, 0x295A830C, 0x295A8310, 0x295A8314, 0x295A8318, 0x295A831C,
+			0x295A8320, 0x295A8324, 0x295A8328, 0x295A832C, 0x295A8330, 0x295A8334, 0x295A8338, 0x295A833C,
+			0x295A8340, 0x295A8344, 0x295A8348, 0x295A834C, 0x295A8350, 0x295A8354, 0x295A8358, 0x295A835C,
+			0x295A8360, 0x295A8364, 0x295A8368, 0x295A836C, 0x295A8370, 0x295A8374, 0x295A8378, 0x295A837C,
+			0x295A8380, 0x295A8384, 0x295A8388, 0x295A838C, 0x295A8390, 0x295A8394, 0x295A8398, 0x295A839C,
+			0x295A83A0, 0x295A83A4, 0x295A83A8, 0x295A83AC, 0x295A83B0, 0x295A83B4, 0x295A83B8, 0x295A83BC,
+			0x295A83C0, 0x295A83C4, 0x295A83C8, 0x295A83CC, 0x295A83D0, 0x295A83D4, 0x295A83D8, 0x295A83DC,
+			0x295A83E0, 0x295A83E4, 0x295A83E8, 0x295A83EC, 0x295A83F0, 0x295A83F4, 0x295A83F8, 0x295A83FC,
+			0x295A8400, 0x295A8404, 0x295A8408, 0x295A840C, 0x295A8410, 0x295A8414, 0x295A8418, 0x295A841C,
+			0x295A8420, 0x295A8424, 0x295A8428, 0x295A842C, 0x295A8430, 0x295A8434, 0x295A8438, 0x295A843C,
+			0x295A8440, 0x295A8444, 0x295A8448, 0x295A844C, 0x295A8450, 0x295A8454, 0x295A8458, 0x295A845C,
+			0x295A8460, 0x295A8464, 0x295A8468, 0x295A846C, 0x295A8470, 0x295A8474, 0x295A8478, 0x295A847C,
+			0x295A8480, 0x295A8484, 0x295A8488, 0x295A848C, 0x295A8490, 0x295A8494, 0x295A8498, 0x295A849C,
+			0x295A84A0, 0x295A84A4, 0x295A84A8, 0x295A84AC, 0x295A84B0, 0x295A84B4, 0x295A84B8, 0x295A84BC,
+			0x295A84C0, 0x295A84C4, 0x295A84C8, 0x295A84CC, 0x295A84D0, 0x295A84D4, 0x295A84D8, 0x295A84DC,
+			0x295A84E0, 0x295A84E4, 0x295A84E8, 0x295A84EC, 0x295A84F0, 0x295A84F4, 0x295A84F8, 0x295A84FC,
+			0x295A8500, 0x295A8504, 0x295A8508, 0x295A850C, 0x295A8510, 0x295A8514, 0x295A8518, 0x295A851C,
+			0x295A8520, 0x295A8524, 0x295A8528, 0x295A852C, 0x295A8530, 0x295A8534, 0x295A8538, 0x295A853C,
+			0x295A8540, 0x295A8544, 0x295A8548, 0x295A854C, 0x295A8550, 0x295A8554, 0x295A8558, 0x295A855C,
+			0x295A8560, 0x295A8564, 0x295A8568, 0x295A856C, 0x295A8570, 0x295A8574, 0x295A8578, 0x295A857C,
+			0x295A8580, 0x295A8584, 0x295A8588, 0x295A858C, 0x295A8590, 0x295A8594, 0x295A8598, 0x295A859C,
+			0x295A85A0, 0x295A85A4, 0x295A85A8, 0x295A85AC, 0x295A85B0, 0x295A85B4, 0x295A85B8, 0x295A85BC,
+			0x295A85C0, 0x295A85C4, 0x295A85C8, 0x295A85CC, 0x295A85D0, 0x295A85D4, 0x295A85D8, 0x295A85DC,
+			0x295A85E0, 0x295A85E4, 0x295A85E8, 0x295A85EC, 0x295A85F0, 0x295A85F4, 0x295A85F8, 0x295A85FC,
+			0x295A8600, 0x295A8604, 0x295A8608, 0x295A860C, 0x295A8610, 0x295A8614, 0x295A8618, 0x295A861C,
+			0x295A8620, 0x295A8624, 0x295A8628, 0x295A862C, 0x295A8630, 0x295A8634, 0x295A8638, 0x295A863C,
+			0x295A8640, 0x295A8644, 0x295A8648, 0x295A864C, 0x295A8650, 0x295A8654, 0x295A8658, 0x295A865C,
+			0x295A8660, 0x295A8664, 0x295A8668, 0x295A866C, 0x295A8670, 0x295A8674, 0x295A8678, 0x295A867C,
+			0x295A8680, 0x295A8684, 0x295A8688, 0x295A868C, 0x295A8690, 0x295A8694, 0x295A8698, 0x295A869C,
+			0x295A86A0, 0x295A86A4, 0x295A86A8, 0x295A86AC, 0x295A86B0, 0x295A86B4, 0x295A86B8, 0x295A86BC,
+			0x295A86C0, 0x295A86C4, 0x295A86C8, 0x295A86CC, 0x295A86D0, 0x295A86D4, 0x295A86D8, 0x295A86DC,
+			0x295A86E0, 0x295A86E4, 0x295A86E8, 0x295A86EC, 0x295A86F0, 0x295A86F4, 0x295A86F8, 0x295A86FC,
+			0x295A8700, 0x295A8704, 0x295A8708, 0x295A870C, 0x295A8710, 0x295A8714, 0x295A8718, 0x295A871C,
+			0x295A8720, 0x295A8724, 0x295A8728, 0x295A872C, 0x295A8730, 0x295A8734, 0x295A8738, 0x295A873C,
+			0x295A8740, 0x295A8744, 0x295A8748, 0x295A874C, 0x295A8750, 0x295A8754, 0x295A8758, 0x295A875C,
+			0x295A8760, 0x295A8764, 0x295A8768, 0x295A876C, 0x295A8770, 0x295A8774, 0x295A8778, 0x295A877C,
+			0x295A8780, 0x295A8784, 0x295A8788, 0x295A878C, 0x295A8790, 0x295A8794, 0x295A8798, 0x295A879C,
+			0x295A87A0, 0x295A87A4, 0x295A87A8, 0x295A87AC, 0x295A87B0, 0x295A87B4, 0x295A87B8, 0x295A87BC,
+			0x295A87C0, 0x295A87C4, 0x295A87C8, 0x295A87CC, 0x295A87D0, 0x295A87D4, 0x295A87D8, 0x295A87DC,
+			0x295A87E0, 0x295A87E4, 0x295A87E8, 0x295A87EC, 0x295A87F0, 0x295A87F4, 0x295A87F8, 0x295A87FC,
+		},
+	},
+	{
+		{
+			0x296A8000, 0x296A8004, 0x296A8008, 0x296A800C, 0x296A8010, 0x296A8014, 0x296A8018, 0x296A801C,
+			0x296A8020, 0x296A8024, 0x296A8028, 0x296A802C, 0x296A8030, 0x296A8034, 0x296A8038, 0x296A803C,
+			0x296A8040, 0x296A8044, 0x296A8048, 0x296A804C, 0x296A8050, 0x296A8054, 0x296A8058, 0x296A805C,
+			0x296A8060, 0x296A8064, 0x296A8068, 0x296A806C, 0x296A8070, 0x296A8074, 0x296A8078, 0x296A807C,
+			0x296A8080, 0x296A8084, 0x296A8088, 0x296A808C, 0x296A8090, 0x296A8094, 0x296A8098, 0x296A809C,
+			0x296A80A0, 0x296A80A4, 0x296A80A8, 0x296A80AC, 0x296A80B0, 0x296A80B4, 0x296A80B8, 0x296A80BC,
+			0x296A80C0, 0x296A80C4, 0x296A80C8, 0x296A80CC, 0x296A80D0, 0x296A80D4, 0x296A80D8, 0x296A80DC,
+			0x296A80E0, 0x296A80E4, 0x296A80E8, 0x296A80EC, 0x296A80F0, 0x296A80F4, 0x296A80F8, 0x296A80FC,
+			0x296A8100, 0x296A8104, 0x296A8108, 0x296A810C, 0x296A8110, 0x296A8114, 0x296A8118, 0x296A811C,
+			0x296A8120, 0x296A8124, 0x296A8128, 0x296A812C, 0x296A8130, 0x296A8134, 0x296A8138, 0x296A813C,
+			0x296A8140, 0x296A8144, 0x296A8148, 0x296A814C, 0x296A8150, 0x296A8154, 0x296A8158, 0x296A815C,
+			0x296A8160, 0x296A8164, 0x296A8168, 0x296A816C, 0x296A8170, 0x296A8174, 0x296A8178, 0x296A817C,
+			0x296A8180, 0x296A8184, 0x296A8188, 0x296A818C, 0x296A8190, 0x296A8194, 0x296A8198, 0x296A819C,
+			0x296A81A0, 0x296A81A4, 0x296A81A8, 0x296A81AC, 0x296A81B0, 0x296A81B4, 0x296A81B8, 0x296A81BC,
+			0x296A81C0, 0x296A81C4, 0x296A81C8, 0x296A81CC, 0x296A81D0, 0x296A81D4, 0x296A81D8, 0x296A81DC,
+			0x296A81E0, 0x296A81E4, 0x296A81E8, 0x296A81EC, 0x296A81F0, 0x296A81F4, 0x296A81F8, 0x296A81FC,
+			0x296A8200, 0x296A8204, 0x296A8208, 0x296A820C, 0x296A8210, 0x296A8214, 0x296A8218, 0x296A821C,
+			0x296A8220, 0x296A8224, 0x296A8228, 0x296A822C, 0x296A8230, 0x296A8234, 0x296A8238, 0x296A823C,
+			0x296A8240, 0x296A8244, 0x296A8248, 0x296A824C, 0x296A8250, 0x296A8254, 0x296A8258, 0x296A825C,
+			0x296A8260, 0x296A8264, 0x296A8268, 0x296A826C, 0x296A8270, 0x296A8274, 0x296A8278, 0x296A827C,
+			0x296A8280, 0x296A8284, 0x296A8288, 0x296A828C, 0x296A8290, 0x296A8294, 0x296A8298, 0x296A829C,
+			0x296A82A0, 0x296A82A4, 0x296A82A8, 0x296A82AC, 0x296A82B0, 0x296A82B4, 0x296A82B8, 0x296A82BC,
+			0x296A82C0, 0x296A82C4, 0x296A82C8, 0x296A82CC, 0x296A82D0, 0x296A82D4, 0x296A82D8, 0x296A82DC,
+			0x296A82E0, 0x296A82E4, 0x296A82E8, 0x296A82EC, 0x296A82F0, 0x296A82F4, 0x296A82F8, 0x296A82FC,
+			0x296A8300, 0x296A8304, 0x296A8308, 0x296A830C, 0x296A8310, 0x296A8314, 0x296A8318, 0x296A831C,
+			0x296A8320, 0x296A8324, 0x296A8328, 0x296A832C, 0x296A8330, 0x296A8334, 0x296A8338, 0x296A833C,
+			0x296A8340, 0x296A8344, 0x296A8348, 0x296A834C, 0x296A8350, 0x296A8354, 0x296A8358, 0x296A835C,
+			0x296A8360, 0x296A8364, 0x296A8368, 0x296A836C, 0x296A8370, 0x296A8374, 0x296A8378, 0x296A837C,
+			0x296A8380, 0x296A8384, 0x296A8388, 0x296A838C, 0x296A8390, 0x296A8394, 0x296A8398, 0x296A839C,
+			0x296A83A0, 0x296A83A4, 0x296A83A8, 0x296A83AC, 0x296A83B0, 0x296A83B4, 0x296A83B8, 0x296A83BC,
+			0x296A83C0, 0x296A83C4, 0x296A83C8, 0x296A83CC, 0x296A83D0, 0x296A83D4, 0x296A83D8, 0x296A83DC,
+			0x296A83E0, 0x296A83E4, 0x296A83E8, 0x296A83EC, 0x296A83F0, 0x296A83F4, 0x296A83F8, 0x296A83FC,
+			0x296A8400, 0x296A8404, 0x296A8408, 0x296A840C, 0x296A8410, 0x296A8414, 0x296A8418, 0x296A841C,
+			0x296A8420, 0x296A8424, 0x296A8428, 0x296A842C, 0x296A8430, 0x296A8434, 0x296A8438, 0x296A843C,
+			0x296A8440, 0x296A8444, 0x296A8448, 0x296A844C, 0x296A8450, 0x296A8454, 0x296A8458, 0x296A845C,
+			0x296A8460, 0x296A8464, 0x296A8468, 0x296A846C, 0x296A8470, 0x296A8474, 0x296A8478, 0x296A847C,
+			0x296A8480, 0x296A8484, 0x296A8488, 0x296A848C, 0x296A8490, 0x296A8494, 0x296A8498, 0x296A849C,
+			0x296A84A0, 0x296A84A4, 0x296A84A8, 0x296A84AC, 0x296A84B0, 0x296A84B4, 0x296A84B8, 0x296A84BC,
+			0x296A84C0, 0x296A84C4, 0x296A84C8, 0x296A84CC, 0x296A84D0, 0x296A84D4, 0x296A84D8, 0x296A84DC,
+			0x296A84E0, 0x296A84E4, 0x296A84E8, 0x296A84EC, 0x296A84F0, 0x296A84F4, 0x296A84F8, 0x296A84FC,
+			0x296A8500, 0x296A8504, 0x296A8508, 0x296A850C, 0x296A8510, 0x296A8514, 0x296A8518, 0x296A851C,
+			0x296A8520, 0x296A8524, 0x296A8528, 0x296A852C, 0x296A8530, 0x296A8534, 0x296A8538, 0x296A853C,
+			0x296A8540, 0x296A8544, 0x296A8548, 0x296A854C, 0x296A8550, 0x296A8554, 0x296A8558, 0x296A855C,
+			0x296A8560, 0x296A8564, 0x296A8568, 0x296A856C, 0x296A8570, 0x296A8574, 0x296A8578, 0x296A857C,
+			0x296A8580, 0x296A8584, 0x296A8588, 0x296A858C, 0x296A8590, 0x296A8594, 0x296A8598, 0x296A859C,
+			0x296A85A0, 0x296A85A4, 0x296A85A8, 0x296A85AC, 0x296A85B0, 0x296A85B4, 0x296A85B8, 0x296A85BC,
+			0x296A85C0, 0x296A85C4, 0x296A85C8, 0x296A85CC, 0x296A85D0, 0x296A85D4, 0x296A85D8, 0x296A85DC,
+			0x296A85E0, 0x296A85E4, 0x296A85E8, 0x296A85EC, 0x296A85F0, 0x296A85F4, 0x296A85F8, 0x296A85FC,
+			0x296A8600, 0x296A8604, 0x296A8608, 0x296A860C, 0x296A8610, 0x296A8614, 0x296A8618, 0x296A861C,
+			0x296A8620, 0x296A8624, 0x296A8628, 0x296A862C, 0x296A8630, 0x296A8634, 0x296A8638, 0x296A863C,
+			0x296A8640, 0x296A8644, 0x296A8648, 0x296A864C, 0x296A8650, 0x296A8654, 0x296A8658, 0x296A865C,
+			0x296A8660, 0x296A8664, 0x296A8668, 0x296A866C, 0x296A8670, 0x296A8674, 0x296A8678, 0x296A867C,
+			0x296A8680, 0x296A8684, 0x296A8688, 0x296A868C, 0x296A8690, 0x296A8694, 0x296A8698, 0x296A869C,
+			0x296A86A0, 0x296A86A4, 0x296A86A8, 0x296A86AC, 0x296A86B0, 0x296A86B4, 0x296A86B8, 0x296A86BC,
+			0x296A86C0, 0x296A86C4, 0x296A86C8, 0x296A86CC, 0x296A86D0, 0x296A86D4, 0x296A86D8, 0x296A86DC,
+			0x296A86E0, 0x296A86E4, 0x296A86E8, 0x296A86EC, 0x296A86F0, 0x296A86F4, 0x296A86F8, 0x296A86FC,
+			0x296A8700, 0x296A8704, 0x296A8708, 0x296A870C, 0x296A8710, 0x296A8714, 0x296A8718, 0x296A871C,
+			0x296A8720, 0x296A8724, 0x296A8728, 0x296A872C, 0x296A8730, 0x296A8734, 0x296A8738, 0x296A873C,
+			0x296A8740, 0x296A8744, 0x296A8748, 0x296A874C, 0x296A8750, 0x296A8754, 0x296A8758, 0x296A875C,
+			0x296A8760, 0x296A8764, 0x296A8768, 0x296A876C, 0x296A8770, 0x296A8774, 0x296A8778, 0x296A877C,
+			0x296A8780, 0x296A8784, 0x296A8788, 0x296A878C, 0x296A8790, 0x296A8794, 0x296A8798, 0x296A879C,
+			0x296A87A0, 0x296A87A4, 0x296A87A8, 0x296A87AC, 0x296A87B0, 0x296A87B4, 0x296A87B8, 0x296A87BC,
+			0x296A87C0, 0x296A87C4, 0x296A87C8, 0x296A87CC, 0x296A87D0, 0x296A87D4, 0x296A87D8, 0x296A87DC,
+			0x296A87E0, 0x296A87E4, 0x296A87E8, 0x296A87EC, 0x296A87F0, 0x296A87F4, 0x296A87F8, 0x296A87FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMDF_TBL_ADDR	gIM_R2Y_GMRDF_Tbl_Addr[3] = {
+	{
+		{
+			0x294A8800, 0x294A8804, 0x294A8808, 0x294A880C, 0x294A8810, 0x294A8814, 0x294A8818, 0x294A881C,
+			0x294A8820, 0x294A8824, 0x294A8828, 0x294A882C, 0x294A8830, 0x294A8834, 0x294A8838, 0x294A883C,
+			0x294A8840, 0x294A8844, 0x294A8848, 0x294A884C, 0x294A8850, 0x294A8854, 0x294A8858, 0x294A885C,
+			0x294A8860, 0x294A8864, 0x294A8868, 0x294A886C, 0x294A8870, 0x294A8874, 0x294A8878, 0x294A887C,
+			0x294A8880, 0x294A8884, 0x294A8888, 0x294A888C, 0x294A8890, 0x294A8894, 0x294A8898, 0x294A889C,
+			0x294A88A0, 0x294A88A4, 0x294A88A8, 0x294A88AC, 0x294A88B0, 0x294A88B4, 0x294A88B8, 0x294A88BC,
+			0x294A88C0, 0x294A88C4, 0x294A88C8, 0x294A88CC, 0x294A88D0, 0x294A88D4, 0x294A88D8, 0x294A88DC,
+			0x294A88E0, 0x294A88E4, 0x294A88E8, 0x294A88EC, 0x294A88F0, 0x294A88F4, 0x294A88F8, 0x294A88FC,
+			0x294A8900, 0x294A8904, 0x294A8908, 0x294A890C, 0x294A8910, 0x294A8914, 0x294A8918, 0x294A891C,
+			0x294A8920, 0x294A8924, 0x294A8928, 0x294A892C, 0x294A8930, 0x294A8934, 0x294A8938, 0x294A893C,
+			0x294A8940, 0x294A8944, 0x294A8948, 0x294A894C, 0x294A8950, 0x294A8954, 0x294A8958, 0x294A895C,
+			0x294A8960, 0x294A8964, 0x294A8968, 0x294A896C, 0x294A8970, 0x294A8974, 0x294A8978, 0x294A897C,
+			0x294A8980, 0x294A8984, 0x294A8988, 0x294A898C, 0x294A8990, 0x294A8994, 0x294A8998, 0x294A899C,
+			0x294A89A0, 0x294A89A4, 0x294A89A8, 0x294A89AC, 0x294A89B0, 0x294A89B4, 0x294A89B8, 0x294A89BC,
+			0x294A89C0, 0x294A89C4, 0x294A89C8, 0x294A89CC, 0x294A89D0, 0x294A89D4, 0x294A89D8, 0x294A89DC,
+			0x294A89E0, 0x294A89E4, 0x294A89E8, 0x294A89EC, 0x294A89F0, 0x294A89F4, 0x294A89F8, 0x294A89FC,
+			0x294A8A00, 0x294A8A04, 0x294A8A08, 0x294A8A0C, 0x294A8A10, 0x294A8A14, 0x294A8A18, 0x294A8A1C,
+			0x294A8A20, 0x294A8A24, 0x294A8A28, 0x294A8A2C, 0x294A8A30, 0x294A8A34, 0x294A8A38, 0x294A8A3C,
+			0x294A8A40, 0x294A8A44, 0x294A8A48, 0x294A8A4C, 0x294A8A50, 0x294A8A54, 0x294A8A58, 0x294A8A5C,
+			0x294A8A60, 0x294A8A64, 0x294A8A68, 0x294A8A6C, 0x294A8A70, 0x294A8A74, 0x294A8A78, 0x294A8A7C,
+			0x294A8A80, 0x294A8A84, 0x294A8A88, 0x294A8A8C, 0x294A8A90, 0x294A8A94, 0x294A8A98, 0x294A8A9C,
+			0x294A8AA0, 0x294A8AA4, 0x294A8AA8, 0x294A8AAC, 0x294A8AB0, 0x294A8AB4, 0x294A8AB8, 0x294A8ABC,
+			0x294A8AC0, 0x294A8AC4, 0x294A8AC8, 0x294A8ACC, 0x294A8AD0, 0x294A8AD4, 0x294A8AD8, 0x294A8ADC,
+			0x294A8AE0, 0x294A8AE4, 0x294A8AE8, 0x294A8AEC, 0x294A8AF0, 0x294A8AF4, 0x294A8AF8, 0x294A8AFC,
+			0x294A8B00, 0x294A8B04, 0x294A8B08, 0x294A8B0C, 0x294A8B10, 0x294A8B14, 0x294A8B18, 0x294A8B1C,
+			0x294A8B20, 0x294A8B24, 0x294A8B28, 0x294A8B2C, 0x294A8B30, 0x294A8B34, 0x294A8B38, 0x294A8B3C,
+			0x294A8B40, 0x294A8B44, 0x294A8B48, 0x294A8B4C, 0x294A8B50, 0x294A8B54, 0x294A8B58, 0x294A8B5C,
+			0x294A8B60, 0x294A8B64, 0x294A8B68, 0x294A8B6C, 0x294A8B70, 0x294A8B74, 0x294A8B78, 0x294A8B7C,
+			0x294A8B80, 0x294A8B84, 0x294A8B88, 0x294A8B8C, 0x294A8B90, 0x294A8B94, 0x294A8B98, 0x294A8B9C,
+			0x294A8BA0, 0x294A8BA4, 0x294A8BA8, 0x294A8BAC, 0x294A8BB0, 0x294A8BB4, 0x294A8BB8, 0x294A8BBC,
+			0x294A8BC0, 0x294A8BC4, 0x294A8BC8, 0x294A8BCC, 0x294A8BD0, 0x294A8BD4, 0x294A8BD8, 0x294A8BDC,
+			0x294A8BE0, 0x294A8BE4, 0x294A8BE8, 0x294A8BEC, 0x294A8BF0, 0x294A8BF4, 0x294A8BF8, 0x294A8BFC,
+			0x294A8C00, 0x294A8C04, 0x294A8C08, 0x294A8C0C, 0x294A8C10, 0x294A8C14, 0x294A8C18, 0x294A8C1C,
+			0x294A8C20, 0x294A8C24, 0x294A8C28, 0x294A8C2C, 0x294A8C30, 0x294A8C34, 0x294A8C38, 0x294A8C3C,
+			0x294A8C40, 0x294A8C44, 0x294A8C48, 0x294A8C4C, 0x294A8C50, 0x294A8C54, 0x294A8C58, 0x294A8C5C,
+			0x294A8C60, 0x294A8C64, 0x294A8C68, 0x294A8C6C, 0x294A8C70, 0x294A8C74, 0x294A8C78, 0x294A8C7C,
+			0x294A8C80, 0x294A8C84, 0x294A8C88, 0x294A8C8C, 0x294A8C90, 0x294A8C94, 0x294A8C98, 0x294A8C9C,
+			0x294A8CA0, 0x294A8CA4, 0x294A8CA8, 0x294A8CAC, 0x294A8CB0, 0x294A8CB4, 0x294A8CB8, 0x294A8CBC,
+			0x294A8CC0, 0x294A8CC4, 0x294A8CC8, 0x294A8CCC, 0x294A8CD0, 0x294A8CD4, 0x294A8CD8, 0x294A8CDC,
+			0x294A8CE0, 0x294A8CE4, 0x294A8CE8, 0x294A8CEC, 0x294A8CF0, 0x294A8CF4, 0x294A8CF8, 0x294A8CFC,
+			0x294A8D00, 0x294A8D04, 0x294A8D08, 0x294A8D0C, 0x294A8D10, 0x294A8D14, 0x294A8D18, 0x294A8D1C,
+			0x294A8D20, 0x294A8D24, 0x294A8D28, 0x294A8D2C, 0x294A8D30, 0x294A8D34, 0x294A8D38, 0x294A8D3C,
+			0x294A8D40, 0x294A8D44, 0x294A8D48, 0x294A8D4C, 0x294A8D50, 0x294A8D54, 0x294A8D58, 0x294A8D5C,
+			0x294A8D60, 0x294A8D64, 0x294A8D68, 0x294A8D6C, 0x294A8D70, 0x294A8D74, 0x294A8D78, 0x294A8D7C,
+			0x294A8D80, 0x294A8D84, 0x294A8D88, 0x294A8D8C, 0x294A8D90, 0x294A8D94, 0x294A8D98, 0x294A8D9C,
+			0x294A8DA0, 0x294A8DA4, 0x294A8DA8, 0x294A8DAC, 0x294A8DB0, 0x294A8DB4, 0x294A8DB8, 0x294A8DBC,
+			0x294A8DC0, 0x294A8DC4, 0x294A8DC8, 0x294A8DCC, 0x294A8DD0, 0x294A8DD4, 0x294A8DD8, 0x294A8DDC,
+			0x294A8DE0, 0x294A8DE4, 0x294A8DE8, 0x294A8DEC, 0x294A8DF0, 0x294A8DF4, 0x294A8DF8, 0x294A8DFC,
+			0x294A8E00, 0x294A8E04, 0x294A8E08, 0x294A8E0C, 0x294A8E10, 0x294A8E14, 0x294A8E18, 0x294A8E1C,
+			0x294A8E20, 0x294A8E24, 0x294A8E28, 0x294A8E2C, 0x294A8E30, 0x294A8E34, 0x294A8E38, 0x294A8E3C,
+			0x294A8E40, 0x294A8E44, 0x294A8E48, 0x294A8E4C, 0x294A8E50, 0x294A8E54, 0x294A8E58, 0x294A8E5C,
+			0x294A8E60, 0x294A8E64, 0x294A8E68, 0x294A8E6C, 0x294A8E70, 0x294A8E74, 0x294A8E78, 0x294A8E7C,
+			0x294A8E80, 0x294A8E84, 0x294A8E88, 0x294A8E8C, 0x294A8E90, 0x294A8E94, 0x294A8E98, 0x294A8E9C,
+			0x294A8EA0, 0x294A8EA4, 0x294A8EA8, 0x294A8EAC, 0x294A8EB0, 0x294A8EB4, 0x294A8EB8, 0x294A8EBC,
+			0x294A8EC0, 0x294A8EC4, 0x294A8EC8, 0x294A8ECC, 0x294A8ED0, 0x294A8ED4, 0x294A8ED8, 0x294A8EDC,
+			0x294A8EE0, 0x294A8EE4, 0x294A8EE8, 0x294A8EEC, 0x294A8EF0, 0x294A8EF4, 0x294A8EF8, 0x294A8EFC,
+			0x294A8F00, 0x294A8F04, 0x294A8F08, 0x294A8F0C, 0x294A8F10, 0x294A8F14, 0x294A8F18, 0x294A8F1C,
+			0x294A8F20, 0x294A8F24, 0x294A8F28, 0x294A8F2C, 0x294A8F30, 0x294A8F34, 0x294A8F38, 0x294A8F3C,
+			0x294A8F40, 0x294A8F44, 0x294A8F48, 0x294A8F4C, 0x294A8F50, 0x294A8F54, 0x294A8F58, 0x294A8F5C,
+			0x294A8F60, 0x294A8F64, 0x294A8F68, 0x294A8F6C, 0x294A8F70, 0x294A8F74, 0x294A8F78, 0x294A8F7C,
+			0x294A8F80, 0x294A8F84, 0x294A8F88, 0x294A8F8C, 0x294A8F90, 0x294A8F94, 0x294A8F98, 0x294A8F9C,
+			0x294A8FA0, 0x294A8FA4, 0x294A8FA8, 0x294A8FAC, 0x294A8FB0, 0x294A8FB4, 0x294A8FB8, 0x294A8FBC,
+			0x294A8FC0, 0x294A8FC4, 0x294A8FC8, 0x294A8FCC, 0x294A8FD0, 0x294A8FD4, 0x294A8FD8, 0x294A8FDC,
+			0x294A8FE0, 0x294A8FE4, 0x294A8FE8, 0x294A8FEC, 0x294A8FF0, 0x294A8FF4, 0x294A8FF8, 0x294A8FFC,
+		},
+	},
+	{
+		{
+			0x295A8800, 0x295A8804, 0x295A8808, 0x295A880C, 0x295A8810, 0x295A8814, 0x295A8818, 0x295A881C,
+			0x295A8820, 0x295A8824, 0x295A8828, 0x295A882C, 0x295A8830, 0x295A8834, 0x295A8838, 0x295A883C,
+			0x295A8840, 0x295A8844, 0x295A8848, 0x295A884C, 0x295A8850, 0x295A8854, 0x295A8858, 0x295A885C,
+			0x295A8860, 0x295A8864, 0x295A8868, 0x295A886C, 0x295A8870, 0x295A8874, 0x295A8878, 0x295A887C,
+			0x295A8880, 0x295A8884, 0x295A8888, 0x295A888C, 0x295A8890, 0x295A8894, 0x295A8898, 0x295A889C,
+			0x295A88A0, 0x295A88A4, 0x295A88A8, 0x295A88AC, 0x295A88B0, 0x295A88B4, 0x295A88B8, 0x295A88BC,
+			0x295A88C0, 0x295A88C4, 0x295A88C8, 0x295A88CC, 0x295A88D0, 0x295A88D4, 0x295A88D8, 0x295A88DC,
+			0x295A88E0, 0x295A88E4, 0x295A88E8, 0x295A88EC, 0x295A88F0, 0x295A88F4, 0x295A88F8, 0x295A88FC,
+			0x295A8900, 0x295A8904, 0x295A8908, 0x295A890C, 0x295A8910, 0x295A8914, 0x295A8918, 0x295A891C,
+			0x295A8920, 0x295A8924, 0x295A8928, 0x295A892C, 0x295A8930, 0x295A8934, 0x295A8938, 0x295A893C,
+			0x295A8940, 0x295A8944, 0x295A8948, 0x295A894C, 0x295A8950, 0x295A8954, 0x295A8958, 0x295A895C,
+			0x295A8960, 0x295A8964, 0x295A8968, 0x295A896C, 0x295A8970, 0x295A8974, 0x295A8978, 0x295A897C,
+			0x295A8980, 0x295A8984, 0x295A8988, 0x295A898C, 0x295A8990, 0x295A8994, 0x295A8998, 0x295A899C,
+			0x295A89A0, 0x295A89A4, 0x295A89A8, 0x295A89AC, 0x295A89B0, 0x295A89B4, 0x295A89B8, 0x295A89BC,
+			0x295A89C0, 0x295A89C4, 0x295A89C8, 0x295A89CC, 0x295A89D0, 0x295A89D4, 0x295A89D8, 0x295A89DC,
+			0x295A89E0, 0x295A89E4, 0x295A89E8, 0x295A89EC, 0x295A89F0, 0x295A89F4, 0x295A89F8, 0x295A89FC,
+			0x295A8A00, 0x295A8A04, 0x295A8A08, 0x295A8A0C, 0x295A8A10, 0x295A8A14, 0x295A8A18, 0x295A8A1C,
+			0x295A8A20, 0x295A8A24, 0x295A8A28, 0x295A8A2C, 0x295A8A30, 0x295A8A34, 0x295A8A38, 0x295A8A3C,
+			0x295A8A40, 0x295A8A44, 0x295A8A48, 0x295A8A4C, 0x295A8A50, 0x295A8A54, 0x295A8A58, 0x295A8A5C,
+			0x295A8A60, 0x295A8A64, 0x295A8A68, 0x295A8A6C, 0x295A8A70, 0x295A8A74, 0x295A8A78, 0x295A8A7C,
+			0x295A8A80, 0x295A8A84, 0x295A8A88, 0x295A8A8C, 0x295A8A90, 0x295A8A94, 0x295A8A98, 0x295A8A9C,
+			0x295A8AA0, 0x295A8AA4, 0x295A8AA8, 0x295A8AAC, 0x295A8AB0, 0x295A8AB4, 0x295A8AB8, 0x295A8ABC,
+			0x295A8AC0, 0x295A8AC4, 0x295A8AC8, 0x295A8ACC, 0x295A8AD0, 0x295A8AD4, 0x295A8AD8, 0x295A8ADC,
+			0x295A8AE0, 0x295A8AE4, 0x295A8AE8, 0x295A8AEC, 0x295A8AF0, 0x295A8AF4, 0x295A8AF8, 0x295A8AFC,
+			0x295A8B00, 0x295A8B04, 0x295A8B08, 0x295A8B0C, 0x295A8B10, 0x295A8B14, 0x295A8B18, 0x295A8B1C,
+			0x295A8B20, 0x295A8B24, 0x295A8B28, 0x295A8B2C, 0x295A8B30, 0x295A8B34, 0x295A8B38, 0x295A8B3C,
+			0x295A8B40, 0x295A8B44, 0x295A8B48, 0x295A8B4C, 0x295A8B50, 0x295A8B54, 0x295A8B58, 0x295A8B5C,
+			0x295A8B60, 0x295A8B64, 0x295A8B68, 0x295A8B6C, 0x295A8B70, 0x295A8B74, 0x295A8B78, 0x295A8B7C,
+			0x295A8B80, 0x295A8B84, 0x295A8B88, 0x295A8B8C, 0x295A8B90, 0x295A8B94, 0x295A8B98, 0x295A8B9C,
+			0x295A8BA0, 0x295A8BA4, 0x295A8BA8, 0x295A8BAC, 0x295A8BB0, 0x295A8BB4, 0x295A8BB8, 0x295A8BBC,
+			0x295A8BC0, 0x295A8BC4, 0x295A8BC8, 0x295A8BCC, 0x295A8BD0, 0x295A8BD4, 0x295A8BD8, 0x295A8BDC,
+			0x295A8BE0, 0x295A8BE4, 0x295A8BE8, 0x295A8BEC, 0x295A8BF0, 0x295A8BF4, 0x295A8BF8, 0x295A8BFC,
+			0x295A8C00, 0x295A8C04, 0x295A8C08, 0x295A8C0C, 0x295A8C10, 0x295A8C14, 0x295A8C18, 0x295A8C1C,
+			0x295A8C20, 0x295A8C24, 0x295A8C28, 0x295A8C2C, 0x295A8C30, 0x295A8C34, 0x295A8C38, 0x295A8C3C,
+			0x295A8C40, 0x295A8C44, 0x295A8C48, 0x295A8C4C, 0x295A8C50, 0x295A8C54, 0x295A8C58, 0x295A8C5C,
+			0x295A8C60, 0x295A8C64, 0x295A8C68, 0x295A8C6C, 0x295A8C70, 0x295A8C74, 0x295A8C78, 0x295A8C7C,
+			0x295A8C80, 0x295A8C84, 0x295A8C88, 0x295A8C8C, 0x295A8C90, 0x295A8C94, 0x295A8C98, 0x295A8C9C,
+			0x295A8CA0, 0x295A8CA4, 0x295A8CA8, 0x295A8CAC, 0x295A8CB0, 0x295A8CB4, 0x295A8CB8, 0x295A8CBC,
+			0x295A8CC0, 0x295A8CC4, 0x295A8CC8, 0x295A8CCC, 0x295A8CD0, 0x295A8CD4, 0x295A8CD8, 0x295A8CDC,
+			0x295A8CE0, 0x295A8CE4, 0x295A8CE8, 0x295A8CEC, 0x295A8CF0, 0x295A8CF4, 0x295A8CF8, 0x295A8CFC,
+			0x295A8D00, 0x295A8D04, 0x295A8D08, 0x295A8D0C, 0x295A8D10, 0x295A8D14, 0x295A8D18, 0x295A8D1C,
+			0x295A8D20, 0x295A8D24, 0x295A8D28, 0x295A8D2C, 0x295A8D30, 0x295A8D34, 0x295A8D38, 0x295A8D3C,
+			0x295A8D40, 0x295A8D44, 0x295A8D48, 0x295A8D4C, 0x295A8D50, 0x295A8D54, 0x295A8D58, 0x295A8D5C,
+			0x295A8D60, 0x295A8D64, 0x295A8D68, 0x295A8D6C, 0x295A8D70, 0x295A8D74, 0x295A8D78, 0x295A8D7C,
+			0x295A8D80, 0x295A8D84, 0x295A8D88, 0x295A8D8C, 0x295A8D90, 0x295A8D94, 0x295A8D98, 0x295A8D9C,
+			0x295A8DA0, 0x295A8DA4, 0x295A8DA8, 0x295A8DAC, 0x295A8DB0, 0x295A8DB4, 0x295A8DB8, 0x295A8DBC,
+			0x295A8DC0, 0x295A8DC4, 0x295A8DC8, 0x295A8DCC, 0x295A8DD0, 0x295A8DD4, 0x295A8DD8, 0x295A8DDC,
+			0x295A8DE0, 0x295A8DE4, 0x295A8DE8, 0x295A8DEC, 0x295A8DF0, 0x295A8DF4, 0x295A8DF8, 0x295A8DFC,
+			0x295A8E00, 0x295A8E04, 0x295A8E08, 0x295A8E0C, 0x295A8E10, 0x295A8E14, 0x295A8E18, 0x295A8E1C,
+			0x295A8E20, 0x295A8E24, 0x295A8E28, 0x295A8E2C, 0x295A8E30, 0x295A8E34, 0x295A8E38, 0x295A8E3C,
+			0x295A8E40, 0x295A8E44, 0x295A8E48, 0x295A8E4C, 0x295A8E50, 0x295A8E54, 0x295A8E58, 0x295A8E5C,
+			0x295A8E60, 0x295A8E64, 0x295A8E68, 0x295A8E6C, 0x295A8E70, 0x295A8E74, 0x295A8E78, 0x295A8E7C,
+			0x295A8E80, 0x295A8E84, 0x295A8E88, 0x295A8E8C, 0x295A8E90, 0x295A8E94, 0x295A8E98, 0x295A8E9C,
+			0x295A8EA0, 0x295A8EA4, 0x295A8EA8, 0x295A8EAC, 0x295A8EB0, 0x295A8EB4, 0x295A8EB8, 0x295A8EBC,
+			0x295A8EC0, 0x295A8EC4, 0x295A8EC8, 0x295A8ECC, 0x295A8ED0, 0x295A8ED4, 0x295A8ED8, 0x295A8EDC,
+			0x295A8EE0, 0x295A8EE4, 0x295A8EE8, 0x295A8EEC, 0x295A8EF0, 0x295A8EF4, 0x295A8EF8, 0x295A8EFC,
+			0x295A8F00, 0x295A8F04, 0x295A8F08, 0x295A8F0C, 0x295A8F10, 0x295A8F14, 0x295A8F18, 0x295A8F1C,
+			0x295A8F20, 0x295A8F24, 0x295A8F28, 0x295A8F2C, 0x295A8F30, 0x295A8F34, 0x295A8F38, 0x295A8F3C,
+			0x295A8F40, 0x295A8F44, 0x295A8F48, 0x295A8F4C, 0x295A8F50, 0x295A8F54, 0x295A8F58, 0x295A8F5C,
+			0x295A8F60, 0x295A8F64, 0x295A8F68, 0x295A8F6C, 0x295A8F70, 0x295A8F74, 0x295A8F78, 0x295A8F7C,
+			0x295A8F80, 0x295A8F84, 0x295A8F88, 0x295A8F8C, 0x295A8F90, 0x295A8F94, 0x295A8F98, 0x295A8F9C,
+			0x295A8FA0, 0x295A8FA4, 0x295A8FA8, 0x295A8FAC, 0x295A8FB0, 0x295A8FB4, 0x295A8FB8, 0x295A8FBC,
+			0x295A8FC0, 0x295A8FC4, 0x295A8FC8, 0x295A8FCC, 0x295A8FD0, 0x295A8FD4, 0x295A8FD8, 0x295A8FDC,
+			0x295A8FE0, 0x295A8FE4, 0x295A8FE8, 0x295A8FEC, 0x295A8FF0, 0x295A8FF4, 0x295A8FF8, 0x295A8FFC,
+		},
+	},
+	{
+		{
+			0x296A8800, 0x296A8804, 0x296A8808, 0x296A880C, 0x296A8810, 0x296A8814, 0x296A8818, 0x296A881C,
+			0x296A8820, 0x296A8824, 0x296A8828, 0x296A882C, 0x296A8830, 0x296A8834, 0x296A8838, 0x296A883C,
+			0x296A8840, 0x296A8844, 0x296A8848, 0x296A884C, 0x296A8850, 0x296A8854, 0x296A8858, 0x296A885C,
+			0x296A8860, 0x296A8864, 0x296A8868, 0x296A886C, 0x296A8870, 0x296A8874, 0x296A8878, 0x296A887C,
+			0x296A8880, 0x296A8884, 0x296A8888, 0x296A888C, 0x296A8890, 0x296A8894, 0x296A8898, 0x296A889C,
+			0x296A88A0, 0x296A88A4, 0x296A88A8, 0x296A88AC, 0x296A88B0, 0x296A88B4, 0x296A88B8, 0x296A88BC,
+			0x296A88C0, 0x296A88C4, 0x296A88C8, 0x296A88CC, 0x296A88D0, 0x296A88D4, 0x296A88D8, 0x296A88DC,
+			0x296A88E0, 0x296A88E4, 0x296A88E8, 0x296A88EC, 0x296A88F0, 0x296A88F4, 0x296A88F8, 0x296A88FC,
+			0x296A8900, 0x296A8904, 0x296A8908, 0x296A890C, 0x296A8910, 0x296A8914, 0x296A8918, 0x296A891C,
+			0x296A8920, 0x296A8924, 0x296A8928, 0x296A892C, 0x296A8930, 0x296A8934, 0x296A8938, 0x296A893C,
+			0x296A8940, 0x296A8944, 0x296A8948, 0x296A894C, 0x296A8950, 0x296A8954, 0x296A8958, 0x296A895C,
+			0x296A8960, 0x296A8964, 0x296A8968, 0x296A896C, 0x296A8970, 0x296A8974, 0x296A8978, 0x296A897C,
+			0x296A8980, 0x296A8984, 0x296A8988, 0x296A898C, 0x296A8990, 0x296A8994, 0x296A8998, 0x296A899C,
+			0x296A89A0, 0x296A89A4, 0x296A89A8, 0x296A89AC, 0x296A89B0, 0x296A89B4, 0x296A89B8, 0x296A89BC,
+			0x296A89C0, 0x296A89C4, 0x296A89C8, 0x296A89CC, 0x296A89D0, 0x296A89D4, 0x296A89D8, 0x296A89DC,
+			0x296A89E0, 0x296A89E4, 0x296A89E8, 0x296A89EC, 0x296A89F0, 0x296A89F4, 0x296A89F8, 0x296A89FC,
+			0x296A8A00, 0x296A8A04, 0x296A8A08, 0x296A8A0C, 0x296A8A10, 0x296A8A14, 0x296A8A18, 0x296A8A1C,
+			0x296A8A20, 0x296A8A24, 0x296A8A28, 0x296A8A2C, 0x296A8A30, 0x296A8A34, 0x296A8A38, 0x296A8A3C,
+			0x296A8A40, 0x296A8A44, 0x296A8A48, 0x296A8A4C, 0x296A8A50, 0x296A8A54, 0x296A8A58, 0x296A8A5C,
+			0x296A8A60, 0x296A8A64, 0x296A8A68, 0x296A8A6C, 0x296A8A70, 0x296A8A74, 0x296A8A78, 0x296A8A7C,
+			0x296A8A80, 0x296A8A84, 0x296A8A88, 0x296A8A8C, 0x296A8A90, 0x296A8A94, 0x296A8A98, 0x296A8A9C,
+			0x296A8AA0, 0x296A8AA4, 0x296A8AA8, 0x296A8AAC, 0x296A8AB0, 0x296A8AB4, 0x296A8AB8, 0x296A8ABC,
+			0x296A8AC0, 0x296A8AC4, 0x296A8AC8, 0x296A8ACC, 0x296A8AD0, 0x296A8AD4, 0x296A8AD8, 0x296A8ADC,
+			0x296A8AE0, 0x296A8AE4, 0x296A8AE8, 0x296A8AEC, 0x296A8AF0, 0x296A8AF4, 0x296A8AF8, 0x296A8AFC,
+			0x296A8B00, 0x296A8B04, 0x296A8B08, 0x296A8B0C, 0x296A8B10, 0x296A8B14, 0x296A8B18, 0x296A8B1C,
+			0x296A8B20, 0x296A8B24, 0x296A8B28, 0x296A8B2C, 0x296A8B30, 0x296A8B34, 0x296A8B38, 0x296A8B3C,
+			0x296A8B40, 0x296A8B44, 0x296A8B48, 0x296A8B4C, 0x296A8B50, 0x296A8B54, 0x296A8B58, 0x296A8B5C,
+			0x296A8B60, 0x296A8B64, 0x296A8B68, 0x296A8B6C, 0x296A8B70, 0x296A8B74, 0x296A8B78, 0x296A8B7C,
+			0x296A8B80, 0x296A8B84, 0x296A8B88, 0x296A8B8C, 0x296A8B90, 0x296A8B94, 0x296A8B98, 0x296A8B9C,
+			0x296A8BA0, 0x296A8BA4, 0x296A8BA8, 0x296A8BAC, 0x296A8BB0, 0x296A8BB4, 0x296A8BB8, 0x296A8BBC,
+			0x296A8BC0, 0x296A8BC4, 0x296A8BC8, 0x296A8BCC, 0x296A8BD0, 0x296A8BD4, 0x296A8BD8, 0x296A8BDC,
+			0x296A8BE0, 0x296A8BE4, 0x296A8BE8, 0x296A8BEC, 0x296A8BF0, 0x296A8BF4, 0x296A8BF8, 0x296A8BFC,
+			0x296A8C00, 0x296A8C04, 0x296A8C08, 0x296A8C0C, 0x296A8C10, 0x296A8C14, 0x296A8C18, 0x296A8C1C,
+			0x296A8C20, 0x296A8C24, 0x296A8C28, 0x296A8C2C, 0x296A8C30, 0x296A8C34, 0x296A8C38, 0x296A8C3C,
+			0x296A8C40, 0x296A8C44, 0x296A8C48, 0x296A8C4C, 0x296A8C50, 0x296A8C54, 0x296A8C58, 0x296A8C5C,
+			0x296A8C60, 0x296A8C64, 0x296A8C68, 0x296A8C6C, 0x296A8C70, 0x296A8C74, 0x296A8C78, 0x296A8C7C,
+			0x296A8C80, 0x296A8C84, 0x296A8C88, 0x296A8C8C, 0x296A8C90, 0x296A8C94, 0x296A8C98, 0x296A8C9C,
+			0x296A8CA0, 0x296A8CA4, 0x296A8CA8, 0x296A8CAC, 0x296A8CB0, 0x296A8CB4, 0x296A8CB8, 0x296A8CBC,
+			0x296A8CC0, 0x296A8CC4, 0x296A8CC8, 0x296A8CCC, 0x296A8CD0, 0x296A8CD4, 0x296A8CD8, 0x296A8CDC,
+			0x296A8CE0, 0x296A8CE4, 0x296A8CE8, 0x296A8CEC, 0x296A8CF0, 0x296A8CF4, 0x296A8CF8, 0x296A8CFC,
+			0x296A8D00, 0x296A8D04, 0x296A8D08, 0x296A8D0C, 0x296A8D10, 0x296A8D14, 0x296A8D18, 0x296A8D1C,
+			0x296A8D20, 0x296A8D24, 0x296A8D28, 0x296A8D2C, 0x296A8D30, 0x296A8D34, 0x296A8D38, 0x296A8D3C,
+			0x296A8D40, 0x296A8D44, 0x296A8D48, 0x296A8D4C, 0x296A8D50, 0x296A8D54, 0x296A8D58, 0x296A8D5C,
+			0x296A8D60, 0x296A8D64, 0x296A8D68, 0x296A8D6C, 0x296A8D70, 0x296A8D74, 0x296A8D78, 0x296A8D7C,
+			0x296A8D80, 0x296A8D84, 0x296A8D88, 0x296A8D8C, 0x296A8D90, 0x296A8D94, 0x296A8D98, 0x296A8D9C,
+			0x296A8DA0, 0x296A8DA4, 0x296A8DA8, 0x296A8DAC, 0x296A8DB0, 0x296A8DB4, 0x296A8DB8, 0x296A8DBC,
+			0x296A8DC0, 0x296A8DC4, 0x296A8DC8, 0x296A8DCC, 0x296A8DD0, 0x296A8DD4, 0x296A8DD8, 0x296A8DDC,
+			0x296A8DE0, 0x296A8DE4, 0x296A8DE8, 0x296A8DEC, 0x296A8DF0, 0x296A8DF4, 0x296A8DF8, 0x296A8DFC,
+			0x296A8E00, 0x296A8E04, 0x296A8E08, 0x296A8E0C, 0x296A8E10, 0x296A8E14, 0x296A8E18, 0x296A8E1C,
+			0x296A8E20, 0x296A8E24, 0x296A8E28, 0x296A8E2C, 0x296A8E30, 0x296A8E34, 0x296A8E38, 0x296A8E3C,
+			0x296A8E40, 0x296A8E44, 0x296A8E48, 0x296A8E4C, 0x296A8E50, 0x296A8E54, 0x296A8E58, 0x296A8E5C,
+			0x296A8E60, 0x296A8E64, 0x296A8E68, 0x296A8E6C, 0x296A8E70, 0x296A8E74, 0x296A8E78, 0x296A8E7C,
+			0x296A8E80, 0x296A8E84, 0x296A8E88, 0x296A8E8C, 0x296A8E90, 0x296A8E94, 0x296A8E98, 0x296A8E9C,
+			0x296A8EA0, 0x296A8EA4, 0x296A8EA8, 0x296A8EAC, 0x296A8EB0, 0x296A8EB4, 0x296A8EB8, 0x296A8EBC,
+			0x296A8EC0, 0x296A8EC4, 0x296A8EC8, 0x296A8ECC, 0x296A8ED0, 0x296A8ED4, 0x296A8ED8, 0x296A8EDC,
+			0x296A8EE0, 0x296A8EE4, 0x296A8EE8, 0x296A8EEC, 0x296A8EF0, 0x296A8EF4, 0x296A8EF8, 0x296A8EFC,
+			0x296A8F00, 0x296A8F04, 0x296A8F08, 0x296A8F0C, 0x296A8F10, 0x296A8F14, 0x296A8F18, 0x296A8F1C,
+			0x296A8F20, 0x296A8F24, 0x296A8F28, 0x296A8F2C, 0x296A8F30, 0x296A8F34, 0x296A8F38, 0x296A8F3C,
+			0x296A8F40, 0x296A8F44, 0x296A8F48, 0x296A8F4C, 0x296A8F50, 0x296A8F54, 0x296A8F58, 0x296A8F5C,
+			0x296A8F60, 0x296A8F64, 0x296A8F68, 0x296A8F6C, 0x296A8F70, 0x296A8F74, 0x296A8F78, 0x296A8F7C,
+			0x296A8F80, 0x296A8F84, 0x296A8F88, 0x296A8F8C, 0x296A8F90, 0x296A8F94, 0x296A8F98, 0x296A8F9C,
+			0x296A8FA0, 0x296A8FA4, 0x296A8FA8, 0x296A8FAC, 0x296A8FB0, 0x296A8FB4, 0x296A8FB8, 0x296A8FBC,
+			0x296A8FC0, 0x296A8FC4, 0x296A8FC8, 0x296A8FCC, 0x296A8FD0, 0x296A8FD4, 0x296A8FD8, 0x296A8FDC,
+			0x296A8FE0, 0x296A8FE4, 0x296A8FE8, 0x296A8FEC, 0x296A8FF0, 0x296A8FF4, 0x296A8FF8, 0x296A8FFC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMDF_TBL_ADDR	gIM_R2Y_GMGDF_Tbl_Addr[3] = {
+	{
+		{
+			0x294A9000, 0x294A9004, 0x294A9008, 0x294A900C, 0x294A9010, 0x294A9014, 0x294A9018, 0x294A901C,
+			0x294A9020, 0x294A9024, 0x294A9028, 0x294A902C, 0x294A9030, 0x294A9034, 0x294A9038, 0x294A903C,
+			0x294A9040, 0x294A9044, 0x294A9048, 0x294A904C, 0x294A9050, 0x294A9054, 0x294A9058, 0x294A905C,
+			0x294A9060, 0x294A9064, 0x294A9068, 0x294A906C, 0x294A9070, 0x294A9074, 0x294A9078, 0x294A907C,
+			0x294A9080, 0x294A9084, 0x294A9088, 0x294A908C, 0x294A9090, 0x294A9094, 0x294A9098, 0x294A909C,
+			0x294A90A0, 0x294A90A4, 0x294A90A8, 0x294A90AC, 0x294A90B0, 0x294A90B4, 0x294A90B8, 0x294A90BC,
+			0x294A90C0, 0x294A90C4, 0x294A90C8, 0x294A90CC, 0x294A90D0, 0x294A90D4, 0x294A90D8, 0x294A90DC,
+			0x294A90E0, 0x294A90E4, 0x294A90E8, 0x294A90EC, 0x294A90F0, 0x294A90F4, 0x294A90F8, 0x294A90FC,
+			0x294A9100, 0x294A9104, 0x294A9108, 0x294A910C, 0x294A9110, 0x294A9114, 0x294A9118, 0x294A911C,
+			0x294A9120, 0x294A9124, 0x294A9128, 0x294A912C, 0x294A9130, 0x294A9134, 0x294A9138, 0x294A913C,
+			0x294A9140, 0x294A9144, 0x294A9148, 0x294A914C, 0x294A9150, 0x294A9154, 0x294A9158, 0x294A915C,
+			0x294A9160, 0x294A9164, 0x294A9168, 0x294A916C, 0x294A9170, 0x294A9174, 0x294A9178, 0x294A917C,
+			0x294A9180, 0x294A9184, 0x294A9188, 0x294A918C, 0x294A9190, 0x294A9194, 0x294A9198, 0x294A919C,
+			0x294A91A0, 0x294A91A4, 0x294A91A8, 0x294A91AC, 0x294A91B0, 0x294A91B4, 0x294A91B8, 0x294A91BC,
+			0x294A91C0, 0x294A91C4, 0x294A91C8, 0x294A91CC, 0x294A91D0, 0x294A91D4, 0x294A91D8, 0x294A91DC,
+			0x294A91E0, 0x294A91E4, 0x294A91E8, 0x294A91EC, 0x294A91F0, 0x294A91F4, 0x294A91F8, 0x294A91FC,
+			0x294A9200, 0x294A9204, 0x294A9208, 0x294A920C, 0x294A9210, 0x294A9214, 0x294A9218, 0x294A921C,
+			0x294A9220, 0x294A9224, 0x294A9228, 0x294A922C, 0x294A9230, 0x294A9234, 0x294A9238, 0x294A923C,
+			0x294A9240, 0x294A9244, 0x294A9248, 0x294A924C, 0x294A9250, 0x294A9254, 0x294A9258, 0x294A925C,
+			0x294A9260, 0x294A9264, 0x294A9268, 0x294A926C, 0x294A9270, 0x294A9274, 0x294A9278, 0x294A927C,
+			0x294A9280, 0x294A9284, 0x294A9288, 0x294A928C, 0x294A9290, 0x294A9294, 0x294A9298, 0x294A929C,
+			0x294A92A0, 0x294A92A4, 0x294A92A8, 0x294A92AC, 0x294A92B0, 0x294A92B4, 0x294A92B8, 0x294A92BC,
+			0x294A92C0, 0x294A92C4, 0x294A92C8, 0x294A92CC, 0x294A92D0, 0x294A92D4, 0x294A92D8, 0x294A92DC,
+			0x294A92E0, 0x294A92E4, 0x294A92E8, 0x294A92EC, 0x294A92F0, 0x294A92F4, 0x294A92F8, 0x294A92FC,
+			0x294A9300, 0x294A9304, 0x294A9308, 0x294A930C, 0x294A9310, 0x294A9314, 0x294A9318, 0x294A931C,
+			0x294A9320, 0x294A9324, 0x294A9328, 0x294A932C, 0x294A9330, 0x294A9334, 0x294A9338, 0x294A933C,
+			0x294A9340, 0x294A9344, 0x294A9348, 0x294A934C, 0x294A9350, 0x294A9354, 0x294A9358, 0x294A935C,
+			0x294A9360, 0x294A9364, 0x294A9368, 0x294A936C, 0x294A9370, 0x294A9374, 0x294A9378, 0x294A937C,
+			0x294A9380, 0x294A9384, 0x294A9388, 0x294A938C, 0x294A9390, 0x294A9394, 0x294A9398, 0x294A939C,
+			0x294A93A0, 0x294A93A4, 0x294A93A8, 0x294A93AC, 0x294A93B0, 0x294A93B4, 0x294A93B8, 0x294A93BC,
+			0x294A93C0, 0x294A93C4, 0x294A93C8, 0x294A93CC, 0x294A93D0, 0x294A93D4, 0x294A93D8, 0x294A93DC,
+			0x294A93E0, 0x294A93E4, 0x294A93E8, 0x294A93EC, 0x294A93F0, 0x294A93F4, 0x294A93F8, 0x294A93FC,
+			0x294A9400, 0x294A9404, 0x294A9408, 0x294A940C, 0x294A9410, 0x294A9414, 0x294A9418, 0x294A941C,
+			0x294A9420, 0x294A9424, 0x294A9428, 0x294A942C, 0x294A9430, 0x294A9434, 0x294A9438, 0x294A943C,
+			0x294A9440, 0x294A9444, 0x294A9448, 0x294A944C, 0x294A9450, 0x294A9454, 0x294A9458, 0x294A945C,
+			0x294A9460, 0x294A9464, 0x294A9468, 0x294A946C, 0x294A9470, 0x294A9474, 0x294A9478, 0x294A947C,
+			0x294A9480, 0x294A9484, 0x294A9488, 0x294A948C, 0x294A9490, 0x294A9494, 0x294A9498, 0x294A949C,
+			0x294A94A0, 0x294A94A4, 0x294A94A8, 0x294A94AC, 0x294A94B0, 0x294A94B4, 0x294A94B8, 0x294A94BC,
+			0x294A94C0, 0x294A94C4, 0x294A94C8, 0x294A94CC, 0x294A94D0, 0x294A94D4, 0x294A94D8, 0x294A94DC,
+			0x294A94E0, 0x294A94E4, 0x294A94E8, 0x294A94EC, 0x294A94F0, 0x294A94F4, 0x294A94F8, 0x294A94FC,
+			0x294A9500, 0x294A9504, 0x294A9508, 0x294A950C, 0x294A9510, 0x294A9514, 0x294A9518, 0x294A951C,
+			0x294A9520, 0x294A9524, 0x294A9528, 0x294A952C, 0x294A9530, 0x294A9534, 0x294A9538, 0x294A953C,
+			0x294A9540, 0x294A9544, 0x294A9548, 0x294A954C, 0x294A9550, 0x294A9554, 0x294A9558, 0x294A955C,
+			0x294A9560, 0x294A9564, 0x294A9568, 0x294A956C, 0x294A9570, 0x294A9574, 0x294A9578, 0x294A957C,
+			0x294A9580, 0x294A9584, 0x294A9588, 0x294A958C, 0x294A9590, 0x294A9594, 0x294A9598, 0x294A959C,
+			0x294A95A0, 0x294A95A4, 0x294A95A8, 0x294A95AC, 0x294A95B0, 0x294A95B4, 0x294A95B8, 0x294A95BC,
+			0x294A95C0, 0x294A95C4, 0x294A95C8, 0x294A95CC, 0x294A95D0, 0x294A95D4, 0x294A95D8, 0x294A95DC,
+			0x294A95E0, 0x294A95E4, 0x294A95E8, 0x294A95EC, 0x294A95F0, 0x294A95F4, 0x294A95F8, 0x294A95FC,
+			0x294A9600, 0x294A9604, 0x294A9608, 0x294A960C, 0x294A9610, 0x294A9614, 0x294A9618, 0x294A961C,
+			0x294A9620, 0x294A9624, 0x294A9628, 0x294A962C, 0x294A9630, 0x294A9634, 0x294A9638, 0x294A963C,
+			0x294A9640, 0x294A9644, 0x294A9648, 0x294A964C, 0x294A9650, 0x294A9654, 0x294A9658, 0x294A965C,
+			0x294A9660, 0x294A9664, 0x294A9668, 0x294A966C, 0x294A9670, 0x294A9674, 0x294A9678, 0x294A967C,
+			0x294A9680, 0x294A9684, 0x294A9688, 0x294A968C, 0x294A9690, 0x294A9694, 0x294A9698, 0x294A969C,
+			0x294A96A0, 0x294A96A4, 0x294A96A8, 0x294A96AC, 0x294A96B0, 0x294A96B4, 0x294A96B8, 0x294A96BC,
+			0x294A96C0, 0x294A96C4, 0x294A96C8, 0x294A96CC, 0x294A96D0, 0x294A96D4, 0x294A96D8, 0x294A96DC,
+			0x294A96E0, 0x294A96E4, 0x294A96E8, 0x294A96EC, 0x294A96F0, 0x294A96F4, 0x294A96F8, 0x294A96FC,
+			0x294A9700, 0x294A9704, 0x294A9708, 0x294A970C, 0x294A9710, 0x294A9714, 0x294A9718, 0x294A971C,
+			0x294A9720, 0x294A9724, 0x294A9728, 0x294A972C, 0x294A9730, 0x294A9734, 0x294A9738, 0x294A973C,
+			0x294A9740, 0x294A9744, 0x294A9748, 0x294A974C, 0x294A9750, 0x294A9754, 0x294A9758, 0x294A975C,
+			0x294A9760, 0x294A9764, 0x294A9768, 0x294A976C, 0x294A9770, 0x294A9774, 0x294A9778, 0x294A977C,
+			0x294A9780, 0x294A9784, 0x294A9788, 0x294A978C, 0x294A9790, 0x294A9794, 0x294A9798, 0x294A979C,
+			0x294A97A0, 0x294A97A4, 0x294A97A8, 0x294A97AC, 0x294A97B0, 0x294A97B4, 0x294A97B8, 0x294A97BC,
+			0x294A97C0, 0x294A97C4, 0x294A97C8, 0x294A97CC, 0x294A97D0, 0x294A97D4, 0x294A97D8, 0x294A97DC,
+			0x294A97E0, 0x294A97E4, 0x294A97E8, 0x294A97EC, 0x294A97F0, 0x294A97F4, 0x294A97F8, 0x294A97FC,
+		},
+	},
+	{
+		{
+			0x295A9000, 0x295A9004, 0x295A9008, 0x295A900C, 0x295A9010, 0x295A9014, 0x295A9018, 0x295A901C,
+			0x295A9020, 0x295A9024, 0x295A9028, 0x295A902C, 0x295A9030, 0x295A9034, 0x295A9038, 0x295A903C,
+			0x295A9040, 0x295A9044, 0x295A9048, 0x295A904C, 0x295A9050, 0x295A9054, 0x295A9058, 0x295A905C,
+			0x295A9060, 0x295A9064, 0x295A9068, 0x295A906C, 0x295A9070, 0x295A9074, 0x295A9078, 0x295A907C,
+			0x295A9080, 0x295A9084, 0x295A9088, 0x295A908C, 0x295A9090, 0x295A9094, 0x295A9098, 0x295A909C,
+			0x295A90A0, 0x295A90A4, 0x295A90A8, 0x295A90AC, 0x295A90B0, 0x295A90B4, 0x295A90B8, 0x295A90BC,
+			0x295A90C0, 0x295A90C4, 0x295A90C8, 0x295A90CC, 0x295A90D0, 0x295A90D4, 0x295A90D8, 0x295A90DC,
+			0x295A90E0, 0x295A90E4, 0x295A90E8, 0x295A90EC, 0x295A90F0, 0x295A90F4, 0x295A90F8, 0x295A90FC,
+			0x295A9100, 0x295A9104, 0x295A9108, 0x295A910C, 0x295A9110, 0x295A9114, 0x295A9118, 0x295A911C,
+			0x295A9120, 0x295A9124, 0x295A9128, 0x295A912C, 0x295A9130, 0x295A9134, 0x295A9138, 0x295A913C,
+			0x295A9140, 0x295A9144, 0x295A9148, 0x295A914C, 0x295A9150, 0x295A9154, 0x295A9158, 0x295A915C,
+			0x295A9160, 0x295A9164, 0x295A9168, 0x295A916C, 0x295A9170, 0x295A9174, 0x295A9178, 0x295A917C,
+			0x295A9180, 0x295A9184, 0x295A9188, 0x295A918C, 0x295A9190, 0x295A9194, 0x295A9198, 0x295A919C,
+			0x295A91A0, 0x295A91A4, 0x295A91A8, 0x295A91AC, 0x295A91B0, 0x295A91B4, 0x295A91B8, 0x295A91BC,
+			0x295A91C0, 0x295A91C4, 0x295A91C8, 0x295A91CC, 0x295A91D0, 0x295A91D4, 0x295A91D8, 0x295A91DC,
+			0x295A91E0, 0x295A91E4, 0x295A91E8, 0x295A91EC, 0x295A91F0, 0x295A91F4, 0x295A91F8, 0x295A91FC,
+			0x295A9200, 0x295A9204, 0x295A9208, 0x295A920C, 0x295A9210, 0x295A9214, 0x295A9218, 0x295A921C,
+			0x295A9220, 0x295A9224, 0x295A9228, 0x295A922C, 0x295A9230, 0x295A9234, 0x295A9238, 0x295A923C,
+			0x295A9240, 0x295A9244, 0x295A9248, 0x295A924C, 0x295A9250, 0x295A9254, 0x295A9258, 0x295A925C,
+			0x295A9260, 0x295A9264, 0x295A9268, 0x295A926C, 0x295A9270, 0x295A9274, 0x295A9278, 0x295A927C,
+			0x295A9280, 0x295A9284, 0x295A9288, 0x295A928C, 0x295A9290, 0x295A9294, 0x295A9298, 0x295A929C,
+			0x295A92A0, 0x295A92A4, 0x295A92A8, 0x295A92AC, 0x295A92B0, 0x295A92B4, 0x295A92B8, 0x295A92BC,
+			0x295A92C0, 0x295A92C4, 0x295A92C8, 0x295A92CC, 0x295A92D0, 0x295A92D4, 0x295A92D8, 0x295A92DC,
+			0x295A92E0, 0x295A92E4, 0x295A92E8, 0x295A92EC, 0x295A92F0, 0x295A92F4, 0x295A92F8, 0x295A92FC,
+			0x295A9300, 0x295A9304, 0x295A9308, 0x295A930C, 0x295A9310, 0x295A9314, 0x295A9318, 0x295A931C,
+			0x295A9320, 0x295A9324, 0x295A9328, 0x295A932C, 0x295A9330, 0x295A9334, 0x295A9338, 0x295A933C,
+			0x295A9340, 0x295A9344, 0x295A9348, 0x295A934C, 0x295A9350, 0x295A9354, 0x295A9358, 0x295A935C,
+			0x295A9360, 0x295A9364, 0x295A9368, 0x295A936C, 0x295A9370, 0x295A9374, 0x295A9378, 0x295A937C,
+			0x295A9380, 0x295A9384, 0x295A9388, 0x295A938C, 0x295A9390, 0x295A9394, 0x295A9398, 0x295A939C,
+			0x295A93A0, 0x295A93A4, 0x295A93A8, 0x295A93AC, 0x295A93B0, 0x295A93B4, 0x295A93B8, 0x295A93BC,
+			0x295A93C0, 0x295A93C4, 0x295A93C8, 0x295A93CC, 0x295A93D0, 0x295A93D4, 0x295A93D8, 0x295A93DC,
+			0x295A93E0, 0x295A93E4, 0x295A93E8, 0x295A93EC, 0x295A93F0, 0x295A93F4, 0x295A93F8, 0x295A93FC,
+			0x295A9400, 0x295A9404, 0x295A9408, 0x295A940C, 0x295A9410, 0x295A9414, 0x295A9418, 0x295A941C,
+			0x295A9420, 0x295A9424, 0x295A9428, 0x295A942C, 0x295A9430, 0x295A9434, 0x295A9438, 0x295A943C,
+			0x295A9440, 0x295A9444, 0x295A9448, 0x295A944C, 0x295A9450, 0x295A9454, 0x295A9458, 0x295A945C,
+			0x295A9460, 0x295A9464, 0x295A9468, 0x295A946C, 0x295A9470, 0x295A9474, 0x295A9478, 0x295A947C,
+			0x295A9480, 0x295A9484, 0x295A9488, 0x295A948C, 0x295A9490, 0x295A9494, 0x295A9498, 0x295A949C,
+			0x295A94A0, 0x295A94A4, 0x295A94A8, 0x295A94AC, 0x295A94B0, 0x295A94B4, 0x295A94B8, 0x295A94BC,
+			0x295A94C0, 0x295A94C4, 0x295A94C8, 0x295A94CC, 0x295A94D0, 0x295A94D4, 0x295A94D8, 0x295A94DC,
+			0x295A94E0, 0x295A94E4, 0x295A94E8, 0x295A94EC, 0x295A94F0, 0x295A94F4, 0x295A94F8, 0x295A94FC,
+			0x295A9500, 0x295A9504, 0x295A9508, 0x295A950C, 0x295A9510, 0x295A9514, 0x295A9518, 0x295A951C,
+			0x295A9520, 0x295A9524, 0x295A9528, 0x295A952C, 0x295A9530, 0x295A9534, 0x295A9538, 0x295A953C,
+			0x295A9540, 0x295A9544, 0x295A9548, 0x295A954C, 0x295A9550, 0x295A9554, 0x295A9558, 0x295A955C,
+			0x295A9560, 0x295A9564, 0x295A9568, 0x295A956C, 0x295A9570, 0x295A9574, 0x295A9578, 0x295A957C,
+			0x295A9580, 0x295A9584, 0x295A9588, 0x295A958C, 0x295A9590, 0x295A9594, 0x295A9598, 0x295A959C,
+			0x295A95A0, 0x295A95A4, 0x295A95A8, 0x295A95AC, 0x295A95B0, 0x295A95B4, 0x295A95B8, 0x295A95BC,
+			0x295A95C0, 0x295A95C4, 0x295A95C8, 0x295A95CC, 0x295A95D0, 0x295A95D4, 0x295A95D8, 0x295A95DC,
+			0x295A95E0, 0x295A95E4, 0x295A95E8, 0x295A95EC, 0x295A95F0, 0x295A95F4, 0x295A95F8, 0x295A95FC,
+			0x295A9600, 0x295A9604, 0x295A9608, 0x295A960C, 0x295A9610, 0x295A9614, 0x295A9618, 0x295A961C,
+			0x295A9620, 0x295A9624, 0x295A9628, 0x295A962C, 0x295A9630, 0x295A9634, 0x295A9638, 0x295A963C,
+			0x295A9640, 0x295A9644, 0x295A9648, 0x295A964C, 0x295A9650, 0x295A9654, 0x295A9658, 0x295A965C,
+			0x295A9660, 0x295A9664, 0x295A9668, 0x295A966C, 0x295A9670, 0x295A9674, 0x295A9678, 0x295A967C,
+			0x295A9680, 0x295A9684, 0x295A9688, 0x295A968C, 0x295A9690, 0x295A9694, 0x295A9698, 0x295A969C,
+			0x295A96A0, 0x295A96A4, 0x295A96A8, 0x295A96AC, 0x295A96B0, 0x295A96B4, 0x295A96B8, 0x295A96BC,
+			0x295A96C0, 0x295A96C4, 0x295A96C8, 0x295A96CC, 0x295A96D0, 0x295A96D4, 0x295A96D8, 0x295A96DC,
+			0x295A96E0, 0x295A96E4, 0x295A96E8, 0x295A96EC, 0x295A96F0, 0x295A96F4, 0x295A96F8, 0x295A96FC,
+			0x295A9700, 0x295A9704, 0x295A9708, 0x295A970C, 0x295A9710, 0x295A9714, 0x295A9718, 0x295A971C,
+			0x295A9720, 0x295A9724, 0x295A9728, 0x295A972C, 0x295A9730, 0x295A9734, 0x295A9738, 0x295A973C,
+			0x295A9740, 0x295A9744, 0x295A9748, 0x295A974C, 0x295A9750, 0x295A9754, 0x295A9758, 0x295A975C,
+			0x295A9760, 0x295A9764, 0x295A9768, 0x295A976C, 0x295A9770, 0x295A9774, 0x295A9778, 0x295A977C,
+			0x295A9780, 0x295A9784, 0x295A9788, 0x295A978C, 0x295A9790, 0x295A9794, 0x295A9798, 0x295A979C,
+			0x295A97A0, 0x295A97A4, 0x295A97A8, 0x295A97AC, 0x295A97B0, 0x295A97B4, 0x295A97B8, 0x295A97BC,
+			0x295A97C0, 0x295A97C4, 0x295A97C8, 0x295A97CC, 0x295A97D0, 0x295A97D4, 0x295A97D8, 0x295A97DC,
+			0x295A97E0, 0x295A97E4, 0x295A97E8, 0x295A97EC, 0x295A97F0, 0x295A97F4, 0x295A97F8, 0x295A97FC,
+		},
+	},
+	{
+		{
+			0x296A9000, 0x296A9004, 0x296A9008, 0x296A900C, 0x296A9010, 0x296A9014, 0x296A9018, 0x296A901C,
+			0x296A9020, 0x296A9024, 0x296A9028, 0x296A902C, 0x296A9030, 0x296A9034, 0x296A9038, 0x296A903C,
+			0x296A9040, 0x296A9044, 0x296A9048, 0x296A904C, 0x296A9050, 0x296A9054, 0x296A9058, 0x296A905C,
+			0x296A9060, 0x296A9064, 0x296A9068, 0x296A906C, 0x296A9070, 0x296A9074, 0x296A9078, 0x296A907C,
+			0x296A9080, 0x296A9084, 0x296A9088, 0x296A908C, 0x296A9090, 0x296A9094, 0x296A9098, 0x296A909C,
+			0x296A90A0, 0x296A90A4, 0x296A90A8, 0x296A90AC, 0x296A90B0, 0x296A90B4, 0x296A90B8, 0x296A90BC,
+			0x296A90C0, 0x296A90C4, 0x296A90C8, 0x296A90CC, 0x296A90D0, 0x296A90D4, 0x296A90D8, 0x296A90DC,
+			0x296A90E0, 0x296A90E4, 0x296A90E8, 0x296A90EC, 0x296A90F0, 0x296A90F4, 0x296A90F8, 0x296A90FC,
+			0x296A9100, 0x296A9104, 0x296A9108, 0x296A910C, 0x296A9110, 0x296A9114, 0x296A9118, 0x296A911C,
+			0x296A9120, 0x296A9124, 0x296A9128, 0x296A912C, 0x296A9130, 0x296A9134, 0x296A9138, 0x296A913C,
+			0x296A9140, 0x296A9144, 0x296A9148, 0x296A914C, 0x296A9150, 0x296A9154, 0x296A9158, 0x296A915C,
+			0x296A9160, 0x296A9164, 0x296A9168, 0x296A916C, 0x296A9170, 0x296A9174, 0x296A9178, 0x296A917C,
+			0x296A9180, 0x296A9184, 0x296A9188, 0x296A918C, 0x296A9190, 0x296A9194, 0x296A9198, 0x296A919C,
+			0x296A91A0, 0x296A91A4, 0x296A91A8, 0x296A91AC, 0x296A91B0, 0x296A91B4, 0x296A91B8, 0x296A91BC,
+			0x296A91C0, 0x296A91C4, 0x296A91C8, 0x296A91CC, 0x296A91D0, 0x296A91D4, 0x296A91D8, 0x296A91DC,
+			0x296A91E0, 0x296A91E4, 0x296A91E8, 0x296A91EC, 0x296A91F0, 0x296A91F4, 0x296A91F8, 0x296A91FC,
+			0x296A9200, 0x296A9204, 0x296A9208, 0x296A920C, 0x296A9210, 0x296A9214, 0x296A9218, 0x296A921C,
+			0x296A9220, 0x296A9224, 0x296A9228, 0x296A922C, 0x296A9230, 0x296A9234, 0x296A9238, 0x296A923C,
+			0x296A9240, 0x296A9244, 0x296A9248, 0x296A924C, 0x296A9250, 0x296A9254, 0x296A9258, 0x296A925C,
+			0x296A9260, 0x296A9264, 0x296A9268, 0x296A926C, 0x296A9270, 0x296A9274, 0x296A9278, 0x296A927C,
+			0x296A9280, 0x296A9284, 0x296A9288, 0x296A928C, 0x296A9290, 0x296A9294, 0x296A9298, 0x296A929C,
+			0x296A92A0, 0x296A92A4, 0x296A92A8, 0x296A92AC, 0x296A92B0, 0x296A92B4, 0x296A92B8, 0x296A92BC,
+			0x296A92C0, 0x296A92C4, 0x296A92C8, 0x296A92CC, 0x296A92D0, 0x296A92D4, 0x296A92D8, 0x296A92DC,
+			0x296A92E0, 0x296A92E4, 0x296A92E8, 0x296A92EC, 0x296A92F0, 0x296A92F4, 0x296A92F8, 0x296A92FC,
+			0x296A9300, 0x296A9304, 0x296A9308, 0x296A930C, 0x296A9310, 0x296A9314, 0x296A9318, 0x296A931C,
+			0x296A9320, 0x296A9324, 0x296A9328, 0x296A932C, 0x296A9330, 0x296A9334, 0x296A9338, 0x296A933C,
+			0x296A9340, 0x296A9344, 0x296A9348, 0x296A934C, 0x296A9350, 0x296A9354, 0x296A9358, 0x296A935C,
+			0x296A9360, 0x296A9364, 0x296A9368, 0x296A936C, 0x296A9370, 0x296A9374, 0x296A9378, 0x296A937C,
+			0x296A9380, 0x296A9384, 0x296A9388, 0x296A938C, 0x296A9390, 0x296A9394, 0x296A9398, 0x296A939C,
+			0x296A93A0, 0x296A93A4, 0x296A93A8, 0x296A93AC, 0x296A93B0, 0x296A93B4, 0x296A93B8, 0x296A93BC,
+			0x296A93C0, 0x296A93C4, 0x296A93C8, 0x296A93CC, 0x296A93D0, 0x296A93D4, 0x296A93D8, 0x296A93DC,
+			0x296A93E0, 0x296A93E4, 0x296A93E8, 0x296A93EC, 0x296A93F0, 0x296A93F4, 0x296A93F8, 0x296A93FC,
+			0x296A9400, 0x296A9404, 0x296A9408, 0x296A940C, 0x296A9410, 0x296A9414, 0x296A9418, 0x296A941C,
+			0x296A9420, 0x296A9424, 0x296A9428, 0x296A942C, 0x296A9430, 0x296A9434, 0x296A9438, 0x296A943C,
+			0x296A9440, 0x296A9444, 0x296A9448, 0x296A944C, 0x296A9450, 0x296A9454, 0x296A9458, 0x296A945C,
+			0x296A9460, 0x296A9464, 0x296A9468, 0x296A946C, 0x296A9470, 0x296A9474, 0x296A9478, 0x296A947C,
+			0x296A9480, 0x296A9484, 0x296A9488, 0x296A948C, 0x296A9490, 0x296A9494, 0x296A9498, 0x296A949C,
+			0x296A94A0, 0x296A94A4, 0x296A94A8, 0x296A94AC, 0x296A94B0, 0x296A94B4, 0x296A94B8, 0x296A94BC,
+			0x296A94C0, 0x296A94C4, 0x296A94C8, 0x296A94CC, 0x296A94D0, 0x296A94D4, 0x296A94D8, 0x296A94DC,
+			0x296A94E0, 0x296A94E4, 0x296A94E8, 0x296A94EC, 0x296A94F0, 0x296A94F4, 0x296A94F8, 0x296A94FC,
+			0x296A9500, 0x296A9504, 0x296A9508, 0x296A950C, 0x296A9510, 0x296A9514, 0x296A9518, 0x296A951C,
+			0x296A9520, 0x296A9524, 0x296A9528, 0x296A952C, 0x296A9530, 0x296A9534, 0x296A9538, 0x296A953C,
+			0x296A9540, 0x296A9544, 0x296A9548, 0x296A954C, 0x296A9550, 0x296A9554, 0x296A9558, 0x296A955C,
+			0x296A9560, 0x296A9564, 0x296A9568, 0x296A956C, 0x296A9570, 0x296A9574, 0x296A9578, 0x296A957C,
+			0x296A9580, 0x296A9584, 0x296A9588, 0x296A958C, 0x296A9590, 0x296A9594, 0x296A9598, 0x296A959C,
+			0x296A95A0, 0x296A95A4, 0x296A95A8, 0x296A95AC, 0x296A95B0, 0x296A95B4, 0x296A95B8, 0x296A95BC,
+			0x296A95C0, 0x296A95C4, 0x296A95C8, 0x296A95CC, 0x296A95D0, 0x296A95D4, 0x296A95D8, 0x296A95DC,
+			0x296A95E0, 0x296A95E4, 0x296A95E8, 0x296A95EC, 0x296A95F0, 0x296A95F4, 0x296A95F8, 0x296A95FC,
+			0x296A9600, 0x296A9604, 0x296A9608, 0x296A960C, 0x296A9610, 0x296A9614, 0x296A9618, 0x296A961C,
+			0x296A9620, 0x296A9624, 0x296A9628, 0x296A962C, 0x296A9630, 0x296A9634, 0x296A9638, 0x296A963C,
+			0x296A9640, 0x296A9644, 0x296A9648, 0x296A964C, 0x296A9650, 0x296A9654, 0x296A9658, 0x296A965C,
+			0x296A9660, 0x296A9664, 0x296A9668, 0x296A966C, 0x296A9670, 0x296A9674, 0x296A9678, 0x296A967C,
+			0x296A9680, 0x296A9684, 0x296A9688, 0x296A968C, 0x296A9690, 0x296A9694, 0x296A9698, 0x296A969C,
+			0x296A96A0, 0x296A96A4, 0x296A96A8, 0x296A96AC, 0x296A96B0, 0x296A96B4, 0x296A96B8, 0x296A96BC,
+			0x296A96C0, 0x296A96C4, 0x296A96C8, 0x296A96CC, 0x296A96D0, 0x296A96D4, 0x296A96D8, 0x296A96DC,
+			0x296A96E0, 0x296A96E4, 0x296A96E8, 0x296A96EC, 0x296A96F0, 0x296A96F4, 0x296A96F8, 0x296A96FC,
+			0x296A9700, 0x296A9704, 0x296A9708, 0x296A970C, 0x296A9710, 0x296A9714, 0x296A9718, 0x296A971C,
+			0x296A9720, 0x296A9724, 0x296A9728, 0x296A972C, 0x296A9730, 0x296A9734, 0x296A9738, 0x296A973C,
+			0x296A9740, 0x296A9744, 0x296A9748, 0x296A974C, 0x296A9750, 0x296A9754, 0x296A9758, 0x296A975C,
+			0x296A9760, 0x296A9764, 0x296A9768, 0x296A976C, 0x296A9770, 0x296A9774, 0x296A9778, 0x296A977C,
+			0x296A9780, 0x296A9784, 0x296A9788, 0x296A978C, 0x296A9790, 0x296A9794, 0x296A9798, 0x296A979C,
+			0x296A97A0, 0x296A97A4, 0x296A97A8, 0x296A97AC, 0x296A97B0, 0x296A97B4, 0x296A97B8, 0x296A97BC,
+			0x296A97C0, 0x296A97C4, 0x296A97C8, 0x296A97CC, 0x296A97D0, 0x296A97D4, 0x296A97D8, 0x296A97DC,
+			0x296A97E0, 0x296A97E4, 0x296A97E8, 0x296A97EC, 0x296A97F0, 0x296A97F4, 0x296A97F8, 0x296A97FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMDF_TBL_ADDR	gIM_R2Y_GMBDF_Tbl_Addr[3] = {
+	{
+		{
+			0x294A9800, 0x294A9804, 0x294A9808, 0x294A980C, 0x294A9810, 0x294A9814, 0x294A9818, 0x294A981C,
+			0x294A9820, 0x294A9824, 0x294A9828, 0x294A982C, 0x294A9830, 0x294A9834, 0x294A9838, 0x294A983C,
+			0x294A9840, 0x294A9844, 0x294A9848, 0x294A984C, 0x294A9850, 0x294A9854, 0x294A9858, 0x294A985C,
+			0x294A9860, 0x294A9864, 0x294A9868, 0x294A986C, 0x294A9870, 0x294A9874, 0x294A9878, 0x294A987C,
+			0x294A9880, 0x294A9884, 0x294A9888, 0x294A988C, 0x294A9890, 0x294A9894, 0x294A9898, 0x294A989C,
+			0x294A98A0, 0x294A98A4, 0x294A98A8, 0x294A98AC, 0x294A98B0, 0x294A98B4, 0x294A98B8, 0x294A98BC,
+			0x294A98C0, 0x294A98C4, 0x294A98C8, 0x294A98CC, 0x294A98D0, 0x294A98D4, 0x294A98D8, 0x294A98DC,
+			0x294A98E0, 0x294A98E4, 0x294A98E8, 0x294A98EC, 0x294A98F0, 0x294A98F4, 0x294A98F8, 0x294A98FC,
+			0x294A9900, 0x294A9904, 0x294A9908, 0x294A990C, 0x294A9910, 0x294A9914, 0x294A9918, 0x294A991C,
+			0x294A9920, 0x294A9924, 0x294A9928, 0x294A992C, 0x294A9930, 0x294A9934, 0x294A9938, 0x294A993C,
+			0x294A9940, 0x294A9944, 0x294A9948, 0x294A994C, 0x294A9950, 0x294A9954, 0x294A9958, 0x294A995C,
+			0x294A9960, 0x294A9964, 0x294A9968, 0x294A996C, 0x294A9970, 0x294A9974, 0x294A9978, 0x294A997C,
+			0x294A9980, 0x294A9984, 0x294A9988, 0x294A998C, 0x294A9990, 0x294A9994, 0x294A9998, 0x294A999C,
+			0x294A99A0, 0x294A99A4, 0x294A99A8, 0x294A99AC, 0x294A99B0, 0x294A99B4, 0x294A99B8, 0x294A99BC,
+			0x294A99C0, 0x294A99C4, 0x294A99C8, 0x294A99CC, 0x294A99D0, 0x294A99D4, 0x294A99D8, 0x294A99DC,
+			0x294A99E0, 0x294A99E4, 0x294A99E8, 0x294A99EC, 0x294A99F0, 0x294A99F4, 0x294A99F8, 0x294A99FC,
+			0x294A9A00, 0x294A9A04, 0x294A9A08, 0x294A9A0C, 0x294A9A10, 0x294A9A14, 0x294A9A18, 0x294A9A1C,
+			0x294A9A20, 0x294A9A24, 0x294A9A28, 0x294A9A2C, 0x294A9A30, 0x294A9A34, 0x294A9A38, 0x294A9A3C,
+			0x294A9A40, 0x294A9A44, 0x294A9A48, 0x294A9A4C, 0x294A9A50, 0x294A9A54, 0x294A9A58, 0x294A9A5C,
+			0x294A9A60, 0x294A9A64, 0x294A9A68, 0x294A9A6C, 0x294A9A70, 0x294A9A74, 0x294A9A78, 0x294A9A7C,
+			0x294A9A80, 0x294A9A84, 0x294A9A88, 0x294A9A8C, 0x294A9A90, 0x294A9A94, 0x294A9A98, 0x294A9A9C,
+			0x294A9AA0, 0x294A9AA4, 0x294A9AA8, 0x294A9AAC, 0x294A9AB0, 0x294A9AB4, 0x294A9AB8, 0x294A9ABC,
+			0x294A9AC0, 0x294A9AC4, 0x294A9AC8, 0x294A9ACC, 0x294A9AD0, 0x294A9AD4, 0x294A9AD8, 0x294A9ADC,
+			0x294A9AE0, 0x294A9AE4, 0x294A9AE8, 0x294A9AEC, 0x294A9AF0, 0x294A9AF4, 0x294A9AF8, 0x294A9AFC,
+			0x294A9B00, 0x294A9B04, 0x294A9B08, 0x294A9B0C, 0x294A9B10, 0x294A9B14, 0x294A9B18, 0x294A9B1C,
+			0x294A9B20, 0x294A9B24, 0x294A9B28, 0x294A9B2C, 0x294A9B30, 0x294A9B34, 0x294A9B38, 0x294A9B3C,
+			0x294A9B40, 0x294A9B44, 0x294A9B48, 0x294A9B4C, 0x294A9B50, 0x294A9B54, 0x294A9B58, 0x294A9B5C,
+			0x294A9B60, 0x294A9B64, 0x294A9B68, 0x294A9B6C, 0x294A9B70, 0x294A9B74, 0x294A9B78, 0x294A9B7C,
+			0x294A9B80, 0x294A9B84, 0x294A9B88, 0x294A9B8C, 0x294A9B90, 0x294A9B94, 0x294A9B98, 0x294A9B9C,
+			0x294A9BA0, 0x294A9BA4, 0x294A9BA8, 0x294A9BAC, 0x294A9BB0, 0x294A9BB4, 0x294A9BB8, 0x294A9BBC,
+			0x294A9BC0, 0x294A9BC4, 0x294A9BC8, 0x294A9BCC, 0x294A9BD0, 0x294A9BD4, 0x294A9BD8, 0x294A9BDC,
+			0x294A9BE0, 0x294A9BE4, 0x294A9BE8, 0x294A9BEC, 0x294A9BF0, 0x294A9BF4, 0x294A9BF8, 0x294A9BFC,
+			0x294A9C00, 0x294A9C04, 0x294A9C08, 0x294A9C0C, 0x294A9C10, 0x294A9C14, 0x294A9C18, 0x294A9C1C,
+			0x294A9C20, 0x294A9C24, 0x294A9C28, 0x294A9C2C, 0x294A9C30, 0x294A9C34, 0x294A9C38, 0x294A9C3C,
+			0x294A9C40, 0x294A9C44, 0x294A9C48, 0x294A9C4C, 0x294A9C50, 0x294A9C54, 0x294A9C58, 0x294A9C5C,
+			0x294A9C60, 0x294A9C64, 0x294A9C68, 0x294A9C6C, 0x294A9C70, 0x294A9C74, 0x294A9C78, 0x294A9C7C,
+			0x294A9C80, 0x294A9C84, 0x294A9C88, 0x294A9C8C, 0x294A9C90, 0x294A9C94, 0x294A9C98, 0x294A9C9C,
+			0x294A9CA0, 0x294A9CA4, 0x294A9CA8, 0x294A9CAC, 0x294A9CB0, 0x294A9CB4, 0x294A9CB8, 0x294A9CBC,
+			0x294A9CC0, 0x294A9CC4, 0x294A9CC8, 0x294A9CCC, 0x294A9CD0, 0x294A9CD4, 0x294A9CD8, 0x294A9CDC,
+			0x294A9CE0, 0x294A9CE4, 0x294A9CE8, 0x294A9CEC, 0x294A9CF0, 0x294A9CF4, 0x294A9CF8, 0x294A9CFC,
+			0x294A9D00, 0x294A9D04, 0x294A9D08, 0x294A9D0C, 0x294A9D10, 0x294A9D14, 0x294A9D18, 0x294A9D1C,
+			0x294A9D20, 0x294A9D24, 0x294A9D28, 0x294A9D2C, 0x294A9D30, 0x294A9D34, 0x294A9D38, 0x294A9D3C,
+			0x294A9D40, 0x294A9D44, 0x294A9D48, 0x294A9D4C, 0x294A9D50, 0x294A9D54, 0x294A9D58, 0x294A9D5C,
+			0x294A9D60, 0x294A9D64, 0x294A9D68, 0x294A9D6C, 0x294A9D70, 0x294A9D74, 0x294A9D78, 0x294A9D7C,
+			0x294A9D80, 0x294A9D84, 0x294A9D88, 0x294A9D8C, 0x294A9D90, 0x294A9D94, 0x294A9D98, 0x294A9D9C,
+			0x294A9DA0, 0x294A9DA4, 0x294A9DA8, 0x294A9DAC, 0x294A9DB0, 0x294A9DB4, 0x294A9DB8, 0x294A9DBC,
+			0x294A9DC0, 0x294A9DC4, 0x294A9DC8, 0x294A9DCC, 0x294A9DD0, 0x294A9DD4, 0x294A9DD8, 0x294A9DDC,
+			0x294A9DE0, 0x294A9DE4, 0x294A9DE8, 0x294A9DEC, 0x294A9DF0, 0x294A9DF4, 0x294A9DF8, 0x294A9DFC,
+			0x294A9E00, 0x294A9E04, 0x294A9E08, 0x294A9E0C, 0x294A9E10, 0x294A9E14, 0x294A9E18, 0x294A9E1C,
+			0x294A9E20, 0x294A9E24, 0x294A9E28, 0x294A9E2C, 0x294A9E30, 0x294A9E34, 0x294A9E38, 0x294A9E3C,
+			0x294A9E40, 0x294A9E44, 0x294A9E48, 0x294A9E4C, 0x294A9E50, 0x294A9E54, 0x294A9E58, 0x294A9E5C,
+			0x294A9E60, 0x294A9E64, 0x294A9E68, 0x294A9E6C, 0x294A9E70, 0x294A9E74, 0x294A9E78, 0x294A9E7C,
+			0x294A9E80, 0x294A9E84, 0x294A9E88, 0x294A9E8C, 0x294A9E90, 0x294A9E94, 0x294A9E98, 0x294A9E9C,
+			0x294A9EA0, 0x294A9EA4, 0x294A9EA8, 0x294A9EAC, 0x294A9EB0, 0x294A9EB4, 0x294A9EB8, 0x294A9EBC,
+			0x294A9EC0, 0x294A9EC4, 0x294A9EC8, 0x294A9ECC, 0x294A9ED0, 0x294A9ED4, 0x294A9ED8, 0x294A9EDC,
+			0x294A9EE0, 0x294A9EE4, 0x294A9EE8, 0x294A9EEC, 0x294A9EF0, 0x294A9EF4, 0x294A9EF8, 0x294A9EFC,
+			0x294A9F00, 0x294A9F04, 0x294A9F08, 0x294A9F0C, 0x294A9F10, 0x294A9F14, 0x294A9F18, 0x294A9F1C,
+			0x294A9F20, 0x294A9F24, 0x294A9F28, 0x294A9F2C, 0x294A9F30, 0x294A9F34, 0x294A9F38, 0x294A9F3C,
+			0x294A9F40, 0x294A9F44, 0x294A9F48, 0x294A9F4C, 0x294A9F50, 0x294A9F54, 0x294A9F58, 0x294A9F5C,
+			0x294A9F60, 0x294A9F64, 0x294A9F68, 0x294A9F6C, 0x294A9F70, 0x294A9F74, 0x294A9F78, 0x294A9F7C,
+			0x294A9F80, 0x294A9F84, 0x294A9F88, 0x294A9F8C, 0x294A9F90, 0x294A9F94, 0x294A9F98, 0x294A9F9C,
+			0x294A9FA0, 0x294A9FA4, 0x294A9FA8, 0x294A9FAC, 0x294A9FB0, 0x294A9FB4, 0x294A9FB8, 0x294A9FBC,
+			0x294A9FC0, 0x294A9FC4, 0x294A9FC8, 0x294A9FCC, 0x294A9FD0, 0x294A9FD4, 0x294A9FD8, 0x294A9FDC,
+			0x294A9FE0, 0x294A9FE4, 0x294A9FE8, 0x294A9FEC, 0x294A9FF0, 0x294A9FF4, 0x294A9FF8, 0x294A9FFC,
+		},
+	},
+	{
+		{
+			0x295A9800, 0x295A9804, 0x295A9808, 0x295A980C, 0x295A9810, 0x295A9814, 0x295A9818, 0x295A981C,
+			0x295A9820, 0x295A9824, 0x295A9828, 0x295A982C, 0x295A9830, 0x295A9834, 0x295A9838, 0x295A983C,
+			0x295A9840, 0x295A9844, 0x295A9848, 0x295A984C, 0x295A9850, 0x295A9854, 0x295A9858, 0x295A985C,
+			0x295A9860, 0x295A9864, 0x295A9868, 0x295A986C, 0x295A9870, 0x295A9874, 0x295A9878, 0x295A987C,
+			0x295A9880, 0x295A9884, 0x295A9888, 0x295A988C, 0x295A9890, 0x295A9894, 0x295A9898, 0x295A989C,
+			0x295A98A0, 0x295A98A4, 0x295A98A8, 0x295A98AC, 0x295A98B0, 0x295A98B4, 0x295A98B8, 0x295A98BC,
+			0x295A98C0, 0x295A98C4, 0x295A98C8, 0x295A98CC, 0x295A98D0, 0x295A98D4, 0x295A98D8, 0x295A98DC,
+			0x295A98E0, 0x295A98E4, 0x295A98E8, 0x295A98EC, 0x295A98F0, 0x295A98F4, 0x295A98F8, 0x295A98FC,
+			0x295A9900, 0x295A9904, 0x295A9908, 0x295A990C, 0x295A9910, 0x295A9914, 0x295A9918, 0x295A991C,
+			0x295A9920, 0x295A9924, 0x295A9928, 0x295A992C, 0x295A9930, 0x295A9934, 0x295A9938, 0x295A993C,
+			0x295A9940, 0x295A9944, 0x295A9948, 0x295A994C, 0x295A9950, 0x295A9954, 0x295A9958, 0x295A995C,
+			0x295A9960, 0x295A9964, 0x295A9968, 0x295A996C, 0x295A9970, 0x295A9974, 0x295A9978, 0x295A997C,
+			0x295A9980, 0x295A9984, 0x295A9988, 0x295A998C, 0x295A9990, 0x295A9994, 0x295A9998, 0x295A999C,
+			0x295A99A0, 0x295A99A4, 0x295A99A8, 0x295A99AC, 0x295A99B0, 0x295A99B4, 0x295A99B8, 0x295A99BC,
+			0x295A99C0, 0x295A99C4, 0x295A99C8, 0x295A99CC, 0x295A99D0, 0x295A99D4, 0x295A99D8, 0x295A99DC,
+			0x295A99E0, 0x295A99E4, 0x295A99E8, 0x295A99EC, 0x295A99F0, 0x295A99F4, 0x295A99F8, 0x295A99FC,
+			0x295A9A00, 0x295A9A04, 0x295A9A08, 0x295A9A0C, 0x295A9A10, 0x295A9A14, 0x295A9A18, 0x295A9A1C,
+			0x295A9A20, 0x295A9A24, 0x295A9A28, 0x295A9A2C, 0x295A9A30, 0x295A9A34, 0x295A9A38, 0x295A9A3C,
+			0x295A9A40, 0x295A9A44, 0x295A9A48, 0x295A9A4C, 0x295A9A50, 0x295A9A54, 0x295A9A58, 0x295A9A5C,
+			0x295A9A60, 0x295A9A64, 0x295A9A68, 0x295A9A6C, 0x295A9A70, 0x295A9A74, 0x295A9A78, 0x295A9A7C,
+			0x295A9A80, 0x295A9A84, 0x295A9A88, 0x295A9A8C, 0x295A9A90, 0x295A9A94, 0x295A9A98, 0x295A9A9C,
+			0x295A9AA0, 0x295A9AA4, 0x295A9AA8, 0x295A9AAC, 0x295A9AB0, 0x295A9AB4, 0x295A9AB8, 0x295A9ABC,
+			0x295A9AC0, 0x295A9AC4, 0x295A9AC8, 0x295A9ACC, 0x295A9AD0, 0x295A9AD4, 0x295A9AD8, 0x295A9ADC,
+			0x295A9AE0, 0x295A9AE4, 0x295A9AE8, 0x295A9AEC, 0x295A9AF0, 0x295A9AF4, 0x295A9AF8, 0x295A9AFC,
+			0x295A9B00, 0x295A9B04, 0x295A9B08, 0x295A9B0C, 0x295A9B10, 0x295A9B14, 0x295A9B18, 0x295A9B1C,
+			0x295A9B20, 0x295A9B24, 0x295A9B28, 0x295A9B2C, 0x295A9B30, 0x295A9B34, 0x295A9B38, 0x295A9B3C,
+			0x295A9B40, 0x295A9B44, 0x295A9B48, 0x295A9B4C, 0x295A9B50, 0x295A9B54, 0x295A9B58, 0x295A9B5C,
+			0x295A9B60, 0x295A9B64, 0x295A9B68, 0x295A9B6C, 0x295A9B70, 0x295A9B74, 0x295A9B78, 0x295A9B7C,
+			0x295A9B80, 0x295A9B84, 0x295A9B88, 0x295A9B8C, 0x295A9B90, 0x295A9B94, 0x295A9B98, 0x295A9B9C,
+			0x295A9BA0, 0x295A9BA4, 0x295A9BA8, 0x295A9BAC, 0x295A9BB0, 0x295A9BB4, 0x295A9BB8, 0x295A9BBC,
+			0x295A9BC0, 0x295A9BC4, 0x295A9BC8, 0x295A9BCC, 0x295A9BD0, 0x295A9BD4, 0x295A9BD8, 0x295A9BDC,
+			0x295A9BE0, 0x295A9BE4, 0x295A9BE8, 0x295A9BEC, 0x295A9BF0, 0x295A9BF4, 0x295A9BF8, 0x295A9BFC,
+			0x295A9C00, 0x295A9C04, 0x295A9C08, 0x295A9C0C, 0x295A9C10, 0x295A9C14, 0x295A9C18, 0x295A9C1C,
+			0x295A9C20, 0x295A9C24, 0x295A9C28, 0x295A9C2C, 0x295A9C30, 0x295A9C34, 0x295A9C38, 0x295A9C3C,
+			0x295A9C40, 0x295A9C44, 0x295A9C48, 0x295A9C4C, 0x295A9C50, 0x295A9C54, 0x295A9C58, 0x295A9C5C,
+			0x295A9C60, 0x295A9C64, 0x295A9C68, 0x295A9C6C, 0x295A9C70, 0x295A9C74, 0x295A9C78, 0x295A9C7C,
+			0x295A9C80, 0x295A9C84, 0x295A9C88, 0x295A9C8C, 0x295A9C90, 0x295A9C94, 0x295A9C98, 0x295A9C9C,
+			0x295A9CA0, 0x295A9CA4, 0x295A9CA8, 0x295A9CAC, 0x295A9CB0, 0x295A9CB4, 0x295A9CB8, 0x295A9CBC,
+			0x295A9CC0, 0x295A9CC4, 0x295A9CC8, 0x295A9CCC, 0x295A9CD0, 0x295A9CD4, 0x295A9CD8, 0x295A9CDC,
+			0x295A9CE0, 0x295A9CE4, 0x295A9CE8, 0x295A9CEC, 0x295A9CF0, 0x295A9CF4, 0x295A9CF8, 0x295A9CFC,
+			0x295A9D00, 0x295A9D04, 0x295A9D08, 0x295A9D0C, 0x295A9D10, 0x295A9D14, 0x295A9D18, 0x295A9D1C,
+			0x295A9D20, 0x295A9D24, 0x295A9D28, 0x295A9D2C, 0x295A9D30, 0x295A9D34, 0x295A9D38, 0x295A9D3C,
+			0x295A9D40, 0x295A9D44, 0x295A9D48, 0x295A9D4C, 0x295A9D50, 0x295A9D54, 0x295A9D58, 0x295A9D5C,
+			0x295A9D60, 0x295A9D64, 0x295A9D68, 0x295A9D6C, 0x295A9D70, 0x295A9D74, 0x295A9D78, 0x295A9D7C,
+			0x295A9D80, 0x295A9D84, 0x295A9D88, 0x295A9D8C, 0x295A9D90, 0x295A9D94, 0x295A9D98, 0x295A9D9C,
+			0x295A9DA0, 0x295A9DA4, 0x295A9DA8, 0x295A9DAC, 0x295A9DB0, 0x295A9DB4, 0x295A9DB8, 0x295A9DBC,
+			0x295A9DC0, 0x295A9DC4, 0x295A9DC8, 0x295A9DCC, 0x295A9DD0, 0x295A9DD4, 0x295A9DD8, 0x295A9DDC,
+			0x295A9DE0, 0x295A9DE4, 0x295A9DE8, 0x295A9DEC, 0x295A9DF0, 0x295A9DF4, 0x295A9DF8, 0x295A9DFC,
+			0x295A9E00, 0x295A9E04, 0x295A9E08, 0x295A9E0C, 0x295A9E10, 0x295A9E14, 0x295A9E18, 0x295A9E1C,
+			0x295A9E20, 0x295A9E24, 0x295A9E28, 0x295A9E2C, 0x295A9E30, 0x295A9E34, 0x295A9E38, 0x295A9E3C,
+			0x295A9E40, 0x295A9E44, 0x295A9E48, 0x295A9E4C, 0x295A9E50, 0x295A9E54, 0x295A9E58, 0x295A9E5C,
+			0x295A9E60, 0x295A9E64, 0x295A9E68, 0x295A9E6C, 0x295A9E70, 0x295A9E74, 0x295A9E78, 0x295A9E7C,
+			0x295A9E80, 0x295A9E84, 0x295A9E88, 0x295A9E8C, 0x295A9E90, 0x295A9E94, 0x295A9E98, 0x295A9E9C,
+			0x295A9EA0, 0x295A9EA4, 0x295A9EA8, 0x295A9EAC, 0x295A9EB0, 0x295A9EB4, 0x295A9EB8, 0x295A9EBC,
+			0x295A9EC0, 0x295A9EC4, 0x295A9EC8, 0x295A9ECC, 0x295A9ED0, 0x295A9ED4, 0x295A9ED8, 0x295A9EDC,
+			0x295A9EE0, 0x295A9EE4, 0x295A9EE8, 0x295A9EEC, 0x295A9EF0, 0x295A9EF4, 0x295A9EF8, 0x295A9EFC,
+			0x295A9F00, 0x295A9F04, 0x295A9F08, 0x295A9F0C, 0x295A9F10, 0x295A9F14, 0x295A9F18, 0x295A9F1C,
+			0x295A9F20, 0x295A9F24, 0x295A9F28, 0x295A9F2C, 0x295A9F30, 0x295A9F34, 0x295A9F38, 0x295A9F3C,
+			0x295A9F40, 0x295A9F44, 0x295A9F48, 0x295A9F4C, 0x295A9F50, 0x295A9F54, 0x295A9F58, 0x295A9F5C,
+			0x295A9F60, 0x295A9F64, 0x295A9F68, 0x295A9F6C, 0x295A9F70, 0x295A9F74, 0x295A9F78, 0x295A9F7C,
+			0x295A9F80, 0x295A9F84, 0x295A9F88, 0x295A9F8C, 0x295A9F90, 0x295A9F94, 0x295A9F98, 0x295A9F9C,
+			0x295A9FA0, 0x295A9FA4, 0x295A9FA8, 0x295A9FAC, 0x295A9FB0, 0x295A9FB4, 0x295A9FB8, 0x295A9FBC,
+			0x295A9FC0, 0x295A9FC4, 0x295A9FC8, 0x295A9FCC, 0x295A9FD0, 0x295A9FD4, 0x295A9FD8, 0x295A9FDC,
+			0x295A9FE0, 0x295A9FE4, 0x295A9FE8, 0x295A9FEC, 0x295A9FF0, 0x295A9FF4, 0x295A9FF8, 0x295A9FFC,
+		},
+	},
+	{
+		{
+			0x296A9800, 0x296A9804, 0x296A9808, 0x296A980C, 0x296A9810, 0x296A9814, 0x296A9818, 0x296A981C,
+			0x296A9820, 0x296A9824, 0x296A9828, 0x296A982C, 0x296A9830, 0x296A9834, 0x296A9838, 0x296A983C,
+			0x296A9840, 0x296A9844, 0x296A9848, 0x296A984C, 0x296A9850, 0x296A9854, 0x296A9858, 0x296A985C,
+			0x296A9860, 0x296A9864, 0x296A9868, 0x296A986C, 0x296A9870, 0x296A9874, 0x296A9878, 0x296A987C,
+			0x296A9880, 0x296A9884, 0x296A9888, 0x296A988C, 0x296A9890, 0x296A9894, 0x296A9898, 0x296A989C,
+			0x296A98A0, 0x296A98A4, 0x296A98A8, 0x296A98AC, 0x296A98B0, 0x296A98B4, 0x296A98B8, 0x296A98BC,
+			0x296A98C0, 0x296A98C4, 0x296A98C8, 0x296A98CC, 0x296A98D0, 0x296A98D4, 0x296A98D8, 0x296A98DC,
+			0x296A98E0, 0x296A98E4, 0x296A98E8, 0x296A98EC, 0x296A98F0, 0x296A98F4, 0x296A98F8, 0x296A98FC,
+			0x296A9900, 0x296A9904, 0x296A9908, 0x296A990C, 0x296A9910, 0x296A9914, 0x296A9918, 0x296A991C,
+			0x296A9920, 0x296A9924, 0x296A9928, 0x296A992C, 0x296A9930, 0x296A9934, 0x296A9938, 0x296A993C,
+			0x296A9940, 0x296A9944, 0x296A9948, 0x296A994C, 0x296A9950, 0x296A9954, 0x296A9958, 0x296A995C,
+			0x296A9960, 0x296A9964, 0x296A9968, 0x296A996C, 0x296A9970, 0x296A9974, 0x296A9978, 0x296A997C,
+			0x296A9980, 0x296A9984, 0x296A9988, 0x296A998C, 0x296A9990, 0x296A9994, 0x296A9998, 0x296A999C,
+			0x296A99A0, 0x296A99A4, 0x296A99A8, 0x296A99AC, 0x296A99B0, 0x296A99B4, 0x296A99B8, 0x296A99BC,
+			0x296A99C0, 0x296A99C4, 0x296A99C8, 0x296A99CC, 0x296A99D0, 0x296A99D4, 0x296A99D8, 0x296A99DC,
+			0x296A99E0, 0x296A99E4, 0x296A99E8, 0x296A99EC, 0x296A99F0, 0x296A99F4, 0x296A99F8, 0x296A99FC,
+			0x296A9A00, 0x296A9A04, 0x296A9A08, 0x296A9A0C, 0x296A9A10, 0x296A9A14, 0x296A9A18, 0x296A9A1C,
+			0x296A9A20, 0x296A9A24, 0x296A9A28, 0x296A9A2C, 0x296A9A30, 0x296A9A34, 0x296A9A38, 0x296A9A3C,
+			0x296A9A40, 0x296A9A44, 0x296A9A48, 0x296A9A4C, 0x296A9A50, 0x296A9A54, 0x296A9A58, 0x296A9A5C,
+			0x296A9A60, 0x296A9A64, 0x296A9A68, 0x296A9A6C, 0x296A9A70, 0x296A9A74, 0x296A9A78, 0x296A9A7C,
+			0x296A9A80, 0x296A9A84, 0x296A9A88, 0x296A9A8C, 0x296A9A90, 0x296A9A94, 0x296A9A98, 0x296A9A9C,
+			0x296A9AA0, 0x296A9AA4, 0x296A9AA8, 0x296A9AAC, 0x296A9AB0, 0x296A9AB4, 0x296A9AB8, 0x296A9ABC,
+			0x296A9AC0, 0x296A9AC4, 0x296A9AC8, 0x296A9ACC, 0x296A9AD0, 0x296A9AD4, 0x296A9AD8, 0x296A9ADC,
+			0x296A9AE0, 0x296A9AE4, 0x296A9AE8, 0x296A9AEC, 0x296A9AF0, 0x296A9AF4, 0x296A9AF8, 0x296A9AFC,
+			0x296A9B00, 0x296A9B04, 0x296A9B08, 0x296A9B0C, 0x296A9B10, 0x296A9B14, 0x296A9B18, 0x296A9B1C,
+			0x296A9B20, 0x296A9B24, 0x296A9B28, 0x296A9B2C, 0x296A9B30, 0x296A9B34, 0x296A9B38, 0x296A9B3C,
+			0x296A9B40, 0x296A9B44, 0x296A9B48, 0x296A9B4C, 0x296A9B50, 0x296A9B54, 0x296A9B58, 0x296A9B5C,
+			0x296A9B60, 0x296A9B64, 0x296A9B68, 0x296A9B6C, 0x296A9B70, 0x296A9B74, 0x296A9B78, 0x296A9B7C,
+			0x296A9B80, 0x296A9B84, 0x296A9B88, 0x296A9B8C, 0x296A9B90, 0x296A9B94, 0x296A9B98, 0x296A9B9C,
+			0x296A9BA0, 0x296A9BA4, 0x296A9BA8, 0x296A9BAC, 0x296A9BB0, 0x296A9BB4, 0x296A9BB8, 0x296A9BBC,
+			0x296A9BC0, 0x296A9BC4, 0x296A9BC8, 0x296A9BCC, 0x296A9BD0, 0x296A9BD4, 0x296A9BD8, 0x296A9BDC,
+			0x296A9BE0, 0x296A9BE4, 0x296A9BE8, 0x296A9BEC, 0x296A9BF0, 0x296A9BF4, 0x296A9BF8, 0x296A9BFC,
+			0x296A9C00, 0x296A9C04, 0x296A9C08, 0x296A9C0C, 0x296A9C10, 0x296A9C14, 0x296A9C18, 0x296A9C1C,
+			0x296A9C20, 0x296A9C24, 0x296A9C28, 0x296A9C2C, 0x296A9C30, 0x296A9C34, 0x296A9C38, 0x296A9C3C,
+			0x296A9C40, 0x296A9C44, 0x296A9C48, 0x296A9C4C, 0x296A9C50, 0x296A9C54, 0x296A9C58, 0x296A9C5C,
+			0x296A9C60, 0x296A9C64, 0x296A9C68, 0x296A9C6C, 0x296A9C70, 0x296A9C74, 0x296A9C78, 0x296A9C7C,
+			0x296A9C80, 0x296A9C84, 0x296A9C88, 0x296A9C8C, 0x296A9C90, 0x296A9C94, 0x296A9C98, 0x296A9C9C,
+			0x296A9CA0, 0x296A9CA4, 0x296A9CA8, 0x296A9CAC, 0x296A9CB0, 0x296A9CB4, 0x296A9CB8, 0x296A9CBC,
+			0x296A9CC0, 0x296A9CC4, 0x296A9CC8, 0x296A9CCC, 0x296A9CD0, 0x296A9CD4, 0x296A9CD8, 0x296A9CDC,
+			0x296A9CE0, 0x296A9CE4, 0x296A9CE8, 0x296A9CEC, 0x296A9CF0, 0x296A9CF4, 0x296A9CF8, 0x296A9CFC,
+			0x296A9D00, 0x296A9D04, 0x296A9D08, 0x296A9D0C, 0x296A9D10, 0x296A9D14, 0x296A9D18, 0x296A9D1C,
+			0x296A9D20, 0x296A9D24, 0x296A9D28, 0x296A9D2C, 0x296A9D30, 0x296A9D34, 0x296A9D38, 0x296A9D3C,
+			0x296A9D40, 0x296A9D44, 0x296A9D48, 0x296A9D4C, 0x296A9D50, 0x296A9D54, 0x296A9D58, 0x296A9D5C,
+			0x296A9D60, 0x296A9D64, 0x296A9D68, 0x296A9D6C, 0x296A9D70, 0x296A9D74, 0x296A9D78, 0x296A9D7C,
+			0x296A9D80, 0x296A9D84, 0x296A9D88, 0x296A9D8C, 0x296A9D90, 0x296A9D94, 0x296A9D98, 0x296A9D9C,
+			0x296A9DA0, 0x296A9DA4, 0x296A9DA8, 0x296A9DAC, 0x296A9DB0, 0x296A9DB4, 0x296A9DB8, 0x296A9DBC,
+			0x296A9DC0, 0x296A9DC4, 0x296A9DC8, 0x296A9DCC, 0x296A9DD0, 0x296A9DD4, 0x296A9DD8, 0x296A9DDC,
+			0x296A9DE0, 0x296A9DE4, 0x296A9DE8, 0x296A9DEC, 0x296A9DF0, 0x296A9DF4, 0x296A9DF8, 0x296A9DFC,
+			0x296A9E00, 0x296A9E04, 0x296A9E08, 0x296A9E0C, 0x296A9E10, 0x296A9E14, 0x296A9E18, 0x296A9E1C,
+			0x296A9E20, 0x296A9E24, 0x296A9E28, 0x296A9E2C, 0x296A9E30, 0x296A9E34, 0x296A9E38, 0x296A9E3C,
+			0x296A9E40, 0x296A9E44, 0x296A9E48, 0x296A9E4C, 0x296A9E50, 0x296A9E54, 0x296A9E58, 0x296A9E5C,
+			0x296A9E60, 0x296A9E64, 0x296A9E68, 0x296A9E6C, 0x296A9E70, 0x296A9E74, 0x296A9E78, 0x296A9E7C,
+			0x296A9E80, 0x296A9E84, 0x296A9E88, 0x296A9E8C, 0x296A9E90, 0x296A9E94, 0x296A9E98, 0x296A9E9C,
+			0x296A9EA0, 0x296A9EA4, 0x296A9EA8, 0x296A9EAC, 0x296A9EB0, 0x296A9EB4, 0x296A9EB8, 0x296A9EBC,
+			0x296A9EC0, 0x296A9EC4, 0x296A9EC8, 0x296A9ECC, 0x296A9ED0, 0x296A9ED4, 0x296A9ED8, 0x296A9EDC,
+			0x296A9EE0, 0x296A9EE4, 0x296A9EE8, 0x296A9EEC, 0x296A9EF0, 0x296A9EF4, 0x296A9EF8, 0x296A9EFC,
+			0x296A9F00, 0x296A9F04, 0x296A9F08, 0x296A9F0C, 0x296A9F10, 0x296A9F14, 0x296A9F18, 0x296A9F1C,
+			0x296A9F20, 0x296A9F24, 0x296A9F28, 0x296A9F2C, 0x296A9F30, 0x296A9F34, 0x296A9F38, 0x296A9F3C,
+			0x296A9F40, 0x296A9F44, 0x296A9F48, 0x296A9F4C, 0x296A9F50, 0x296A9F54, 0x296A9F58, 0x296A9F5C,
+			0x296A9F60, 0x296A9F64, 0x296A9F68, 0x296A9F6C, 0x296A9F70, 0x296A9F74, 0x296A9F78, 0x296A9F7C,
+			0x296A9F80, 0x296A9F84, 0x296A9F88, 0x296A9F8C, 0x296A9F90, 0x296A9F94, 0x296A9F98, 0x296A9F9C,
+			0x296A9FA0, 0x296A9FA4, 0x296A9FA8, 0x296A9FAC, 0x296A9FB0, 0x296A9FB4, 0x296A9FB8, 0x296A9FBC,
+			0x296A9FC0, 0x296A9FC4, 0x296A9FC8, 0x296A9FCC, 0x296A9FD0, 0x296A9FD4, 0x296A9FD8, 0x296A9FDC,
+			0x296A9FE0, 0x296A9FE4, 0x296A9FE8, 0x296A9FEC, 0x296A9FF0, 0x296A9FF4, 0x296A9FF8, 0x296A9FFC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMDF_TBL_ADDR	gIM_R2Y_GMYBDF_Tbl_Addr[3] = {
+	{
+		{
+			0x294AA000, 0x294AA004, 0x294AA008, 0x294AA00C, 0x294AA010, 0x294AA014, 0x294AA018, 0x294AA01C,
+			0x294AA020, 0x294AA024, 0x294AA028, 0x294AA02C, 0x294AA030, 0x294AA034, 0x294AA038, 0x294AA03C,
+			0x294AA040, 0x294AA044, 0x294AA048, 0x294AA04C, 0x294AA050, 0x294AA054, 0x294AA058, 0x294AA05C,
+			0x294AA060, 0x294AA064, 0x294AA068, 0x294AA06C, 0x294AA070, 0x294AA074, 0x294AA078, 0x294AA07C,
+			0x294AA080, 0x294AA084, 0x294AA088, 0x294AA08C, 0x294AA090, 0x294AA094, 0x294AA098, 0x294AA09C,
+			0x294AA0A0, 0x294AA0A4, 0x294AA0A8, 0x294AA0AC, 0x294AA0B0, 0x294AA0B4, 0x294AA0B8, 0x294AA0BC,
+			0x294AA0C0, 0x294AA0C4, 0x294AA0C8, 0x294AA0CC, 0x294AA0D0, 0x294AA0D4, 0x294AA0D8, 0x294AA0DC,
+			0x294AA0E0, 0x294AA0E4, 0x294AA0E8, 0x294AA0EC, 0x294AA0F0, 0x294AA0F4, 0x294AA0F8, 0x294AA0FC,
+			0x294AA100, 0x294AA104, 0x294AA108, 0x294AA10C, 0x294AA110, 0x294AA114, 0x294AA118, 0x294AA11C,
+			0x294AA120, 0x294AA124, 0x294AA128, 0x294AA12C, 0x294AA130, 0x294AA134, 0x294AA138, 0x294AA13C,
+			0x294AA140, 0x294AA144, 0x294AA148, 0x294AA14C, 0x294AA150, 0x294AA154, 0x294AA158, 0x294AA15C,
+			0x294AA160, 0x294AA164, 0x294AA168, 0x294AA16C, 0x294AA170, 0x294AA174, 0x294AA178, 0x294AA17C,
+			0x294AA180, 0x294AA184, 0x294AA188, 0x294AA18C, 0x294AA190, 0x294AA194, 0x294AA198, 0x294AA19C,
+			0x294AA1A0, 0x294AA1A4, 0x294AA1A8, 0x294AA1AC, 0x294AA1B0, 0x294AA1B4, 0x294AA1B8, 0x294AA1BC,
+			0x294AA1C0, 0x294AA1C4, 0x294AA1C8, 0x294AA1CC, 0x294AA1D0, 0x294AA1D4, 0x294AA1D8, 0x294AA1DC,
+			0x294AA1E0, 0x294AA1E4, 0x294AA1E8, 0x294AA1EC, 0x294AA1F0, 0x294AA1F4, 0x294AA1F8, 0x294AA1FC,
+			0x294AA200, 0x294AA204, 0x294AA208, 0x294AA20C, 0x294AA210, 0x294AA214, 0x294AA218, 0x294AA21C,
+			0x294AA220, 0x294AA224, 0x294AA228, 0x294AA22C, 0x294AA230, 0x294AA234, 0x294AA238, 0x294AA23C,
+			0x294AA240, 0x294AA244, 0x294AA248, 0x294AA24C, 0x294AA250, 0x294AA254, 0x294AA258, 0x294AA25C,
+			0x294AA260, 0x294AA264, 0x294AA268, 0x294AA26C, 0x294AA270, 0x294AA274, 0x294AA278, 0x294AA27C,
+			0x294AA280, 0x294AA284, 0x294AA288, 0x294AA28C, 0x294AA290, 0x294AA294, 0x294AA298, 0x294AA29C,
+			0x294AA2A0, 0x294AA2A4, 0x294AA2A8, 0x294AA2AC, 0x294AA2B0, 0x294AA2B4, 0x294AA2B8, 0x294AA2BC,
+			0x294AA2C0, 0x294AA2C4, 0x294AA2C8, 0x294AA2CC, 0x294AA2D0, 0x294AA2D4, 0x294AA2D8, 0x294AA2DC,
+			0x294AA2E0, 0x294AA2E4, 0x294AA2E8, 0x294AA2EC, 0x294AA2F0, 0x294AA2F4, 0x294AA2F8, 0x294AA2FC,
+			0x294AA300, 0x294AA304, 0x294AA308, 0x294AA30C, 0x294AA310, 0x294AA314, 0x294AA318, 0x294AA31C,
+			0x294AA320, 0x294AA324, 0x294AA328, 0x294AA32C, 0x294AA330, 0x294AA334, 0x294AA338, 0x294AA33C,
+			0x294AA340, 0x294AA344, 0x294AA348, 0x294AA34C, 0x294AA350, 0x294AA354, 0x294AA358, 0x294AA35C,
+			0x294AA360, 0x294AA364, 0x294AA368, 0x294AA36C, 0x294AA370, 0x294AA374, 0x294AA378, 0x294AA37C,
+			0x294AA380, 0x294AA384, 0x294AA388, 0x294AA38C, 0x294AA390, 0x294AA394, 0x294AA398, 0x294AA39C,
+			0x294AA3A0, 0x294AA3A4, 0x294AA3A8, 0x294AA3AC, 0x294AA3B0, 0x294AA3B4, 0x294AA3B8, 0x294AA3BC,
+			0x294AA3C0, 0x294AA3C4, 0x294AA3C8, 0x294AA3CC, 0x294AA3D0, 0x294AA3D4, 0x294AA3D8, 0x294AA3DC,
+			0x294AA3E0, 0x294AA3E4, 0x294AA3E8, 0x294AA3EC, 0x294AA3F0, 0x294AA3F4, 0x294AA3F8, 0x294AA3FC,
+			0x294AA400, 0x294AA404, 0x294AA408, 0x294AA40C, 0x294AA410, 0x294AA414, 0x294AA418, 0x294AA41C,
+			0x294AA420, 0x294AA424, 0x294AA428, 0x294AA42C, 0x294AA430, 0x294AA434, 0x294AA438, 0x294AA43C,
+			0x294AA440, 0x294AA444, 0x294AA448, 0x294AA44C, 0x294AA450, 0x294AA454, 0x294AA458, 0x294AA45C,
+			0x294AA460, 0x294AA464, 0x294AA468, 0x294AA46C, 0x294AA470, 0x294AA474, 0x294AA478, 0x294AA47C,
+			0x294AA480, 0x294AA484, 0x294AA488, 0x294AA48C, 0x294AA490, 0x294AA494, 0x294AA498, 0x294AA49C,
+			0x294AA4A0, 0x294AA4A4, 0x294AA4A8, 0x294AA4AC, 0x294AA4B0, 0x294AA4B4, 0x294AA4B8, 0x294AA4BC,
+			0x294AA4C0, 0x294AA4C4, 0x294AA4C8, 0x294AA4CC, 0x294AA4D0, 0x294AA4D4, 0x294AA4D8, 0x294AA4DC,
+			0x294AA4E0, 0x294AA4E4, 0x294AA4E8, 0x294AA4EC, 0x294AA4F0, 0x294AA4F4, 0x294AA4F8, 0x294AA4FC,
+			0x294AA500, 0x294AA504, 0x294AA508, 0x294AA50C, 0x294AA510, 0x294AA514, 0x294AA518, 0x294AA51C,
+			0x294AA520, 0x294AA524, 0x294AA528, 0x294AA52C, 0x294AA530, 0x294AA534, 0x294AA538, 0x294AA53C,
+			0x294AA540, 0x294AA544, 0x294AA548, 0x294AA54C, 0x294AA550, 0x294AA554, 0x294AA558, 0x294AA55C,
+			0x294AA560, 0x294AA564, 0x294AA568, 0x294AA56C, 0x294AA570, 0x294AA574, 0x294AA578, 0x294AA57C,
+			0x294AA580, 0x294AA584, 0x294AA588, 0x294AA58C, 0x294AA590, 0x294AA594, 0x294AA598, 0x294AA59C,
+			0x294AA5A0, 0x294AA5A4, 0x294AA5A8, 0x294AA5AC, 0x294AA5B0, 0x294AA5B4, 0x294AA5B8, 0x294AA5BC,
+			0x294AA5C0, 0x294AA5C4, 0x294AA5C8, 0x294AA5CC, 0x294AA5D0, 0x294AA5D4, 0x294AA5D8, 0x294AA5DC,
+			0x294AA5E0, 0x294AA5E4, 0x294AA5E8, 0x294AA5EC, 0x294AA5F0, 0x294AA5F4, 0x294AA5F8, 0x294AA5FC,
+			0x294AA600, 0x294AA604, 0x294AA608, 0x294AA60C, 0x294AA610, 0x294AA614, 0x294AA618, 0x294AA61C,
+			0x294AA620, 0x294AA624, 0x294AA628, 0x294AA62C, 0x294AA630, 0x294AA634, 0x294AA638, 0x294AA63C,
+			0x294AA640, 0x294AA644, 0x294AA648, 0x294AA64C, 0x294AA650, 0x294AA654, 0x294AA658, 0x294AA65C,
+			0x294AA660, 0x294AA664, 0x294AA668, 0x294AA66C, 0x294AA670, 0x294AA674, 0x294AA678, 0x294AA67C,
+			0x294AA680, 0x294AA684, 0x294AA688, 0x294AA68C, 0x294AA690, 0x294AA694, 0x294AA698, 0x294AA69C,
+			0x294AA6A0, 0x294AA6A4, 0x294AA6A8, 0x294AA6AC, 0x294AA6B0, 0x294AA6B4, 0x294AA6B8, 0x294AA6BC,
+			0x294AA6C0, 0x294AA6C4, 0x294AA6C8, 0x294AA6CC, 0x294AA6D0, 0x294AA6D4, 0x294AA6D8, 0x294AA6DC,
+			0x294AA6E0, 0x294AA6E4, 0x294AA6E8, 0x294AA6EC, 0x294AA6F0, 0x294AA6F4, 0x294AA6F8, 0x294AA6FC,
+			0x294AA700, 0x294AA704, 0x294AA708, 0x294AA70C, 0x294AA710, 0x294AA714, 0x294AA718, 0x294AA71C,
+			0x294AA720, 0x294AA724, 0x294AA728, 0x294AA72C, 0x294AA730, 0x294AA734, 0x294AA738, 0x294AA73C,
+			0x294AA740, 0x294AA744, 0x294AA748, 0x294AA74C, 0x294AA750, 0x294AA754, 0x294AA758, 0x294AA75C,
+			0x294AA760, 0x294AA764, 0x294AA768, 0x294AA76C, 0x294AA770, 0x294AA774, 0x294AA778, 0x294AA77C,
+			0x294AA780, 0x294AA784, 0x294AA788, 0x294AA78C, 0x294AA790, 0x294AA794, 0x294AA798, 0x294AA79C,
+			0x294AA7A0, 0x294AA7A4, 0x294AA7A8, 0x294AA7AC, 0x294AA7B0, 0x294AA7B4, 0x294AA7B8, 0x294AA7BC,
+			0x294AA7C0, 0x294AA7C4, 0x294AA7C8, 0x294AA7CC, 0x294AA7D0, 0x294AA7D4, 0x294AA7D8, 0x294AA7DC,
+			0x294AA7E0, 0x294AA7E4, 0x294AA7E8, 0x294AA7EC, 0x294AA7F0, 0x294AA7F4, 0x294AA7F8, 0x294AA7FC,
+		},
+	},
+	{
+		{
+			0x295AA000, 0x295AA004, 0x295AA008, 0x295AA00C, 0x295AA010, 0x295AA014, 0x295AA018, 0x295AA01C,
+			0x295AA020, 0x295AA024, 0x295AA028, 0x295AA02C, 0x295AA030, 0x295AA034, 0x295AA038, 0x295AA03C,
+			0x295AA040, 0x295AA044, 0x295AA048, 0x295AA04C, 0x295AA050, 0x295AA054, 0x295AA058, 0x295AA05C,
+			0x295AA060, 0x295AA064, 0x295AA068, 0x295AA06C, 0x295AA070, 0x295AA074, 0x295AA078, 0x295AA07C,
+			0x295AA080, 0x295AA084, 0x295AA088, 0x295AA08C, 0x295AA090, 0x295AA094, 0x295AA098, 0x295AA09C,
+			0x295AA0A0, 0x295AA0A4, 0x295AA0A8, 0x295AA0AC, 0x295AA0B0, 0x295AA0B4, 0x295AA0B8, 0x295AA0BC,
+			0x295AA0C0, 0x295AA0C4, 0x295AA0C8, 0x295AA0CC, 0x295AA0D0, 0x295AA0D4, 0x295AA0D8, 0x295AA0DC,
+			0x295AA0E0, 0x295AA0E4, 0x295AA0E8, 0x295AA0EC, 0x295AA0F0, 0x295AA0F4, 0x295AA0F8, 0x295AA0FC,
+			0x295AA100, 0x295AA104, 0x295AA108, 0x295AA10C, 0x295AA110, 0x295AA114, 0x295AA118, 0x295AA11C,
+			0x295AA120, 0x295AA124, 0x295AA128, 0x295AA12C, 0x295AA130, 0x295AA134, 0x295AA138, 0x295AA13C,
+			0x295AA140, 0x295AA144, 0x295AA148, 0x295AA14C, 0x295AA150, 0x295AA154, 0x295AA158, 0x295AA15C,
+			0x295AA160, 0x295AA164, 0x295AA168, 0x295AA16C, 0x295AA170, 0x295AA174, 0x295AA178, 0x295AA17C,
+			0x295AA180, 0x295AA184, 0x295AA188, 0x295AA18C, 0x295AA190, 0x295AA194, 0x295AA198, 0x295AA19C,
+			0x295AA1A0, 0x295AA1A4, 0x295AA1A8, 0x295AA1AC, 0x295AA1B0, 0x295AA1B4, 0x295AA1B8, 0x295AA1BC,
+			0x295AA1C0, 0x295AA1C4, 0x295AA1C8, 0x295AA1CC, 0x295AA1D0, 0x295AA1D4, 0x295AA1D8, 0x295AA1DC,
+			0x295AA1E0, 0x295AA1E4, 0x295AA1E8, 0x295AA1EC, 0x295AA1F0, 0x295AA1F4, 0x295AA1F8, 0x295AA1FC,
+			0x295AA200, 0x295AA204, 0x295AA208, 0x295AA20C, 0x295AA210, 0x295AA214, 0x295AA218, 0x295AA21C,
+			0x295AA220, 0x295AA224, 0x295AA228, 0x295AA22C, 0x295AA230, 0x295AA234, 0x295AA238, 0x295AA23C,
+			0x295AA240, 0x295AA244, 0x295AA248, 0x295AA24C, 0x295AA250, 0x295AA254, 0x295AA258, 0x295AA25C,
+			0x295AA260, 0x295AA264, 0x295AA268, 0x295AA26C, 0x295AA270, 0x295AA274, 0x295AA278, 0x295AA27C,
+			0x295AA280, 0x295AA284, 0x295AA288, 0x295AA28C, 0x295AA290, 0x295AA294, 0x295AA298, 0x295AA29C,
+			0x295AA2A0, 0x295AA2A4, 0x295AA2A8, 0x295AA2AC, 0x295AA2B0, 0x295AA2B4, 0x295AA2B8, 0x295AA2BC,
+			0x295AA2C0, 0x295AA2C4, 0x295AA2C8, 0x295AA2CC, 0x295AA2D0, 0x295AA2D4, 0x295AA2D8, 0x295AA2DC,
+			0x295AA2E0, 0x295AA2E4, 0x295AA2E8, 0x295AA2EC, 0x295AA2F0, 0x295AA2F4, 0x295AA2F8, 0x295AA2FC,
+			0x295AA300, 0x295AA304, 0x295AA308, 0x295AA30C, 0x295AA310, 0x295AA314, 0x295AA318, 0x295AA31C,
+			0x295AA320, 0x295AA324, 0x295AA328, 0x295AA32C, 0x295AA330, 0x295AA334, 0x295AA338, 0x295AA33C,
+			0x295AA340, 0x295AA344, 0x295AA348, 0x295AA34C, 0x295AA350, 0x295AA354, 0x295AA358, 0x295AA35C,
+			0x295AA360, 0x295AA364, 0x295AA368, 0x295AA36C, 0x295AA370, 0x295AA374, 0x295AA378, 0x295AA37C,
+			0x295AA380, 0x295AA384, 0x295AA388, 0x295AA38C, 0x295AA390, 0x295AA394, 0x295AA398, 0x295AA39C,
+			0x295AA3A0, 0x295AA3A4, 0x295AA3A8, 0x295AA3AC, 0x295AA3B0, 0x295AA3B4, 0x295AA3B8, 0x295AA3BC,
+			0x295AA3C0, 0x295AA3C4, 0x295AA3C8, 0x295AA3CC, 0x295AA3D0, 0x295AA3D4, 0x295AA3D8, 0x295AA3DC,
+			0x295AA3E0, 0x295AA3E4, 0x295AA3E8, 0x295AA3EC, 0x295AA3F0, 0x295AA3F4, 0x295AA3F8, 0x295AA3FC,
+			0x295AA400, 0x295AA404, 0x295AA408, 0x295AA40C, 0x295AA410, 0x295AA414, 0x295AA418, 0x295AA41C,
+			0x295AA420, 0x295AA424, 0x295AA428, 0x295AA42C, 0x295AA430, 0x295AA434, 0x295AA438, 0x295AA43C,
+			0x295AA440, 0x295AA444, 0x295AA448, 0x295AA44C, 0x295AA450, 0x295AA454, 0x295AA458, 0x295AA45C,
+			0x295AA460, 0x295AA464, 0x295AA468, 0x295AA46C, 0x295AA470, 0x295AA474, 0x295AA478, 0x295AA47C,
+			0x295AA480, 0x295AA484, 0x295AA488, 0x295AA48C, 0x295AA490, 0x295AA494, 0x295AA498, 0x295AA49C,
+			0x295AA4A0, 0x295AA4A4, 0x295AA4A8, 0x295AA4AC, 0x295AA4B0, 0x295AA4B4, 0x295AA4B8, 0x295AA4BC,
+			0x295AA4C0, 0x295AA4C4, 0x295AA4C8, 0x295AA4CC, 0x295AA4D0, 0x295AA4D4, 0x295AA4D8, 0x295AA4DC,
+			0x295AA4E0, 0x295AA4E4, 0x295AA4E8, 0x295AA4EC, 0x295AA4F0, 0x295AA4F4, 0x295AA4F8, 0x295AA4FC,
+			0x295AA500, 0x295AA504, 0x295AA508, 0x295AA50C, 0x295AA510, 0x295AA514, 0x295AA518, 0x295AA51C,
+			0x295AA520, 0x295AA524, 0x295AA528, 0x295AA52C, 0x295AA530, 0x295AA534, 0x295AA538, 0x295AA53C,
+			0x295AA540, 0x295AA544, 0x295AA548, 0x295AA54C, 0x295AA550, 0x295AA554, 0x295AA558, 0x295AA55C,
+			0x295AA560, 0x295AA564, 0x295AA568, 0x295AA56C, 0x295AA570, 0x295AA574, 0x295AA578, 0x295AA57C,
+			0x295AA580, 0x295AA584, 0x295AA588, 0x295AA58C, 0x295AA590, 0x295AA594, 0x295AA598, 0x295AA59C,
+			0x295AA5A0, 0x295AA5A4, 0x295AA5A8, 0x295AA5AC, 0x295AA5B0, 0x295AA5B4, 0x295AA5B8, 0x295AA5BC,
+			0x295AA5C0, 0x295AA5C4, 0x295AA5C8, 0x295AA5CC, 0x295AA5D0, 0x295AA5D4, 0x295AA5D8, 0x295AA5DC,
+			0x295AA5E0, 0x295AA5E4, 0x295AA5E8, 0x295AA5EC, 0x295AA5F0, 0x295AA5F4, 0x295AA5F8, 0x295AA5FC,
+			0x295AA600, 0x295AA604, 0x295AA608, 0x295AA60C, 0x295AA610, 0x295AA614, 0x295AA618, 0x295AA61C,
+			0x295AA620, 0x295AA624, 0x295AA628, 0x295AA62C, 0x295AA630, 0x295AA634, 0x295AA638, 0x295AA63C,
+			0x295AA640, 0x295AA644, 0x295AA648, 0x295AA64C, 0x295AA650, 0x295AA654, 0x295AA658, 0x295AA65C,
+			0x295AA660, 0x295AA664, 0x295AA668, 0x295AA66C, 0x295AA670, 0x295AA674, 0x295AA678, 0x295AA67C,
+			0x295AA680, 0x295AA684, 0x295AA688, 0x295AA68C, 0x295AA690, 0x295AA694, 0x295AA698, 0x295AA69C,
+			0x295AA6A0, 0x295AA6A4, 0x295AA6A8, 0x295AA6AC, 0x295AA6B0, 0x295AA6B4, 0x295AA6B8, 0x295AA6BC,
+			0x295AA6C0, 0x295AA6C4, 0x295AA6C8, 0x295AA6CC, 0x295AA6D0, 0x295AA6D4, 0x295AA6D8, 0x295AA6DC,
+			0x295AA6E0, 0x295AA6E4, 0x295AA6E8, 0x295AA6EC, 0x295AA6F0, 0x295AA6F4, 0x295AA6F8, 0x295AA6FC,
+			0x295AA700, 0x295AA704, 0x295AA708, 0x295AA70C, 0x295AA710, 0x295AA714, 0x295AA718, 0x295AA71C,
+			0x295AA720, 0x295AA724, 0x295AA728, 0x295AA72C, 0x295AA730, 0x295AA734, 0x295AA738, 0x295AA73C,
+			0x295AA740, 0x295AA744, 0x295AA748, 0x295AA74C, 0x295AA750, 0x295AA754, 0x295AA758, 0x295AA75C,
+			0x295AA760, 0x295AA764, 0x295AA768, 0x295AA76C, 0x295AA770, 0x295AA774, 0x295AA778, 0x295AA77C,
+			0x295AA780, 0x295AA784, 0x295AA788, 0x295AA78C, 0x295AA790, 0x295AA794, 0x295AA798, 0x295AA79C,
+			0x295AA7A0, 0x295AA7A4, 0x295AA7A8, 0x295AA7AC, 0x295AA7B0, 0x295AA7B4, 0x295AA7B8, 0x295AA7BC,
+			0x295AA7C0, 0x295AA7C4, 0x295AA7C8, 0x295AA7CC, 0x295AA7D0, 0x295AA7D4, 0x295AA7D8, 0x295AA7DC,
+			0x295AA7E0, 0x295AA7E4, 0x295AA7E8, 0x295AA7EC, 0x295AA7F0, 0x295AA7F4, 0x295AA7F8, 0x295AA7FC,
+		},
+	},
+	{
+		{
+			0x296AA000, 0x296AA004, 0x296AA008, 0x296AA00C, 0x296AA010, 0x296AA014, 0x296AA018, 0x296AA01C,
+			0x296AA020, 0x296AA024, 0x296AA028, 0x296AA02C, 0x296AA030, 0x296AA034, 0x296AA038, 0x296AA03C,
+			0x296AA040, 0x296AA044, 0x296AA048, 0x296AA04C, 0x296AA050, 0x296AA054, 0x296AA058, 0x296AA05C,
+			0x296AA060, 0x296AA064, 0x296AA068, 0x296AA06C, 0x296AA070, 0x296AA074, 0x296AA078, 0x296AA07C,
+			0x296AA080, 0x296AA084, 0x296AA088, 0x296AA08C, 0x296AA090, 0x296AA094, 0x296AA098, 0x296AA09C,
+			0x296AA0A0, 0x296AA0A4, 0x296AA0A8, 0x296AA0AC, 0x296AA0B0, 0x296AA0B4, 0x296AA0B8, 0x296AA0BC,
+			0x296AA0C0, 0x296AA0C4, 0x296AA0C8, 0x296AA0CC, 0x296AA0D0, 0x296AA0D4, 0x296AA0D8, 0x296AA0DC,
+			0x296AA0E0, 0x296AA0E4, 0x296AA0E8, 0x296AA0EC, 0x296AA0F0, 0x296AA0F4, 0x296AA0F8, 0x296AA0FC,
+			0x296AA100, 0x296AA104, 0x296AA108, 0x296AA10C, 0x296AA110, 0x296AA114, 0x296AA118, 0x296AA11C,
+			0x296AA120, 0x296AA124, 0x296AA128, 0x296AA12C, 0x296AA130, 0x296AA134, 0x296AA138, 0x296AA13C,
+			0x296AA140, 0x296AA144, 0x296AA148, 0x296AA14C, 0x296AA150, 0x296AA154, 0x296AA158, 0x296AA15C,
+			0x296AA160, 0x296AA164, 0x296AA168, 0x296AA16C, 0x296AA170, 0x296AA174, 0x296AA178, 0x296AA17C,
+			0x296AA180, 0x296AA184, 0x296AA188, 0x296AA18C, 0x296AA190, 0x296AA194, 0x296AA198, 0x296AA19C,
+			0x296AA1A0, 0x296AA1A4, 0x296AA1A8, 0x296AA1AC, 0x296AA1B0, 0x296AA1B4, 0x296AA1B8, 0x296AA1BC,
+			0x296AA1C0, 0x296AA1C4, 0x296AA1C8, 0x296AA1CC, 0x296AA1D0, 0x296AA1D4, 0x296AA1D8, 0x296AA1DC,
+			0x296AA1E0, 0x296AA1E4, 0x296AA1E8, 0x296AA1EC, 0x296AA1F0, 0x296AA1F4, 0x296AA1F8, 0x296AA1FC,
+			0x296AA200, 0x296AA204, 0x296AA208, 0x296AA20C, 0x296AA210, 0x296AA214, 0x296AA218, 0x296AA21C,
+			0x296AA220, 0x296AA224, 0x296AA228, 0x296AA22C, 0x296AA230, 0x296AA234, 0x296AA238, 0x296AA23C,
+			0x296AA240, 0x296AA244, 0x296AA248, 0x296AA24C, 0x296AA250, 0x296AA254, 0x296AA258, 0x296AA25C,
+			0x296AA260, 0x296AA264, 0x296AA268, 0x296AA26C, 0x296AA270, 0x296AA274, 0x296AA278, 0x296AA27C,
+			0x296AA280, 0x296AA284, 0x296AA288, 0x296AA28C, 0x296AA290, 0x296AA294, 0x296AA298, 0x296AA29C,
+			0x296AA2A0, 0x296AA2A4, 0x296AA2A8, 0x296AA2AC, 0x296AA2B0, 0x296AA2B4, 0x296AA2B8, 0x296AA2BC,
+			0x296AA2C0, 0x296AA2C4, 0x296AA2C8, 0x296AA2CC, 0x296AA2D0, 0x296AA2D4, 0x296AA2D8, 0x296AA2DC,
+			0x296AA2E0, 0x296AA2E4, 0x296AA2E8, 0x296AA2EC, 0x296AA2F0, 0x296AA2F4, 0x296AA2F8, 0x296AA2FC,
+			0x296AA300, 0x296AA304, 0x296AA308, 0x296AA30C, 0x296AA310, 0x296AA314, 0x296AA318, 0x296AA31C,
+			0x296AA320, 0x296AA324, 0x296AA328, 0x296AA32C, 0x296AA330, 0x296AA334, 0x296AA338, 0x296AA33C,
+			0x296AA340, 0x296AA344, 0x296AA348, 0x296AA34C, 0x296AA350, 0x296AA354, 0x296AA358, 0x296AA35C,
+			0x296AA360, 0x296AA364, 0x296AA368, 0x296AA36C, 0x296AA370, 0x296AA374, 0x296AA378, 0x296AA37C,
+			0x296AA380, 0x296AA384, 0x296AA388, 0x296AA38C, 0x296AA390, 0x296AA394, 0x296AA398, 0x296AA39C,
+			0x296AA3A0, 0x296AA3A4, 0x296AA3A8, 0x296AA3AC, 0x296AA3B0, 0x296AA3B4, 0x296AA3B8, 0x296AA3BC,
+			0x296AA3C0, 0x296AA3C4, 0x296AA3C8, 0x296AA3CC, 0x296AA3D0, 0x296AA3D4, 0x296AA3D8, 0x296AA3DC,
+			0x296AA3E0, 0x296AA3E4, 0x296AA3E8, 0x296AA3EC, 0x296AA3F0, 0x296AA3F4, 0x296AA3F8, 0x296AA3FC,
+			0x296AA400, 0x296AA404, 0x296AA408, 0x296AA40C, 0x296AA410, 0x296AA414, 0x296AA418, 0x296AA41C,
+			0x296AA420, 0x296AA424, 0x296AA428, 0x296AA42C, 0x296AA430, 0x296AA434, 0x296AA438, 0x296AA43C,
+			0x296AA440, 0x296AA444, 0x296AA448, 0x296AA44C, 0x296AA450, 0x296AA454, 0x296AA458, 0x296AA45C,
+			0x296AA460, 0x296AA464, 0x296AA468, 0x296AA46C, 0x296AA470, 0x296AA474, 0x296AA478, 0x296AA47C,
+			0x296AA480, 0x296AA484, 0x296AA488, 0x296AA48C, 0x296AA490, 0x296AA494, 0x296AA498, 0x296AA49C,
+			0x296AA4A0, 0x296AA4A4, 0x296AA4A8, 0x296AA4AC, 0x296AA4B0, 0x296AA4B4, 0x296AA4B8, 0x296AA4BC,
+			0x296AA4C0, 0x296AA4C4, 0x296AA4C8, 0x296AA4CC, 0x296AA4D0, 0x296AA4D4, 0x296AA4D8, 0x296AA4DC,
+			0x296AA4E0, 0x296AA4E4, 0x296AA4E8, 0x296AA4EC, 0x296AA4F0, 0x296AA4F4, 0x296AA4F8, 0x296AA4FC,
+			0x296AA500, 0x296AA504, 0x296AA508, 0x296AA50C, 0x296AA510, 0x296AA514, 0x296AA518, 0x296AA51C,
+			0x296AA520, 0x296AA524, 0x296AA528, 0x296AA52C, 0x296AA530, 0x296AA534, 0x296AA538, 0x296AA53C,
+			0x296AA540, 0x296AA544, 0x296AA548, 0x296AA54C, 0x296AA550, 0x296AA554, 0x296AA558, 0x296AA55C,
+			0x296AA560, 0x296AA564, 0x296AA568, 0x296AA56C, 0x296AA570, 0x296AA574, 0x296AA578, 0x296AA57C,
+			0x296AA580, 0x296AA584, 0x296AA588, 0x296AA58C, 0x296AA590, 0x296AA594, 0x296AA598, 0x296AA59C,
+			0x296AA5A0, 0x296AA5A4, 0x296AA5A8, 0x296AA5AC, 0x296AA5B0, 0x296AA5B4, 0x296AA5B8, 0x296AA5BC,
+			0x296AA5C0, 0x296AA5C4, 0x296AA5C8, 0x296AA5CC, 0x296AA5D0, 0x296AA5D4, 0x296AA5D8, 0x296AA5DC,
+			0x296AA5E0, 0x296AA5E4, 0x296AA5E8, 0x296AA5EC, 0x296AA5F0, 0x296AA5F4, 0x296AA5F8, 0x296AA5FC,
+			0x296AA600, 0x296AA604, 0x296AA608, 0x296AA60C, 0x296AA610, 0x296AA614, 0x296AA618, 0x296AA61C,
+			0x296AA620, 0x296AA624, 0x296AA628, 0x296AA62C, 0x296AA630, 0x296AA634, 0x296AA638, 0x296AA63C,
+			0x296AA640, 0x296AA644, 0x296AA648, 0x296AA64C, 0x296AA650, 0x296AA654, 0x296AA658, 0x296AA65C,
+			0x296AA660, 0x296AA664, 0x296AA668, 0x296AA66C, 0x296AA670, 0x296AA674, 0x296AA678, 0x296AA67C,
+			0x296AA680, 0x296AA684, 0x296AA688, 0x296AA68C, 0x296AA690, 0x296AA694, 0x296AA698, 0x296AA69C,
+			0x296AA6A0, 0x296AA6A4, 0x296AA6A8, 0x296AA6AC, 0x296AA6B0, 0x296AA6B4, 0x296AA6B8, 0x296AA6BC,
+			0x296AA6C0, 0x296AA6C4, 0x296AA6C8, 0x296AA6CC, 0x296AA6D0, 0x296AA6D4, 0x296AA6D8, 0x296AA6DC,
+			0x296AA6E0, 0x296AA6E4, 0x296AA6E8, 0x296AA6EC, 0x296AA6F0, 0x296AA6F4, 0x296AA6F8, 0x296AA6FC,
+			0x296AA700, 0x296AA704, 0x296AA708, 0x296AA70C, 0x296AA710, 0x296AA714, 0x296AA718, 0x296AA71C,
+			0x296AA720, 0x296AA724, 0x296AA728, 0x296AA72C, 0x296AA730, 0x296AA734, 0x296AA738, 0x296AA73C,
+			0x296AA740, 0x296AA744, 0x296AA748, 0x296AA74C, 0x296AA750, 0x296AA754, 0x296AA758, 0x296AA75C,
+			0x296AA760, 0x296AA764, 0x296AA768, 0x296AA76C, 0x296AA770, 0x296AA774, 0x296AA778, 0x296AA77C,
+			0x296AA780, 0x296AA784, 0x296AA788, 0x296AA78C, 0x296AA790, 0x296AA794, 0x296AA798, 0x296AA79C,
+			0x296AA7A0, 0x296AA7A4, 0x296AA7A8, 0x296AA7AC, 0x296AA7B0, 0x296AA7B4, 0x296AA7B8, 0x296AA7BC,
+			0x296AA7C0, 0x296AA7C4, 0x296AA7C8, 0x296AA7CC, 0x296AA7D0, 0x296AA7D4, 0x296AA7D8, 0x296AA7DC,
+			0x296AA7E0, 0x296AA7E4, 0x296AA7E8, 0x296AA7EC, 0x296AA7F0, 0x296AA7F4, 0x296AA7F8, 0x296AA7FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMFL_TBL_ADDR	gIM_R2Y_GMRGBFL_Tbl_Addr[3] = {
+	{
+		{
+			0x294AA800, 0x294AA804, 0x294AA808, 0x294AA80C, 0x294AA810, 0x294AA814, 0x294AA818, 0x294AA81C,
+			0x294AA820, 0x294AA824, 0x294AA828, 0x294AA82C, 0x294AA830, 0x294AA834, 0x294AA838, 0x294AA83C,
+			0x294AA840, 0x294AA844, 0x294AA848, 0x294AA84C, 0x294AA850, 0x294AA854, 0x294AA858, 0x294AA85C,
+			0x294AA860, 0x294AA864, 0x294AA868, 0x294AA86C, 0x294AA870, 0x294AA874, 0x294AA878, 0x294AA87C,
+			0x294AA880, 0x294AA884, 0x294AA888, 0x294AA88C, 0x294AA890, 0x294AA894, 0x294AA898, 0x294AA89C,
+			0x294AA8A0, 0x294AA8A4, 0x294AA8A8, 0x294AA8AC, 0x294AA8B0, 0x294AA8B4, 0x294AA8B8, 0x294AA8BC,
+			0x294AA8C0, 0x294AA8C4, 0x294AA8C8, 0x294AA8CC, 0x294AA8D0, 0x294AA8D4, 0x294AA8D8, 0x294AA8DC,
+			0x294AA8E0, 0x294AA8E4, 0x294AA8E8, 0x294AA8EC, 0x294AA8F0, 0x294AA8F4, 0x294AA8F8, 0x294AA8FC,
+			0x294AA900, 0x294AA904, 0x294AA908, 0x294AA90C, 0x294AA910, 0x294AA914, 0x294AA918, 0x294AA91C,
+			0x294AA920, 0x294AA924, 0x294AA928, 0x294AA92C, 0x294AA930, 0x294AA934, 0x294AA938, 0x294AA93C,
+			0x294AA940, 0x294AA944, 0x294AA948, 0x294AA94C, 0x294AA950, 0x294AA954, 0x294AA958, 0x294AA95C,
+			0x294AA960, 0x294AA964, 0x294AA968, 0x294AA96C, 0x294AA970, 0x294AA974, 0x294AA978, 0x294AA97C,
+			0x294AA980, 0x294AA984, 0x294AA988, 0x294AA98C, 0x294AA990, 0x294AA994, 0x294AA998, 0x294AA99C,
+			0x294AA9A0, 0x294AA9A4, 0x294AA9A8, 0x294AA9AC, 0x294AA9B0, 0x294AA9B4, 0x294AA9B8, 0x294AA9BC,
+			0x294AA9C0, 0x294AA9C4, 0x294AA9C8, 0x294AA9CC, 0x294AA9D0, 0x294AA9D4, 0x294AA9D8, 0x294AA9DC,
+			0x294AA9E0, 0x294AA9E4, 0x294AA9E8, 0x294AA9EC, 0x294AA9F0, 0x294AA9F4, 0x294AA9F8, 0x294AA9FC,
+		},
+	},
+	{
+		{
+			0x295AA800, 0x295AA804, 0x295AA808, 0x295AA80C, 0x295AA810, 0x295AA814, 0x295AA818, 0x295AA81C,
+			0x295AA820, 0x295AA824, 0x295AA828, 0x295AA82C, 0x295AA830, 0x295AA834, 0x295AA838, 0x295AA83C,
+			0x295AA840, 0x295AA844, 0x295AA848, 0x295AA84C, 0x295AA850, 0x295AA854, 0x295AA858, 0x295AA85C,
+			0x295AA860, 0x295AA864, 0x295AA868, 0x295AA86C, 0x295AA870, 0x295AA874, 0x295AA878, 0x295AA87C,
+			0x295AA880, 0x295AA884, 0x295AA888, 0x295AA88C, 0x295AA890, 0x295AA894, 0x295AA898, 0x295AA89C,
+			0x295AA8A0, 0x295AA8A4, 0x295AA8A8, 0x295AA8AC, 0x295AA8B0, 0x295AA8B4, 0x295AA8B8, 0x295AA8BC,
+			0x295AA8C0, 0x295AA8C4, 0x295AA8C8, 0x295AA8CC, 0x295AA8D0, 0x295AA8D4, 0x295AA8D8, 0x295AA8DC,
+			0x295AA8E0, 0x295AA8E4, 0x295AA8E8, 0x295AA8EC, 0x295AA8F0, 0x295AA8F4, 0x295AA8F8, 0x295AA8FC,
+			0x295AA900, 0x295AA904, 0x295AA908, 0x295AA90C, 0x295AA910, 0x295AA914, 0x295AA918, 0x295AA91C,
+			0x295AA920, 0x295AA924, 0x295AA928, 0x295AA92C, 0x295AA930, 0x295AA934, 0x295AA938, 0x295AA93C,
+			0x295AA940, 0x295AA944, 0x295AA948, 0x295AA94C, 0x295AA950, 0x295AA954, 0x295AA958, 0x295AA95C,
+			0x295AA960, 0x295AA964, 0x295AA968, 0x295AA96C, 0x295AA970, 0x295AA974, 0x295AA978, 0x295AA97C,
+			0x295AA980, 0x295AA984, 0x295AA988, 0x295AA98C, 0x295AA990, 0x295AA994, 0x295AA998, 0x295AA99C,
+			0x295AA9A0, 0x295AA9A4, 0x295AA9A8, 0x295AA9AC, 0x295AA9B0, 0x295AA9B4, 0x295AA9B8, 0x295AA9BC,
+			0x295AA9C0, 0x295AA9C4, 0x295AA9C8, 0x295AA9CC, 0x295AA9D0, 0x295AA9D4, 0x295AA9D8, 0x295AA9DC,
+			0x295AA9E0, 0x295AA9E4, 0x295AA9E8, 0x295AA9EC, 0x295AA9F0, 0x295AA9F4, 0x295AA9F8, 0x295AA9FC,
+		},
+	},
+	{
+		{
+			0x296AA800, 0x296AA804, 0x296AA808, 0x296AA80C, 0x296AA810, 0x296AA814, 0x296AA818, 0x296AA81C,
+			0x296AA820, 0x296AA824, 0x296AA828, 0x296AA82C, 0x296AA830, 0x296AA834, 0x296AA838, 0x296AA83C,
+			0x296AA840, 0x296AA844, 0x296AA848, 0x296AA84C, 0x296AA850, 0x296AA854, 0x296AA858, 0x296AA85C,
+			0x296AA860, 0x296AA864, 0x296AA868, 0x296AA86C, 0x296AA870, 0x296AA874, 0x296AA878, 0x296AA87C,
+			0x296AA880, 0x296AA884, 0x296AA888, 0x296AA88C, 0x296AA890, 0x296AA894, 0x296AA898, 0x296AA89C,
+			0x296AA8A0, 0x296AA8A4, 0x296AA8A8, 0x296AA8AC, 0x296AA8B0, 0x296AA8B4, 0x296AA8B8, 0x296AA8BC,
+			0x296AA8C0, 0x296AA8C4, 0x296AA8C8, 0x296AA8CC, 0x296AA8D0, 0x296AA8D4, 0x296AA8D8, 0x296AA8DC,
+			0x296AA8E0, 0x296AA8E4, 0x296AA8E8, 0x296AA8EC, 0x296AA8F0, 0x296AA8F4, 0x296AA8F8, 0x296AA8FC,
+			0x296AA900, 0x296AA904, 0x296AA908, 0x296AA90C, 0x296AA910, 0x296AA914, 0x296AA918, 0x296AA91C,
+			0x296AA920, 0x296AA924, 0x296AA928, 0x296AA92C, 0x296AA930, 0x296AA934, 0x296AA938, 0x296AA93C,
+			0x296AA940, 0x296AA944, 0x296AA948, 0x296AA94C, 0x296AA950, 0x296AA954, 0x296AA958, 0x296AA95C,
+			0x296AA960, 0x296AA964, 0x296AA968, 0x296AA96C, 0x296AA970, 0x296AA974, 0x296AA978, 0x296AA97C,
+			0x296AA980, 0x296AA984, 0x296AA988, 0x296AA98C, 0x296AA990, 0x296AA994, 0x296AA998, 0x296AA99C,
+			0x296AA9A0, 0x296AA9A4, 0x296AA9A8, 0x296AA9AC, 0x296AA9B0, 0x296AA9B4, 0x296AA9B8, 0x296AA9BC,
+			0x296AA9C0, 0x296AA9C4, 0x296AA9C8, 0x296AA9CC, 0x296AA9D0, 0x296AA9D4, 0x296AA9D8, 0x296AA9DC,
+			0x296AA9E0, 0x296AA9E4, 0x296AA9E8, 0x296AA9EC, 0x296AA9F0, 0x296AA9F4, 0x296AA9F8, 0x296AA9FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMFL_TBL_ADDR	gIM_R2Y_GMRFL_Tbl_Addr[3] = {
+	{
+		{
+			0x294AAA00, 0x294AAA04, 0x294AAA08, 0x294AAA0C, 0x294AAA10, 0x294AAA14, 0x294AAA18, 0x294AAA1C,
+			0x294AAA20, 0x294AAA24, 0x294AAA28, 0x294AAA2C, 0x294AAA30, 0x294AAA34, 0x294AAA38, 0x294AAA3C,
+			0x294AAA40, 0x294AAA44, 0x294AAA48, 0x294AAA4C, 0x294AAA50, 0x294AAA54, 0x294AAA58, 0x294AAA5C,
+			0x294AAA60, 0x294AAA64, 0x294AAA68, 0x294AAA6C, 0x294AAA70, 0x294AAA74, 0x294AAA78, 0x294AAA7C,
+			0x294AAA80, 0x294AAA84, 0x294AAA88, 0x294AAA8C, 0x294AAA90, 0x294AAA94, 0x294AAA98, 0x294AAA9C,
+			0x294AAAA0, 0x294AAAA4, 0x294AAAA8, 0x294AAAAC, 0x294AAAB0, 0x294AAAB4, 0x294AAAB8, 0x294AAABC,
+			0x294AAAC0, 0x294AAAC4, 0x294AAAC8, 0x294AAACC, 0x294AAAD0, 0x294AAAD4, 0x294AAAD8, 0x294AAADC,
+			0x294AAAE0, 0x294AAAE4, 0x294AAAE8, 0x294AAAEC, 0x294AAAF0, 0x294AAAF4, 0x294AAAF8, 0x294AAAFC,
+			0x294AAB00, 0x294AAB04, 0x294AAB08, 0x294AAB0C, 0x294AAB10, 0x294AAB14, 0x294AAB18, 0x294AAB1C,
+			0x294AAB20, 0x294AAB24, 0x294AAB28, 0x294AAB2C, 0x294AAB30, 0x294AAB34, 0x294AAB38, 0x294AAB3C,
+			0x294AAB40, 0x294AAB44, 0x294AAB48, 0x294AAB4C, 0x294AAB50, 0x294AAB54, 0x294AAB58, 0x294AAB5C,
+			0x294AAB60, 0x294AAB64, 0x294AAB68, 0x294AAB6C, 0x294AAB70, 0x294AAB74, 0x294AAB78, 0x294AAB7C,
+			0x294AAB80, 0x294AAB84, 0x294AAB88, 0x294AAB8C, 0x294AAB90, 0x294AAB94, 0x294AAB98, 0x294AAB9C,
+			0x294AABA0, 0x294AABA4, 0x294AABA8, 0x294AABAC, 0x294AABB0, 0x294AABB4, 0x294AABB8, 0x294AABBC,
+			0x294AABC0, 0x294AABC4, 0x294AABC8, 0x294AABCC, 0x294AABD0, 0x294AABD4, 0x294AABD8, 0x294AABDC,
+			0x294AABE0, 0x294AABE4, 0x294AABE8, 0x294AABEC, 0x294AABF0, 0x294AABF4, 0x294AABF8, 0x294AABFC,
+		},
+	},
+	{
+		{
+			0x295AAA00, 0x295AAA04, 0x295AAA08, 0x295AAA0C, 0x295AAA10, 0x295AAA14, 0x295AAA18, 0x295AAA1C,
+			0x295AAA20, 0x295AAA24, 0x295AAA28, 0x295AAA2C, 0x295AAA30, 0x295AAA34, 0x295AAA38, 0x295AAA3C,
+			0x295AAA40, 0x295AAA44, 0x295AAA48, 0x295AAA4C, 0x295AAA50, 0x295AAA54, 0x295AAA58, 0x295AAA5C,
+			0x295AAA60, 0x295AAA64, 0x295AAA68, 0x295AAA6C, 0x295AAA70, 0x295AAA74, 0x295AAA78, 0x295AAA7C,
+			0x295AAA80, 0x295AAA84, 0x295AAA88, 0x295AAA8C, 0x295AAA90, 0x295AAA94, 0x295AAA98, 0x295AAA9C,
+			0x295AAAA0, 0x295AAAA4, 0x295AAAA8, 0x295AAAAC, 0x295AAAB0, 0x295AAAB4, 0x295AAAB8, 0x295AAABC,
+			0x295AAAC0, 0x295AAAC4, 0x295AAAC8, 0x295AAACC, 0x295AAAD0, 0x295AAAD4, 0x295AAAD8, 0x295AAADC,
+			0x295AAAE0, 0x295AAAE4, 0x295AAAE8, 0x295AAAEC, 0x295AAAF0, 0x295AAAF4, 0x295AAAF8, 0x295AAAFC,
+			0x295AAB00, 0x295AAB04, 0x295AAB08, 0x295AAB0C, 0x295AAB10, 0x295AAB14, 0x295AAB18, 0x295AAB1C,
+			0x295AAB20, 0x295AAB24, 0x295AAB28, 0x295AAB2C, 0x295AAB30, 0x295AAB34, 0x295AAB38, 0x295AAB3C,
+			0x295AAB40, 0x295AAB44, 0x295AAB48, 0x295AAB4C, 0x295AAB50, 0x295AAB54, 0x295AAB58, 0x295AAB5C,
+			0x295AAB60, 0x295AAB64, 0x295AAB68, 0x295AAB6C, 0x295AAB70, 0x295AAB74, 0x295AAB78, 0x295AAB7C,
+			0x295AAB80, 0x295AAB84, 0x295AAB88, 0x295AAB8C, 0x295AAB90, 0x295AAB94, 0x295AAB98, 0x295AAB9C,
+			0x295AABA0, 0x295AABA4, 0x295AABA8, 0x295AABAC, 0x295AABB0, 0x295AABB4, 0x295AABB8, 0x295AABBC,
+			0x295AABC0, 0x295AABC4, 0x295AABC8, 0x295AABCC, 0x295AABD0, 0x295AABD4, 0x295AABD8, 0x295AABDC,
+			0x295AABE0, 0x295AABE4, 0x295AABE8, 0x295AABEC, 0x295AABF0, 0x295AABF4, 0x295AABF8, 0x295AABFC,
+		},
+	},
+	{
+		{
+			0x296AAA00, 0x296AAA04, 0x296AAA08, 0x296AAA0C, 0x296AAA10, 0x296AAA14, 0x296AAA18, 0x296AAA1C,
+			0x296AAA20, 0x296AAA24, 0x296AAA28, 0x296AAA2C, 0x296AAA30, 0x296AAA34, 0x296AAA38, 0x296AAA3C,
+			0x296AAA40, 0x296AAA44, 0x296AAA48, 0x296AAA4C, 0x296AAA50, 0x296AAA54, 0x296AAA58, 0x296AAA5C,
+			0x296AAA60, 0x296AAA64, 0x296AAA68, 0x296AAA6C, 0x296AAA70, 0x296AAA74, 0x296AAA78, 0x296AAA7C,
+			0x296AAA80, 0x296AAA84, 0x296AAA88, 0x296AAA8C, 0x296AAA90, 0x296AAA94, 0x296AAA98, 0x296AAA9C,
+			0x296AAAA0, 0x296AAAA4, 0x296AAAA8, 0x296AAAAC, 0x296AAAB0, 0x296AAAB4, 0x296AAAB8, 0x296AAABC,
+			0x296AAAC0, 0x296AAAC4, 0x296AAAC8, 0x296AAACC, 0x296AAAD0, 0x296AAAD4, 0x296AAAD8, 0x296AAADC,
+			0x296AAAE0, 0x296AAAE4, 0x296AAAE8, 0x296AAAEC, 0x296AAAF0, 0x296AAAF4, 0x296AAAF8, 0x296AAAFC,
+			0x296AAB00, 0x296AAB04, 0x296AAB08, 0x296AAB0C, 0x296AAB10, 0x296AAB14, 0x296AAB18, 0x296AAB1C,
+			0x296AAB20, 0x296AAB24, 0x296AAB28, 0x296AAB2C, 0x296AAB30, 0x296AAB34, 0x296AAB38, 0x296AAB3C,
+			0x296AAB40, 0x296AAB44, 0x296AAB48, 0x296AAB4C, 0x296AAB50, 0x296AAB54, 0x296AAB58, 0x296AAB5C,
+			0x296AAB60, 0x296AAB64, 0x296AAB68, 0x296AAB6C, 0x296AAB70, 0x296AAB74, 0x296AAB78, 0x296AAB7C,
+			0x296AAB80, 0x296AAB84, 0x296AAB88, 0x296AAB8C, 0x296AAB90, 0x296AAB94, 0x296AAB98, 0x296AAB9C,
+			0x296AABA0, 0x296AABA4, 0x296AABA8, 0x296AABAC, 0x296AABB0, 0x296AABB4, 0x296AABB8, 0x296AABBC,
+			0x296AABC0, 0x296AABC4, 0x296AABC8, 0x296AABCC, 0x296AABD0, 0x296AABD4, 0x296AABD8, 0x296AABDC,
+			0x296AABE0, 0x296AABE4, 0x296AABE8, 0x296AABEC, 0x296AABF0, 0x296AABF4, 0x296AABF8, 0x296AABFC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMFL_TBL_ADDR	gIM_R2Y_GMGFL_Tbl_Addr[3] = {
+	{
+		{
+			0x294AAC00, 0x294AAC04, 0x294AAC08, 0x294AAC0C, 0x294AAC10, 0x294AAC14, 0x294AAC18, 0x294AAC1C,
+			0x294AAC20, 0x294AAC24, 0x294AAC28, 0x294AAC2C, 0x294AAC30, 0x294AAC34, 0x294AAC38, 0x294AAC3C,
+			0x294AAC40, 0x294AAC44, 0x294AAC48, 0x294AAC4C, 0x294AAC50, 0x294AAC54, 0x294AAC58, 0x294AAC5C,
+			0x294AAC60, 0x294AAC64, 0x294AAC68, 0x294AAC6C, 0x294AAC70, 0x294AAC74, 0x294AAC78, 0x294AAC7C,
+			0x294AAC80, 0x294AAC84, 0x294AAC88, 0x294AAC8C, 0x294AAC90, 0x294AAC94, 0x294AAC98, 0x294AAC9C,
+			0x294AACA0, 0x294AACA4, 0x294AACA8, 0x294AACAC, 0x294AACB0, 0x294AACB4, 0x294AACB8, 0x294AACBC,
+			0x294AACC0, 0x294AACC4, 0x294AACC8, 0x294AACCC, 0x294AACD0, 0x294AACD4, 0x294AACD8, 0x294AACDC,
+			0x294AACE0, 0x294AACE4, 0x294AACE8, 0x294AACEC, 0x294AACF0, 0x294AACF4, 0x294AACF8, 0x294AACFC,
+			0x294AAD00, 0x294AAD04, 0x294AAD08, 0x294AAD0C, 0x294AAD10, 0x294AAD14, 0x294AAD18, 0x294AAD1C,
+			0x294AAD20, 0x294AAD24, 0x294AAD28, 0x294AAD2C, 0x294AAD30, 0x294AAD34, 0x294AAD38, 0x294AAD3C,
+			0x294AAD40, 0x294AAD44, 0x294AAD48, 0x294AAD4C, 0x294AAD50, 0x294AAD54, 0x294AAD58, 0x294AAD5C,
+			0x294AAD60, 0x294AAD64, 0x294AAD68, 0x294AAD6C, 0x294AAD70, 0x294AAD74, 0x294AAD78, 0x294AAD7C,
+			0x294AAD80, 0x294AAD84, 0x294AAD88, 0x294AAD8C, 0x294AAD90, 0x294AAD94, 0x294AAD98, 0x294AAD9C,
+			0x294AADA0, 0x294AADA4, 0x294AADA8, 0x294AADAC, 0x294AADB0, 0x294AADB4, 0x294AADB8, 0x294AADBC,
+			0x294AADC0, 0x294AADC4, 0x294AADC8, 0x294AADCC, 0x294AADD0, 0x294AADD4, 0x294AADD8, 0x294AADDC,
+			0x294AADE0, 0x294AADE4, 0x294AADE8, 0x294AADEC, 0x294AADF0, 0x294AADF4, 0x294AADF8, 0x294AADFC,
+		},
+	},
+	{
+		{
+			0x295AAC00, 0x295AAC04, 0x295AAC08, 0x295AAC0C, 0x295AAC10, 0x295AAC14, 0x295AAC18, 0x295AAC1C,
+			0x295AAC20, 0x295AAC24, 0x295AAC28, 0x295AAC2C, 0x295AAC30, 0x295AAC34, 0x295AAC38, 0x295AAC3C,
+			0x295AAC40, 0x295AAC44, 0x295AAC48, 0x295AAC4C, 0x295AAC50, 0x295AAC54, 0x295AAC58, 0x295AAC5C,
+			0x295AAC60, 0x295AAC64, 0x295AAC68, 0x295AAC6C, 0x295AAC70, 0x295AAC74, 0x295AAC78, 0x295AAC7C,
+			0x295AAC80, 0x295AAC84, 0x295AAC88, 0x295AAC8C, 0x295AAC90, 0x295AAC94, 0x295AAC98, 0x295AAC9C,
+			0x295AACA0, 0x295AACA4, 0x295AACA8, 0x295AACAC, 0x295AACB0, 0x295AACB4, 0x295AACB8, 0x295AACBC,
+			0x295AACC0, 0x295AACC4, 0x295AACC8, 0x295AACCC, 0x295AACD0, 0x295AACD4, 0x295AACD8, 0x295AACDC,
+			0x295AACE0, 0x295AACE4, 0x295AACE8, 0x295AACEC, 0x295AACF0, 0x295AACF4, 0x295AACF8, 0x295AACFC,
+			0x295AAD00, 0x295AAD04, 0x295AAD08, 0x295AAD0C, 0x295AAD10, 0x295AAD14, 0x295AAD18, 0x295AAD1C,
+			0x295AAD20, 0x295AAD24, 0x295AAD28, 0x295AAD2C, 0x295AAD30, 0x295AAD34, 0x295AAD38, 0x295AAD3C,
+			0x295AAD40, 0x295AAD44, 0x295AAD48, 0x295AAD4C, 0x295AAD50, 0x295AAD54, 0x295AAD58, 0x295AAD5C,
+			0x295AAD60, 0x295AAD64, 0x295AAD68, 0x295AAD6C, 0x295AAD70, 0x295AAD74, 0x295AAD78, 0x295AAD7C,
+			0x295AAD80, 0x295AAD84, 0x295AAD88, 0x295AAD8C, 0x295AAD90, 0x295AAD94, 0x295AAD98, 0x295AAD9C,
+			0x295AADA0, 0x295AADA4, 0x295AADA8, 0x295AADAC, 0x295AADB0, 0x295AADB4, 0x295AADB8, 0x295AADBC,
+			0x295AADC0, 0x295AADC4, 0x295AADC8, 0x295AADCC, 0x295AADD0, 0x295AADD4, 0x295AADD8, 0x295AADDC,
+			0x295AADE0, 0x295AADE4, 0x295AADE8, 0x295AADEC, 0x295AADF0, 0x295AADF4, 0x295AADF8, 0x295AADFC,
+		},
+	},
+	{
+		{
+			0x296AAC00, 0x296AAC04, 0x296AAC08, 0x296AAC0C, 0x296AAC10, 0x296AAC14, 0x296AAC18, 0x296AAC1C,
+			0x296AAC20, 0x296AAC24, 0x296AAC28, 0x296AAC2C, 0x296AAC30, 0x296AAC34, 0x296AAC38, 0x296AAC3C,
+			0x296AAC40, 0x296AAC44, 0x296AAC48, 0x296AAC4C, 0x296AAC50, 0x296AAC54, 0x296AAC58, 0x296AAC5C,
+			0x296AAC60, 0x296AAC64, 0x296AAC68, 0x296AAC6C, 0x296AAC70, 0x296AAC74, 0x296AAC78, 0x296AAC7C,
+			0x296AAC80, 0x296AAC84, 0x296AAC88, 0x296AAC8C, 0x296AAC90, 0x296AAC94, 0x296AAC98, 0x296AAC9C,
+			0x296AACA0, 0x296AACA4, 0x296AACA8, 0x296AACAC, 0x296AACB0, 0x296AACB4, 0x296AACB8, 0x296AACBC,
+			0x296AACC0, 0x296AACC4, 0x296AACC8, 0x296AACCC, 0x296AACD0, 0x296AACD4, 0x296AACD8, 0x296AACDC,
+			0x296AACE0, 0x296AACE4, 0x296AACE8, 0x296AACEC, 0x296AACF0, 0x296AACF4, 0x296AACF8, 0x296AACFC,
+			0x296AAD00, 0x296AAD04, 0x296AAD08, 0x296AAD0C, 0x296AAD10, 0x296AAD14, 0x296AAD18, 0x296AAD1C,
+			0x296AAD20, 0x296AAD24, 0x296AAD28, 0x296AAD2C, 0x296AAD30, 0x296AAD34, 0x296AAD38, 0x296AAD3C,
+			0x296AAD40, 0x296AAD44, 0x296AAD48, 0x296AAD4C, 0x296AAD50, 0x296AAD54, 0x296AAD58, 0x296AAD5C,
+			0x296AAD60, 0x296AAD64, 0x296AAD68, 0x296AAD6C, 0x296AAD70, 0x296AAD74, 0x296AAD78, 0x296AAD7C,
+			0x296AAD80, 0x296AAD84, 0x296AAD88, 0x296AAD8C, 0x296AAD90, 0x296AAD94, 0x296AAD98, 0x296AAD9C,
+			0x296AADA0, 0x296AADA4, 0x296AADA8, 0x296AADAC, 0x296AADB0, 0x296AADB4, 0x296AADB8, 0x296AADBC,
+			0x296AADC0, 0x296AADC4, 0x296AADC8, 0x296AADCC, 0x296AADD0, 0x296AADD4, 0x296AADD8, 0x296AADDC,
+			0x296AADE0, 0x296AADE4, 0x296AADE8, 0x296AADEC, 0x296AADF0, 0x296AADF4, 0x296AADF8, 0x296AADFC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMFL_TBL_ADDR	gIM_R2Y_GMBFL_Tbl_Addr[3] = {
+	{
+		{
+			0x294AAE00, 0x294AAE04, 0x294AAE08, 0x294AAE0C, 0x294AAE10, 0x294AAE14, 0x294AAE18, 0x294AAE1C,
+			0x294AAE20, 0x294AAE24, 0x294AAE28, 0x294AAE2C, 0x294AAE30, 0x294AAE34, 0x294AAE38, 0x294AAE3C,
+			0x294AAE40, 0x294AAE44, 0x294AAE48, 0x294AAE4C, 0x294AAE50, 0x294AAE54, 0x294AAE58, 0x294AAE5C,
+			0x294AAE60, 0x294AAE64, 0x294AAE68, 0x294AAE6C, 0x294AAE70, 0x294AAE74, 0x294AAE78, 0x294AAE7C,
+			0x294AAE80, 0x294AAE84, 0x294AAE88, 0x294AAE8C, 0x294AAE90, 0x294AAE94, 0x294AAE98, 0x294AAE9C,
+			0x294AAEA0, 0x294AAEA4, 0x294AAEA8, 0x294AAEAC, 0x294AAEB0, 0x294AAEB4, 0x294AAEB8, 0x294AAEBC,
+			0x294AAEC0, 0x294AAEC4, 0x294AAEC8, 0x294AAECC, 0x294AAED0, 0x294AAED4, 0x294AAED8, 0x294AAEDC,
+			0x294AAEE0, 0x294AAEE4, 0x294AAEE8, 0x294AAEEC, 0x294AAEF0, 0x294AAEF4, 0x294AAEF8, 0x294AAEFC,
+			0x294AAF00, 0x294AAF04, 0x294AAF08, 0x294AAF0C, 0x294AAF10, 0x294AAF14, 0x294AAF18, 0x294AAF1C,
+			0x294AAF20, 0x294AAF24, 0x294AAF28, 0x294AAF2C, 0x294AAF30, 0x294AAF34, 0x294AAF38, 0x294AAF3C,
+			0x294AAF40, 0x294AAF44, 0x294AAF48, 0x294AAF4C, 0x294AAF50, 0x294AAF54, 0x294AAF58, 0x294AAF5C,
+			0x294AAF60, 0x294AAF64, 0x294AAF68, 0x294AAF6C, 0x294AAF70, 0x294AAF74, 0x294AAF78, 0x294AAF7C,
+			0x294AAF80, 0x294AAF84, 0x294AAF88, 0x294AAF8C, 0x294AAF90, 0x294AAF94, 0x294AAF98, 0x294AAF9C,
+			0x294AAFA0, 0x294AAFA4, 0x294AAFA8, 0x294AAFAC, 0x294AAFB0, 0x294AAFB4, 0x294AAFB8, 0x294AAFBC,
+			0x294AAFC0, 0x294AAFC4, 0x294AAFC8, 0x294AAFCC, 0x294AAFD0, 0x294AAFD4, 0x294AAFD8, 0x294AAFDC,
+			0x294AAFE0, 0x294AAFE4, 0x294AAFE8, 0x294AAFEC, 0x294AAFF0, 0x294AAFF4, 0x294AAFF8, 0x294AAFFC,
+		},
+	},
+	{
+		{
+			0x295AAE00, 0x295AAE04, 0x295AAE08, 0x295AAE0C, 0x295AAE10, 0x295AAE14, 0x295AAE18, 0x295AAE1C,
+			0x295AAE20, 0x295AAE24, 0x295AAE28, 0x295AAE2C, 0x295AAE30, 0x295AAE34, 0x295AAE38, 0x295AAE3C,
+			0x295AAE40, 0x295AAE44, 0x295AAE48, 0x295AAE4C, 0x295AAE50, 0x295AAE54, 0x295AAE58, 0x295AAE5C,
+			0x295AAE60, 0x295AAE64, 0x295AAE68, 0x295AAE6C, 0x295AAE70, 0x295AAE74, 0x295AAE78, 0x295AAE7C,
+			0x295AAE80, 0x295AAE84, 0x295AAE88, 0x295AAE8C, 0x295AAE90, 0x295AAE94, 0x295AAE98, 0x295AAE9C,
+			0x295AAEA0, 0x295AAEA4, 0x295AAEA8, 0x295AAEAC, 0x295AAEB0, 0x295AAEB4, 0x295AAEB8, 0x295AAEBC,
+			0x295AAEC0, 0x295AAEC4, 0x295AAEC8, 0x295AAECC, 0x295AAED0, 0x295AAED4, 0x295AAED8, 0x295AAEDC,
+			0x295AAEE0, 0x295AAEE4, 0x295AAEE8, 0x295AAEEC, 0x295AAEF0, 0x295AAEF4, 0x295AAEF8, 0x295AAEFC,
+			0x295AAF00, 0x295AAF04, 0x295AAF08, 0x295AAF0C, 0x295AAF10, 0x295AAF14, 0x295AAF18, 0x295AAF1C,
+			0x295AAF20, 0x295AAF24, 0x295AAF28, 0x295AAF2C, 0x295AAF30, 0x295AAF34, 0x295AAF38, 0x295AAF3C,
+			0x295AAF40, 0x295AAF44, 0x295AAF48, 0x295AAF4C, 0x295AAF50, 0x295AAF54, 0x295AAF58, 0x295AAF5C,
+			0x295AAF60, 0x295AAF64, 0x295AAF68, 0x295AAF6C, 0x295AAF70, 0x295AAF74, 0x295AAF78, 0x295AAF7C,
+			0x295AAF80, 0x295AAF84, 0x295AAF88, 0x295AAF8C, 0x295AAF90, 0x295AAF94, 0x295AAF98, 0x295AAF9C,
+			0x295AAFA0, 0x295AAFA4, 0x295AAFA8, 0x295AAFAC, 0x295AAFB0, 0x295AAFB4, 0x295AAFB8, 0x295AAFBC,
+			0x295AAFC0, 0x295AAFC4, 0x295AAFC8, 0x295AAFCC, 0x295AAFD0, 0x295AAFD4, 0x295AAFD8, 0x295AAFDC,
+			0x295AAFE0, 0x295AAFE4, 0x295AAFE8, 0x295AAFEC, 0x295AAFF0, 0x295AAFF4, 0x295AAFF8, 0x295AAFFC,
+		},
+	},
+	{
+		{
+			0x296AAE00, 0x296AAE04, 0x296AAE08, 0x296AAE0C, 0x296AAE10, 0x296AAE14, 0x296AAE18, 0x296AAE1C,
+			0x296AAE20, 0x296AAE24, 0x296AAE28, 0x296AAE2C, 0x296AAE30, 0x296AAE34, 0x296AAE38, 0x296AAE3C,
+			0x296AAE40, 0x296AAE44, 0x296AAE48, 0x296AAE4C, 0x296AAE50, 0x296AAE54, 0x296AAE58, 0x296AAE5C,
+			0x296AAE60, 0x296AAE64, 0x296AAE68, 0x296AAE6C, 0x296AAE70, 0x296AAE74, 0x296AAE78, 0x296AAE7C,
+			0x296AAE80, 0x296AAE84, 0x296AAE88, 0x296AAE8C, 0x296AAE90, 0x296AAE94, 0x296AAE98, 0x296AAE9C,
+			0x296AAEA0, 0x296AAEA4, 0x296AAEA8, 0x296AAEAC, 0x296AAEB0, 0x296AAEB4, 0x296AAEB8, 0x296AAEBC,
+			0x296AAEC0, 0x296AAEC4, 0x296AAEC8, 0x296AAECC, 0x296AAED0, 0x296AAED4, 0x296AAED8, 0x296AAEDC,
+			0x296AAEE0, 0x296AAEE4, 0x296AAEE8, 0x296AAEEC, 0x296AAEF0, 0x296AAEF4, 0x296AAEF8, 0x296AAEFC,
+			0x296AAF00, 0x296AAF04, 0x296AAF08, 0x296AAF0C, 0x296AAF10, 0x296AAF14, 0x296AAF18, 0x296AAF1C,
+			0x296AAF20, 0x296AAF24, 0x296AAF28, 0x296AAF2C, 0x296AAF30, 0x296AAF34, 0x296AAF38, 0x296AAF3C,
+			0x296AAF40, 0x296AAF44, 0x296AAF48, 0x296AAF4C, 0x296AAF50, 0x296AAF54, 0x296AAF58, 0x296AAF5C,
+			0x296AAF60, 0x296AAF64, 0x296AAF68, 0x296AAF6C, 0x296AAF70, 0x296AAF74, 0x296AAF78, 0x296AAF7C,
+			0x296AAF80, 0x296AAF84, 0x296AAF88, 0x296AAF8C, 0x296AAF90, 0x296AAF94, 0x296AAF98, 0x296AAF9C,
+			0x296AAFA0, 0x296AAFA4, 0x296AAFA8, 0x296AAFAC, 0x296AAFB0, 0x296AAFB4, 0x296AAFB8, 0x296AAFBC,
+			0x296AAFC0, 0x296AAFC4, 0x296AAFC8, 0x296AAFCC, 0x296AAFD0, 0x296AAFD4, 0x296AAFD8, 0x296AAFDC,
+			0x296AAFE0, 0x296AAFE4, 0x296AAFE8, 0x296AAFEC, 0x296AAFF0, 0x296AAFF4, 0x296AAFF8, 0x296AAFFC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_GMFL_TBL_ADDR	gIM_R2Y_GMYBFL_Tbl_Addr[3] = {
+	{
+		{
+			0x294AB000, 0x294AB004, 0x294AB008, 0x294AB00C, 0x294AB010, 0x294AB014, 0x294AB018, 0x294AB01C,
+			0x294AB020, 0x294AB024, 0x294AB028, 0x294AB02C, 0x294AB030, 0x294AB034, 0x294AB038, 0x294AB03C,
+			0x294AB040, 0x294AB044, 0x294AB048, 0x294AB04C, 0x294AB050, 0x294AB054, 0x294AB058, 0x294AB05C,
+			0x294AB060, 0x294AB064, 0x294AB068, 0x294AB06C, 0x294AB070, 0x294AB074, 0x294AB078, 0x294AB07C,
+			0x294AB080, 0x294AB084, 0x294AB088, 0x294AB08C, 0x294AB090, 0x294AB094, 0x294AB098, 0x294AB09C,
+			0x294AB0A0, 0x294AB0A4, 0x294AB0A8, 0x294AB0AC, 0x294AB0B0, 0x294AB0B4, 0x294AB0B8, 0x294AB0BC,
+			0x294AB0C0, 0x294AB0C4, 0x294AB0C8, 0x294AB0CC, 0x294AB0D0, 0x294AB0D4, 0x294AB0D8, 0x294AB0DC,
+			0x294AB0E0, 0x294AB0E4, 0x294AB0E8, 0x294AB0EC, 0x294AB0F0, 0x294AB0F4, 0x294AB0F8, 0x294AB0FC,
+			0x294AB100, 0x294AB104, 0x294AB108, 0x294AB10C, 0x294AB110, 0x294AB114, 0x294AB118, 0x294AB11C,
+			0x294AB120, 0x294AB124, 0x294AB128, 0x294AB12C, 0x294AB130, 0x294AB134, 0x294AB138, 0x294AB13C,
+			0x294AB140, 0x294AB144, 0x294AB148, 0x294AB14C, 0x294AB150, 0x294AB154, 0x294AB158, 0x294AB15C,
+			0x294AB160, 0x294AB164, 0x294AB168, 0x294AB16C, 0x294AB170, 0x294AB174, 0x294AB178, 0x294AB17C,
+			0x294AB180, 0x294AB184, 0x294AB188, 0x294AB18C, 0x294AB190, 0x294AB194, 0x294AB198, 0x294AB19C,
+			0x294AB1A0, 0x294AB1A4, 0x294AB1A8, 0x294AB1AC, 0x294AB1B0, 0x294AB1B4, 0x294AB1B8, 0x294AB1BC,
+			0x294AB1C0, 0x294AB1C4, 0x294AB1C8, 0x294AB1CC, 0x294AB1D0, 0x294AB1D4, 0x294AB1D8, 0x294AB1DC,
+			0x294AB1E0, 0x294AB1E4, 0x294AB1E8, 0x294AB1EC, 0x294AB1F0, 0x294AB1F4, 0x294AB1F8, 0x294AB1FC,
+		},
+	},
+	{
+		{
+			0x295AB000, 0x295AB004, 0x295AB008, 0x295AB00C, 0x295AB010, 0x295AB014, 0x295AB018, 0x295AB01C,
+			0x295AB020, 0x295AB024, 0x295AB028, 0x295AB02C, 0x295AB030, 0x295AB034, 0x295AB038, 0x295AB03C,
+			0x295AB040, 0x295AB044, 0x295AB048, 0x295AB04C, 0x295AB050, 0x295AB054, 0x295AB058, 0x295AB05C,
+			0x295AB060, 0x295AB064, 0x295AB068, 0x295AB06C, 0x295AB070, 0x295AB074, 0x295AB078, 0x295AB07C,
+			0x295AB080, 0x295AB084, 0x295AB088, 0x295AB08C, 0x295AB090, 0x295AB094, 0x295AB098, 0x295AB09C,
+			0x295AB0A0, 0x295AB0A4, 0x295AB0A8, 0x295AB0AC, 0x295AB0B0, 0x295AB0B4, 0x295AB0B8, 0x295AB0BC,
+			0x295AB0C0, 0x295AB0C4, 0x295AB0C8, 0x295AB0CC, 0x295AB0D0, 0x295AB0D4, 0x295AB0D8, 0x295AB0DC,
+			0x295AB0E0, 0x295AB0E4, 0x295AB0E8, 0x295AB0EC, 0x295AB0F0, 0x295AB0F4, 0x295AB0F8, 0x295AB0FC,
+			0x295AB100, 0x295AB104, 0x295AB108, 0x295AB10C, 0x295AB110, 0x295AB114, 0x295AB118, 0x295AB11C,
+			0x295AB120, 0x295AB124, 0x295AB128, 0x295AB12C, 0x295AB130, 0x295AB134, 0x295AB138, 0x295AB13C,
+			0x295AB140, 0x295AB144, 0x295AB148, 0x295AB14C, 0x295AB150, 0x295AB154, 0x295AB158, 0x295AB15C,
+			0x295AB160, 0x295AB164, 0x295AB168, 0x295AB16C, 0x295AB170, 0x295AB174, 0x295AB178, 0x295AB17C,
+			0x295AB180, 0x295AB184, 0x295AB188, 0x295AB18C, 0x295AB190, 0x295AB194, 0x295AB198, 0x295AB19C,
+			0x295AB1A0, 0x295AB1A4, 0x295AB1A8, 0x295AB1AC, 0x295AB1B0, 0x295AB1B4, 0x295AB1B8, 0x295AB1BC,
+			0x295AB1C0, 0x295AB1C4, 0x295AB1C8, 0x295AB1CC, 0x295AB1D0, 0x295AB1D4, 0x295AB1D8, 0x295AB1DC,
+			0x295AB1E0, 0x295AB1E4, 0x295AB1E8, 0x295AB1EC, 0x295AB1F0, 0x295AB1F4, 0x295AB1F8, 0x295AB1FC,
+		},
+	},
+	{
+		{
+			0x296AB000, 0x296AB004, 0x296AB008, 0x296AB00C, 0x296AB010, 0x296AB014, 0x296AB018, 0x296AB01C,
+			0x296AB020, 0x296AB024, 0x296AB028, 0x296AB02C, 0x296AB030, 0x296AB034, 0x296AB038, 0x296AB03C,
+			0x296AB040, 0x296AB044, 0x296AB048, 0x296AB04C, 0x296AB050, 0x296AB054, 0x296AB058, 0x296AB05C,
+			0x296AB060, 0x296AB064, 0x296AB068, 0x296AB06C, 0x296AB070, 0x296AB074, 0x296AB078, 0x296AB07C,
+			0x296AB080, 0x296AB084, 0x296AB088, 0x296AB08C, 0x296AB090, 0x296AB094, 0x296AB098, 0x296AB09C,
+			0x296AB0A0, 0x296AB0A4, 0x296AB0A8, 0x296AB0AC, 0x296AB0B0, 0x296AB0B4, 0x296AB0B8, 0x296AB0BC,
+			0x296AB0C0, 0x296AB0C4, 0x296AB0C8, 0x296AB0CC, 0x296AB0D0, 0x296AB0D4, 0x296AB0D8, 0x296AB0DC,
+			0x296AB0E0, 0x296AB0E4, 0x296AB0E8, 0x296AB0EC, 0x296AB0F0, 0x296AB0F4, 0x296AB0F8, 0x296AB0FC,
+			0x296AB100, 0x296AB104, 0x296AB108, 0x296AB10C, 0x296AB110, 0x296AB114, 0x296AB118, 0x296AB11C,
+			0x296AB120, 0x296AB124, 0x296AB128, 0x296AB12C, 0x296AB130, 0x296AB134, 0x296AB138, 0x296AB13C,
+			0x296AB140, 0x296AB144, 0x296AB148, 0x296AB14C, 0x296AB150, 0x296AB154, 0x296AB158, 0x296AB15C,
+			0x296AB160, 0x296AB164, 0x296AB168, 0x296AB16C, 0x296AB170, 0x296AB174, 0x296AB178, 0x296AB17C,
+			0x296AB180, 0x296AB184, 0x296AB188, 0x296AB18C, 0x296AB190, 0x296AB194, 0x296AB198, 0x296AB19C,
+			0x296AB1A0, 0x296AB1A4, 0x296AB1A8, 0x296AB1AC, 0x296AB1B0, 0x296AB1B4, 0x296AB1B8, 0x296AB1BC,
+			0x296AB1C0, 0x296AB1C4, 0x296AB1C8, 0x296AB1CC, 0x296AB1D0, 0x296AB1D4, 0x296AB1D8, 0x296AB1DC,
+			0x296AB1E0, 0x296AB1E4, 0x296AB1E8, 0x296AB1EC, 0x296AB1F0, 0x296AB1F4, 0x296AB1F8, 0x296AB1FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGWSCL_TBL_ADDR	gIM_R2Y_EGHWSCL_Tbl_Addr[3] = {
+	{
+		{
+			0x294AC000, 0x294AC004, 0x294AC008, 0x294AC00C, 0x294AC010, 0x294AC014, 0x294AC018, 0x294AC01C,
+			0x294AC020, 0x294AC024, 0x294AC028, 0x294AC02C, 0x294AC030, 0x294AC034, 0x294AC038, 0x294AC03C,
+			0x294AC040, 0x294AC044, 0x294AC048, 0x294AC04C, 0x294AC050, 0x294AC054, 0x294AC058, 0x294AC05C,
+			0x294AC060, 0x294AC064, 0x294AC068, 0x294AC06C, 0x294AC070, 0x294AC074, 0x294AC078, 0x294AC07C,
+			0x294AC080, 0x294AC084, 0x294AC088, 0x294AC08C, 0x294AC090, 0x294AC094, 0x294AC098, 0x294AC09C,
+			0x294AC0A0, 0x294AC0A4, 0x294AC0A8, 0x294AC0AC, 0x294AC0B0, 0x294AC0B4, 0x294AC0B8, 0x294AC0BC,
+			0x294AC0C0, 0x294AC0C4, 0x294AC0C8, 0x294AC0CC, 0x294AC0D0, 0x294AC0D4, 0x294AC0D8, 0x294AC0DC,
+			0x294AC0E0, 0x294AC0E4, 0x294AC0E8, 0x294AC0EC, 0x294AC0F0, 0x294AC0F4, 0x294AC0F8, 0x294AC0FC,
+			0x294AC100, 0x294AC104, 0x294AC108, 0x294AC10C, 0x294AC110, 0x294AC114, 0x294AC118, 0x294AC11C,
+			0x294AC120, 0x294AC124, 0x294AC128, 0x294AC12C, 0x294AC130, 0x294AC134, 0x294AC138, 0x294AC13C,
+			0x294AC140, 0x294AC144, 0x294AC148, 0x294AC14C, 0x294AC150, 0x294AC154, 0x294AC158, 0x294AC15C,
+			0x294AC160, 0x294AC164, 0x294AC168, 0x294AC16C, 0x294AC170, 0x294AC174, 0x294AC178, 0x294AC17C,
+			0x294AC180, 0x294AC184, 0x294AC188, 0x294AC18C, 0x294AC190, 0x294AC194, 0x294AC198, 0x294AC19C,
+			0x294AC1A0, 0x294AC1A4, 0x294AC1A8, 0x294AC1AC, 0x294AC1B0, 0x294AC1B4, 0x294AC1B8, 0x294AC1BC,
+			0x294AC1C0, 0x294AC1C4, 0x294AC1C8, 0x294AC1CC, 0x294AC1D0, 0x294AC1D4, 0x294AC1D8, 0x294AC1DC,
+			0x294AC1E0, 0x294AC1E4, 0x294AC1E8, 0x294AC1EC, 0x294AC1F0, 0x294AC1F4, 0x294AC1F8, 0x294AC1FC,
+		},
+	},
+	{
+		{
+			0x295AC000, 0x295AC004, 0x295AC008, 0x295AC00C, 0x295AC010, 0x295AC014, 0x295AC018, 0x295AC01C,
+			0x295AC020, 0x295AC024, 0x295AC028, 0x295AC02C, 0x295AC030, 0x295AC034, 0x295AC038, 0x295AC03C,
+			0x295AC040, 0x295AC044, 0x295AC048, 0x295AC04C, 0x295AC050, 0x295AC054, 0x295AC058, 0x295AC05C,
+			0x295AC060, 0x295AC064, 0x295AC068, 0x295AC06C, 0x295AC070, 0x295AC074, 0x295AC078, 0x295AC07C,
+			0x295AC080, 0x295AC084, 0x295AC088, 0x295AC08C, 0x295AC090, 0x295AC094, 0x295AC098, 0x295AC09C,
+			0x295AC0A0, 0x295AC0A4, 0x295AC0A8, 0x295AC0AC, 0x295AC0B0, 0x295AC0B4, 0x295AC0B8, 0x295AC0BC,
+			0x295AC0C0, 0x295AC0C4, 0x295AC0C8, 0x295AC0CC, 0x295AC0D0, 0x295AC0D4, 0x295AC0D8, 0x295AC0DC,
+			0x295AC0E0, 0x295AC0E4, 0x295AC0E8, 0x295AC0EC, 0x295AC0F0, 0x295AC0F4, 0x295AC0F8, 0x295AC0FC,
+			0x295AC100, 0x295AC104, 0x295AC108, 0x295AC10C, 0x295AC110, 0x295AC114, 0x295AC118, 0x295AC11C,
+			0x295AC120, 0x295AC124, 0x295AC128, 0x295AC12C, 0x295AC130, 0x295AC134, 0x295AC138, 0x295AC13C,
+			0x295AC140, 0x295AC144, 0x295AC148, 0x295AC14C, 0x295AC150, 0x295AC154, 0x295AC158, 0x295AC15C,
+			0x295AC160, 0x295AC164, 0x295AC168, 0x295AC16C, 0x295AC170, 0x295AC174, 0x295AC178, 0x295AC17C,
+			0x295AC180, 0x295AC184, 0x295AC188, 0x295AC18C, 0x295AC190, 0x295AC194, 0x295AC198, 0x295AC19C,
+			0x295AC1A0, 0x295AC1A4, 0x295AC1A8, 0x295AC1AC, 0x295AC1B0, 0x295AC1B4, 0x295AC1B8, 0x295AC1BC,
+			0x295AC1C0, 0x295AC1C4, 0x295AC1C8, 0x295AC1CC, 0x295AC1D0, 0x295AC1D4, 0x295AC1D8, 0x295AC1DC,
+			0x295AC1E0, 0x295AC1E4, 0x295AC1E8, 0x295AC1EC, 0x295AC1F0, 0x295AC1F4, 0x295AC1F8, 0x295AC1FC,
+		},
+	},
+	{
+		{
+			0x296AC000, 0x296AC004, 0x296AC008, 0x296AC00C, 0x296AC010, 0x296AC014, 0x296AC018, 0x296AC01C,
+			0x296AC020, 0x296AC024, 0x296AC028, 0x296AC02C, 0x296AC030, 0x296AC034, 0x296AC038, 0x296AC03C,
+			0x296AC040, 0x296AC044, 0x296AC048, 0x296AC04C, 0x296AC050, 0x296AC054, 0x296AC058, 0x296AC05C,
+			0x296AC060, 0x296AC064, 0x296AC068, 0x296AC06C, 0x296AC070, 0x296AC074, 0x296AC078, 0x296AC07C,
+			0x296AC080, 0x296AC084, 0x296AC088, 0x296AC08C, 0x296AC090, 0x296AC094, 0x296AC098, 0x296AC09C,
+			0x296AC0A0, 0x296AC0A4, 0x296AC0A8, 0x296AC0AC, 0x296AC0B0, 0x296AC0B4, 0x296AC0B8, 0x296AC0BC,
+			0x296AC0C0, 0x296AC0C4, 0x296AC0C8, 0x296AC0CC, 0x296AC0D0, 0x296AC0D4, 0x296AC0D8, 0x296AC0DC,
+			0x296AC0E0, 0x296AC0E4, 0x296AC0E8, 0x296AC0EC, 0x296AC0F0, 0x296AC0F4, 0x296AC0F8, 0x296AC0FC,
+			0x296AC100, 0x296AC104, 0x296AC108, 0x296AC10C, 0x296AC110, 0x296AC114, 0x296AC118, 0x296AC11C,
+			0x296AC120, 0x296AC124, 0x296AC128, 0x296AC12C, 0x296AC130, 0x296AC134, 0x296AC138, 0x296AC13C,
+			0x296AC140, 0x296AC144, 0x296AC148, 0x296AC14C, 0x296AC150, 0x296AC154, 0x296AC158, 0x296AC15C,
+			0x296AC160, 0x296AC164, 0x296AC168, 0x296AC16C, 0x296AC170, 0x296AC174, 0x296AC178, 0x296AC17C,
+			0x296AC180, 0x296AC184, 0x296AC188, 0x296AC18C, 0x296AC190, 0x296AC194, 0x296AC198, 0x296AC19C,
+			0x296AC1A0, 0x296AC1A4, 0x296AC1A8, 0x296AC1AC, 0x296AC1B0, 0x296AC1B4, 0x296AC1B8, 0x296AC1BC,
+			0x296AC1C0, 0x296AC1C4, 0x296AC1C8, 0x296AC1CC, 0x296AC1D0, 0x296AC1D4, 0x296AC1D8, 0x296AC1DC,
+			0x296AC1E0, 0x296AC1E4, 0x296AC1E8, 0x296AC1EC, 0x296AC1F0, 0x296AC1F4, 0x296AC1F8, 0x296AC1FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGWSCL_TBL_ADDR	gIM_R2Y_EGMWSCL_Tbl_Addr[3] = {
+	{
+		{
+			0x294AC400, 0x294AC404, 0x294AC408, 0x294AC40C, 0x294AC410, 0x294AC414, 0x294AC418, 0x294AC41C,
+			0x294AC420, 0x294AC424, 0x294AC428, 0x294AC42C, 0x294AC430, 0x294AC434, 0x294AC438, 0x294AC43C,
+			0x294AC440, 0x294AC444, 0x294AC448, 0x294AC44C, 0x294AC450, 0x294AC454, 0x294AC458, 0x294AC45C,
+			0x294AC460, 0x294AC464, 0x294AC468, 0x294AC46C, 0x294AC470, 0x294AC474, 0x294AC478, 0x294AC47C,
+			0x294AC480, 0x294AC484, 0x294AC488, 0x294AC48C, 0x294AC490, 0x294AC494, 0x294AC498, 0x294AC49C,
+			0x294AC4A0, 0x294AC4A4, 0x294AC4A8, 0x294AC4AC, 0x294AC4B0, 0x294AC4B4, 0x294AC4B8, 0x294AC4BC,
+			0x294AC4C0, 0x294AC4C4, 0x294AC4C8, 0x294AC4CC, 0x294AC4D0, 0x294AC4D4, 0x294AC4D8, 0x294AC4DC,
+			0x294AC4E0, 0x294AC4E4, 0x294AC4E8, 0x294AC4EC, 0x294AC4F0, 0x294AC4F4, 0x294AC4F8, 0x294AC4FC,
+			0x294AC500, 0x294AC504, 0x294AC508, 0x294AC50C, 0x294AC510, 0x294AC514, 0x294AC518, 0x294AC51C,
+			0x294AC520, 0x294AC524, 0x294AC528, 0x294AC52C, 0x294AC530, 0x294AC534, 0x294AC538, 0x294AC53C,
+			0x294AC540, 0x294AC544, 0x294AC548, 0x294AC54C, 0x294AC550, 0x294AC554, 0x294AC558, 0x294AC55C,
+			0x294AC560, 0x294AC564, 0x294AC568, 0x294AC56C, 0x294AC570, 0x294AC574, 0x294AC578, 0x294AC57C,
+			0x294AC580, 0x294AC584, 0x294AC588, 0x294AC58C, 0x294AC590, 0x294AC594, 0x294AC598, 0x294AC59C,
+			0x294AC5A0, 0x294AC5A4, 0x294AC5A8, 0x294AC5AC, 0x294AC5B0, 0x294AC5B4, 0x294AC5B8, 0x294AC5BC,
+			0x294AC5C0, 0x294AC5C4, 0x294AC5C8, 0x294AC5CC, 0x294AC5D0, 0x294AC5D4, 0x294AC5D8, 0x294AC5DC,
+			0x294AC5E0, 0x294AC5E4, 0x294AC5E8, 0x294AC5EC, 0x294AC5F0, 0x294AC5F4, 0x294AC5F8, 0x294AC5FC,
+		},
+	},
+	{
+		{
+			0x295AC400, 0x295AC404, 0x295AC408, 0x295AC40C, 0x295AC410, 0x295AC414, 0x295AC418, 0x295AC41C,
+			0x295AC420, 0x295AC424, 0x295AC428, 0x295AC42C, 0x295AC430, 0x295AC434, 0x295AC438, 0x295AC43C,
+			0x295AC440, 0x295AC444, 0x295AC448, 0x295AC44C, 0x295AC450, 0x295AC454, 0x295AC458, 0x295AC45C,
+			0x295AC460, 0x295AC464, 0x295AC468, 0x295AC46C, 0x295AC470, 0x295AC474, 0x295AC478, 0x295AC47C,
+			0x295AC480, 0x295AC484, 0x295AC488, 0x295AC48C, 0x295AC490, 0x295AC494, 0x295AC498, 0x295AC49C,
+			0x295AC4A0, 0x295AC4A4, 0x295AC4A8, 0x295AC4AC, 0x295AC4B0, 0x295AC4B4, 0x295AC4B8, 0x295AC4BC,
+			0x295AC4C0, 0x295AC4C4, 0x295AC4C8, 0x295AC4CC, 0x295AC4D0, 0x295AC4D4, 0x295AC4D8, 0x295AC4DC,
+			0x295AC4E0, 0x295AC4E4, 0x295AC4E8, 0x295AC4EC, 0x295AC4F0, 0x295AC4F4, 0x295AC4F8, 0x295AC4FC,
+			0x295AC500, 0x295AC504, 0x295AC508, 0x295AC50C, 0x295AC510, 0x295AC514, 0x295AC518, 0x295AC51C,
+			0x295AC520, 0x295AC524, 0x295AC528, 0x295AC52C, 0x295AC530, 0x295AC534, 0x295AC538, 0x295AC53C,
+			0x295AC540, 0x295AC544, 0x295AC548, 0x295AC54C, 0x295AC550, 0x295AC554, 0x295AC558, 0x295AC55C,
+			0x295AC560, 0x295AC564, 0x295AC568, 0x295AC56C, 0x295AC570, 0x295AC574, 0x295AC578, 0x295AC57C,
+			0x295AC580, 0x295AC584, 0x295AC588, 0x295AC58C, 0x295AC590, 0x295AC594, 0x295AC598, 0x295AC59C,
+			0x295AC5A0, 0x295AC5A4, 0x295AC5A8, 0x295AC5AC, 0x295AC5B0, 0x295AC5B4, 0x295AC5B8, 0x295AC5BC,
+			0x295AC5C0, 0x295AC5C4, 0x295AC5C8, 0x295AC5CC, 0x295AC5D0, 0x295AC5D4, 0x295AC5D8, 0x295AC5DC,
+			0x295AC5E0, 0x295AC5E4, 0x295AC5E8, 0x295AC5EC, 0x295AC5F0, 0x295AC5F4, 0x295AC5F8, 0x295AC5FC,
+		},
+	},
+	{
+		{
+			0x296AC400, 0x296AC404, 0x296AC408, 0x296AC40C, 0x296AC410, 0x296AC414, 0x296AC418, 0x296AC41C,
+			0x296AC420, 0x296AC424, 0x296AC428, 0x296AC42C, 0x296AC430, 0x296AC434, 0x296AC438, 0x296AC43C,
+			0x296AC440, 0x296AC444, 0x296AC448, 0x296AC44C, 0x296AC450, 0x296AC454, 0x296AC458, 0x296AC45C,
+			0x296AC460, 0x296AC464, 0x296AC468, 0x296AC46C, 0x296AC470, 0x296AC474, 0x296AC478, 0x296AC47C,
+			0x296AC480, 0x296AC484, 0x296AC488, 0x296AC48C, 0x296AC490, 0x296AC494, 0x296AC498, 0x296AC49C,
+			0x296AC4A0, 0x296AC4A4, 0x296AC4A8, 0x296AC4AC, 0x296AC4B0, 0x296AC4B4, 0x296AC4B8, 0x296AC4BC,
+			0x296AC4C0, 0x296AC4C4, 0x296AC4C8, 0x296AC4CC, 0x296AC4D0, 0x296AC4D4, 0x296AC4D8, 0x296AC4DC,
+			0x296AC4E0, 0x296AC4E4, 0x296AC4E8, 0x296AC4EC, 0x296AC4F0, 0x296AC4F4, 0x296AC4F8, 0x296AC4FC,
+			0x296AC500, 0x296AC504, 0x296AC508, 0x296AC50C, 0x296AC510, 0x296AC514, 0x296AC518, 0x296AC51C,
+			0x296AC520, 0x296AC524, 0x296AC528, 0x296AC52C, 0x296AC530, 0x296AC534, 0x296AC538, 0x296AC53C,
+			0x296AC540, 0x296AC544, 0x296AC548, 0x296AC54C, 0x296AC550, 0x296AC554, 0x296AC558, 0x296AC55C,
+			0x296AC560, 0x296AC564, 0x296AC568, 0x296AC56C, 0x296AC570, 0x296AC574, 0x296AC578, 0x296AC57C,
+			0x296AC580, 0x296AC584, 0x296AC588, 0x296AC58C, 0x296AC590, 0x296AC594, 0x296AC598, 0x296AC59C,
+			0x296AC5A0, 0x296AC5A4, 0x296AC5A8, 0x296AC5AC, 0x296AC5B0, 0x296AC5B4, 0x296AC5B8, 0x296AC5BC,
+			0x296AC5C0, 0x296AC5C4, 0x296AC5C8, 0x296AC5CC, 0x296AC5D0, 0x296AC5D4, 0x296AC5D8, 0x296AC5DC,
+			0x296AC5E0, 0x296AC5E4, 0x296AC5E8, 0x296AC5EC, 0x296AC5F0, 0x296AC5F4, 0x296AC5F8, 0x296AC5FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGWSCL_TBL_ADDR	gIM_R2Y_EGLWSCL_Tbl_Addr[3] = {
+	{
+		{
+			0x294AC800, 0x294AC804, 0x294AC808, 0x294AC80C, 0x294AC810, 0x294AC814, 0x294AC818, 0x294AC81C,
+			0x294AC820, 0x294AC824, 0x294AC828, 0x294AC82C, 0x294AC830, 0x294AC834, 0x294AC838, 0x294AC83C,
+			0x294AC840, 0x294AC844, 0x294AC848, 0x294AC84C, 0x294AC850, 0x294AC854, 0x294AC858, 0x294AC85C,
+			0x294AC860, 0x294AC864, 0x294AC868, 0x294AC86C, 0x294AC870, 0x294AC874, 0x294AC878, 0x294AC87C,
+			0x294AC880, 0x294AC884, 0x294AC888, 0x294AC88C, 0x294AC890, 0x294AC894, 0x294AC898, 0x294AC89C,
+			0x294AC8A0, 0x294AC8A4, 0x294AC8A8, 0x294AC8AC, 0x294AC8B0, 0x294AC8B4, 0x294AC8B8, 0x294AC8BC,
+			0x294AC8C0, 0x294AC8C4, 0x294AC8C8, 0x294AC8CC, 0x294AC8D0, 0x294AC8D4, 0x294AC8D8, 0x294AC8DC,
+			0x294AC8E0, 0x294AC8E4, 0x294AC8E8, 0x294AC8EC, 0x294AC8F0, 0x294AC8F4, 0x294AC8F8, 0x294AC8FC,
+			0x294AC900, 0x294AC904, 0x294AC908, 0x294AC90C, 0x294AC910, 0x294AC914, 0x294AC918, 0x294AC91C,
+			0x294AC920, 0x294AC924, 0x294AC928, 0x294AC92C, 0x294AC930, 0x294AC934, 0x294AC938, 0x294AC93C,
+			0x294AC940, 0x294AC944, 0x294AC948, 0x294AC94C, 0x294AC950, 0x294AC954, 0x294AC958, 0x294AC95C,
+			0x294AC960, 0x294AC964, 0x294AC968, 0x294AC96C, 0x294AC970, 0x294AC974, 0x294AC978, 0x294AC97C,
+			0x294AC980, 0x294AC984, 0x294AC988, 0x294AC98C, 0x294AC990, 0x294AC994, 0x294AC998, 0x294AC99C,
+			0x294AC9A0, 0x294AC9A4, 0x294AC9A8, 0x294AC9AC, 0x294AC9B0, 0x294AC9B4, 0x294AC9B8, 0x294AC9BC,
+			0x294AC9C0, 0x294AC9C4, 0x294AC9C8, 0x294AC9CC, 0x294AC9D0, 0x294AC9D4, 0x294AC9D8, 0x294AC9DC,
+			0x294AC9E0, 0x294AC9E4, 0x294AC9E8, 0x294AC9EC, 0x294AC9F0, 0x294AC9F4, 0x294AC9F8, 0x294AC9FC,
+		},
+	},
+	{
+		{
+			0x295AC800, 0x295AC804, 0x295AC808, 0x295AC80C, 0x295AC810, 0x295AC814, 0x295AC818, 0x295AC81C,
+			0x295AC820, 0x295AC824, 0x295AC828, 0x295AC82C, 0x295AC830, 0x295AC834, 0x295AC838, 0x295AC83C,
+			0x295AC840, 0x295AC844, 0x295AC848, 0x295AC84C, 0x295AC850, 0x295AC854, 0x295AC858, 0x295AC85C,
+			0x295AC860, 0x295AC864, 0x295AC868, 0x295AC86C, 0x295AC870, 0x295AC874, 0x295AC878, 0x295AC87C,
+			0x295AC880, 0x295AC884, 0x295AC888, 0x295AC88C, 0x295AC890, 0x295AC894, 0x295AC898, 0x295AC89C,
+			0x295AC8A0, 0x295AC8A4, 0x295AC8A8, 0x295AC8AC, 0x295AC8B0, 0x295AC8B4, 0x295AC8B8, 0x295AC8BC,
+			0x295AC8C0, 0x295AC8C4, 0x295AC8C8, 0x295AC8CC, 0x295AC8D0, 0x295AC8D4, 0x295AC8D8, 0x295AC8DC,
+			0x295AC8E0, 0x295AC8E4, 0x295AC8E8, 0x295AC8EC, 0x295AC8F0, 0x295AC8F4, 0x295AC8F8, 0x295AC8FC,
+			0x295AC900, 0x295AC904, 0x295AC908, 0x295AC90C, 0x295AC910, 0x295AC914, 0x295AC918, 0x295AC91C,
+			0x295AC920, 0x295AC924, 0x295AC928, 0x295AC92C, 0x295AC930, 0x295AC934, 0x295AC938, 0x295AC93C,
+			0x295AC940, 0x295AC944, 0x295AC948, 0x295AC94C, 0x295AC950, 0x295AC954, 0x295AC958, 0x295AC95C,
+			0x295AC960, 0x295AC964, 0x295AC968, 0x295AC96C, 0x295AC970, 0x295AC974, 0x295AC978, 0x295AC97C,
+			0x295AC980, 0x295AC984, 0x295AC988, 0x295AC98C, 0x295AC990, 0x295AC994, 0x295AC998, 0x295AC99C,
+			0x295AC9A0, 0x295AC9A4, 0x295AC9A8, 0x295AC9AC, 0x295AC9B0, 0x295AC9B4, 0x295AC9B8, 0x295AC9BC,
+			0x295AC9C0, 0x295AC9C4, 0x295AC9C8, 0x295AC9CC, 0x295AC9D0, 0x295AC9D4, 0x295AC9D8, 0x295AC9DC,
+			0x295AC9E0, 0x295AC9E4, 0x295AC9E8, 0x295AC9EC, 0x295AC9F0, 0x295AC9F4, 0x295AC9F8, 0x295AC9FC,
+		},
+	},
+	{
+		{
+			0x296AC800, 0x296AC804, 0x296AC808, 0x296AC80C, 0x296AC810, 0x296AC814, 0x296AC818, 0x296AC81C,
+			0x296AC820, 0x296AC824, 0x296AC828, 0x296AC82C, 0x296AC830, 0x296AC834, 0x296AC838, 0x296AC83C,
+			0x296AC840, 0x296AC844, 0x296AC848, 0x296AC84C, 0x296AC850, 0x296AC854, 0x296AC858, 0x296AC85C,
+			0x296AC860, 0x296AC864, 0x296AC868, 0x296AC86C, 0x296AC870, 0x296AC874, 0x296AC878, 0x296AC87C,
+			0x296AC880, 0x296AC884, 0x296AC888, 0x296AC88C, 0x296AC890, 0x296AC894, 0x296AC898, 0x296AC89C,
+			0x296AC8A0, 0x296AC8A4, 0x296AC8A8, 0x296AC8AC, 0x296AC8B0, 0x296AC8B4, 0x296AC8B8, 0x296AC8BC,
+			0x296AC8C0, 0x296AC8C4, 0x296AC8C8, 0x296AC8CC, 0x296AC8D0, 0x296AC8D4, 0x296AC8D8, 0x296AC8DC,
+			0x296AC8E0, 0x296AC8E4, 0x296AC8E8, 0x296AC8EC, 0x296AC8F0, 0x296AC8F4, 0x296AC8F8, 0x296AC8FC,
+			0x296AC900, 0x296AC904, 0x296AC908, 0x296AC90C, 0x296AC910, 0x296AC914, 0x296AC918, 0x296AC91C,
+			0x296AC920, 0x296AC924, 0x296AC928, 0x296AC92C, 0x296AC930, 0x296AC934, 0x296AC938, 0x296AC93C,
+			0x296AC940, 0x296AC944, 0x296AC948, 0x296AC94C, 0x296AC950, 0x296AC954, 0x296AC958, 0x296AC95C,
+			0x296AC960, 0x296AC964, 0x296AC968, 0x296AC96C, 0x296AC970, 0x296AC974, 0x296AC978, 0x296AC97C,
+			0x296AC980, 0x296AC984, 0x296AC988, 0x296AC98C, 0x296AC990, 0x296AC994, 0x296AC998, 0x296AC99C,
+			0x296AC9A0, 0x296AC9A4, 0x296AC9A8, 0x296AC9AC, 0x296AC9B0, 0x296AC9B4, 0x296AC9B8, 0x296AC9BC,
+			0x296AC9C0, 0x296AC9C4, 0x296AC9C8, 0x296AC9CC, 0x296AC9D0, 0x296AC9D4, 0x296AC9D8, 0x296AC9DC,
+			0x296AC9E0, 0x296AC9E4, 0x296AC9E8, 0x296AC9EC, 0x296AC9F0, 0x296AC9F4, 0x296AC9F8, 0x296AC9FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGWTON_TBL_ADDR	gIM_R2Y_EGHWTON_Tbl_Addr[3] = {
+	{
+		{
+			0x294AC200, 0x294AC204, 0x294AC208, 0x294AC20C, 0x294AC210, 0x294AC214, 0x294AC218, 0x294AC21C,
+			0x294AC220, 0x294AC224, 0x294AC228, 0x294AC22C, 0x294AC230, 0x294AC234, 0x294AC238, 0x294AC23C,
+			0x294AC240, 0x294AC244, 0x294AC248, 0x294AC24C, 0x294AC250, 0x294AC254, 0x294AC258, 0x294AC25C,
+			0x294AC260, 0x294AC264, 0x294AC268, 0x294AC26C, 0x294AC270, 0x294AC274, 0x294AC278, 0x294AC27C,
+			0x294AC280, 0x294AC284, 0x294AC288, 0x294AC28C, 0x294AC290, 0x294AC294, 0x294AC298, 0x294AC29C,
+			0x294AC2A0, 0x294AC2A4, 0x294AC2A8, 0x294AC2AC, 0x294AC2B0, 0x294AC2B4, 0x294AC2B8, 0x294AC2BC,
+			0x294AC2C0, 0x294AC2C4, 0x294AC2C8, 0x294AC2CC, 0x294AC2D0, 0x294AC2D4, 0x294AC2D8, 0x294AC2DC,
+			0x294AC2E0, 0x294AC2E4, 0x294AC2E8, 0x294AC2EC, 0x294AC2F0, 0x294AC2F4, 0x294AC2F8, 0x294AC2FC,
+			0x294AC300, 0x294AC304, 0x294AC308, 0x294AC30C, 0x294AC310, 0x294AC314, 0x294AC318, 0x294AC31C,
+			0x294AC320, 0x294AC324, 0x294AC328, 0x294AC32C, 0x294AC330, 0x294AC334, 0x294AC338, 0x294AC33C,
+			0x294AC340, 0x294AC344, 0x294AC348, 0x294AC34C, 0x294AC350, 0x294AC354, 0x294AC358, 0x294AC35C,
+			0x294AC360, 0x294AC364, 0x294AC368, 0x294AC36C, 0x294AC370, 0x294AC374, 0x294AC378, 0x294AC37C,
+			0x294AC380, 0x294AC384, 0x294AC388, 0x294AC38C, 0x294AC390, 0x294AC394, 0x294AC398, 0x294AC39C,
+			0x294AC3A0, 0x294AC3A4, 0x294AC3A8, 0x294AC3AC, 0x294AC3B0, 0x294AC3B4, 0x294AC3B8, 0x294AC3BC,
+			0x294AC3C0, 0x294AC3C4, 0x294AC3C8, 0x294AC3CC, 0x294AC3D0, 0x294AC3D4, 0x294AC3D8, 0x294AC3DC,
+			0x294AC3E0, 0x294AC3E4, 0x294AC3E8, 0x294AC3EC, 0x294AC3F0, 0x294AC3F4, 0x294AC3F8, 0x294AC3FC,
+		},
+	},
+	{
+		{
+			0x295AC200, 0x295AC204, 0x295AC208, 0x295AC20C, 0x295AC210, 0x295AC214, 0x295AC218, 0x295AC21C,
+			0x295AC220, 0x295AC224, 0x295AC228, 0x295AC22C, 0x295AC230, 0x295AC234, 0x295AC238, 0x295AC23C,
+			0x295AC240, 0x295AC244, 0x295AC248, 0x295AC24C, 0x295AC250, 0x295AC254, 0x295AC258, 0x295AC25C,
+			0x295AC260, 0x295AC264, 0x295AC268, 0x295AC26C, 0x295AC270, 0x295AC274, 0x295AC278, 0x295AC27C,
+			0x295AC280, 0x295AC284, 0x295AC288, 0x295AC28C, 0x295AC290, 0x295AC294, 0x295AC298, 0x295AC29C,
+			0x295AC2A0, 0x295AC2A4, 0x295AC2A8, 0x295AC2AC, 0x295AC2B0, 0x295AC2B4, 0x295AC2B8, 0x295AC2BC,
+			0x295AC2C0, 0x295AC2C4, 0x295AC2C8, 0x295AC2CC, 0x295AC2D0, 0x295AC2D4, 0x295AC2D8, 0x295AC2DC,
+			0x295AC2E0, 0x295AC2E4, 0x295AC2E8, 0x295AC2EC, 0x295AC2F0, 0x295AC2F4, 0x295AC2F8, 0x295AC2FC,
+			0x295AC300, 0x295AC304, 0x295AC308, 0x295AC30C, 0x295AC310, 0x295AC314, 0x295AC318, 0x295AC31C,
+			0x295AC320, 0x295AC324, 0x295AC328, 0x295AC32C, 0x295AC330, 0x295AC334, 0x295AC338, 0x295AC33C,
+			0x295AC340, 0x295AC344, 0x295AC348, 0x295AC34C, 0x295AC350, 0x295AC354, 0x295AC358, 0x295AC35C,
+			0x295AC360, 0x295AC364, 0x295AC368, 0x295AC36C, 0x295AC370, 0x295AC374, 0x295AC378, 0x295AC37C,
+			0x295AC380, 0x295AC384, 0x295AC388, 0x295AC38C, 0x295AC390, 0x295AC394, 0x295AC398, 0x295AC39C,
+			0x295AC3A0, 0x295AC3A4, 0x295AC3A8, 0x295AC3AC, 0x295AC3B0, 0x295AC3B4, 0x295AC3B8, 0x295AC3BC,
+			0x295AC3C0, 0x295AC3C4, 0x295AC3C8, 0x295AC3CC, 0x295AC3D0, 0x295AC3D4, 0x295AC3D8, 0x295AC3DC,
+			0x295AC3E0, 0x295AC3E4, 0x295AC3E8, 0x295AC3EC, 0x295AC3F0, 0x295AC3F4, 0x295AC3F8, 0x295AC3FC,
+		},
+	},
+	{
+		{
+			0x296AC200, 0x296AC204, 0x296AC208, 0x296AC20C, 0x296AC210, 0x296AC214, 0x296AC218, 0x296AC21C,
+			0x296AC220, 0x296AC224, 0x296AC228, 0x296AC22C, 0x296AC230, 0x296AC234, 0x296AC238, 0x296AC23C,
+			0x296AC240, 0x296AC244, 0x296AC248, 0x296AC24C, 0x296AC250, 0x296AC254, 0x296AC258, 0x296AC25C,
+			0x296AC260, 0x296AC264, 0x296AC268, 0x296AC26C, 0x296AC270, 0x296AC274, 0x296AC278, 0x296AC27C,
+			0x296AC280, 0x296AC284, 0x296AC288, 0x296AC28C, 0x296AC290, 0x296AC294, 0x296AC298, 0x296AC29C,
+			0x296AC2A0, 0x296AC2A4, 0x296AC2A8, 0x296AC2AC, 0x296AC2B0, 0x296AC2B4, 0x296AC2B8, 0x296AC2BC,
+			0x296AC2C0, 0x296AC2C4, 0x296AC2C8, 0x296AC2CC, 0x296AC2D0, 0x296AC2D4, 0x296AC2D8, 0x296AC2DC,
+			0x296AC2E0, 0x296AC2E4, 0x296AC2E8, 0x296AC2EC, 0x296AC2F0, 0x296AC2F4, 0x296AC2F8, 0x296AC2FC,
+			0x296AC300, 0x296AC304, 0x296AC308, 0x296AC30C, 0x296AC310, 0x296AC314, 0x296AC318, 0x296AC31C,
+			0x296AC320, 0x296AC324, 0x296AC328, 0x296AC32C, 0x296AC330, 0x296AC334, 0x296AC338, 0x296AC33C,
+			0x296AC340, 0x296AC344, 0x296AC348, 0x296AC34C, 0x296AC350, 0x296AC354, 0x296AC358, 0x296AC35C,
+			0x296AC360, 0x296AC364, 0x296AC368, 0x296AC36C, 0x296AC370, 0x296AC374, 0x296AC378, 0x296AC37C,
+			0x296AC380, 0x296AC384, 0x296AC388, 0x296AC38C, 0x296AC390, 0x296AC394, 0x296AC398, 0x296AC39C,
+			0x296AC3A0, 0x296AC3A4, 0x296AC3A8, 0x296AC3AC, 0x296AC3B0, 0x296AC3B4, 0x296AC3B8, 0x296AC3BC,
+			0x296AC3C0, 0x296AC3C4, 0x296AC3C8, 0x296AC3CC, 0x296AC3D0, 0x296AC3D4, 0x296AC3D8, 0x296AC3DC,
+			0x296AC3E0, 0x296AC3E4, 0x296AC3E8, 0x296AC3EC, 0x296AC3F0, 0x296AC3F4, 0x296AC3F8, 0x296AC3FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGWTON_TBL_ADDR	gIM_R2Y_EGMWTON_Tbl_Addr[3] = {
+	{
+		{
+			0x294AC600, 0x294AC604, 0x294AC608, 0x294AC60C, 0x294AC610, 0x294AC614, 0x294AC618, 0x294AC61C,
+			0x294AC620, 0x294AC624, 0x294AC628, 0x294AC62C, 0x294AC630, 0x294AC634, 0x294AC638, 0x294AC63C,
+			0x294AC640, 0x294AC644, 0x294AC648, 0x294AC64C, 0x294AC650, 0x294AC654, 0x294AC658, 0x294AC65C,
+			0x294AC660, 0x294AC664, 0x294AC668, 0x294AC66C, 0x294AC670, 0x294AC674, 0x294AC678, 0x294AC67C,
+			0x294AC680, 0x294AC684, 0x294AC688, 0x294AC68C, 0x294AC690, 0x294AC694, 0x294AC698, 0x294AC69C,
+			0x294AC6A0, 0x294AC6A4, 0x294AC6A8, 0x294AC6AC, 0x294AC6B0, 0x294AC6B4, 0x294AC6B8, 0x294AC6BC,
+			0x294AC6C0, 0x294AC6C4, 0x294AC6C8, 0x294AC6CC, 0x294AC6D0, 0x294AC6D4, 0x294AC6D8, 0x294AC6DC,
+			0x294AC6E0, 0x294AC6E4, 0x294AC6E8, 0x294AC6EC, 0x294AC6F0, 0x294AC6F4, 0x294AC6F8, 0x294AC6FC,
+			0x294AC700, 0x294AC704, 0x294AC708, 0x294AC70C, 0x294AC710, 0x294AC714, 0x294AC718, 0x294AC71C,
+			0x294AC720, 0x294AC724, 0x294AC728, 0x294AC72C, 0x294AC730, 0x294AC734, 0x294AC738, 0x294AC73C,
+			0x294AC740, 0x294AC744, 0x294AC748, 0x294AC74C, 0x294AC750, 0x294AC754, 0x294AC758, 0x294AC75C,
+			0x294AC760, 0x294AC764, 0x294AC768, 0x294AC76C, 0x294AC770, 0x294AC774, 0x294AC778, 0x294AC77C,
+			0x294AC780, 0x294AC784, 0x294AC788, 0x294AC78C, 0x294AC790, 0x294AC794, 0x294AC798, 0x294AC79C,
+			0x294AC7A0, 0x294AC7A4, 0x294AC7A8, 0x294AC7AC, 0x294AC7B0, 0x294AC7B4, 0x294AC7B8, 0x294AC7BC,
+			0x294AC7C0, 0x294AC7C4, 0x294AC7C8, 0x294AC7CC, 0x294AC7D0, 0x294AC7D4, 0x294AC7D8, 0x294AC7DC,
+			0x294AC7E0, 0x294AC7E4, 0x294AC7E8, 0x294AC7EC, 0x294AC7F0, 0x294AC7F4, 0x294AC7F8, 0x294AC7FC,
+		},
+	},
+	{
+		{
+			0x295AC600, 0x295AC604, 0x295AC608, 0x295AC60C, 0x295AC610, 0x295AC614, 0x295AC618, 0x295AC61C,
+			0x295AC620, 0x295AC624, 0x295AC628, 0x295AC62C, 0x295AC630, 0x295AC634, 0x295AC638, 0x295AC63C,
+			0x295AC640, 0x295AC644, 0x295AC648, 0x295AC64C, 0x295AC650, 0x295AC654, 0x295AC658, 0x295AC65C,
+			0x295AC660, 0x295AC664, 0x295AC668, 0x295AC66C, 0x295AC670, 0x295AC674, 0x295AC678, 0x295AC67C,
+			0x295AC680, 0x295AC684, 0x295AC688, 0x295AC68C, 0x295AC690, 0x295AC694, 0x295AC698, 0x295AC69C,
+			0x295AC6A0, 0x295AC6A4, 0x295AC6A8, 0x295AC6AC, 0x295AC6B0, 0x295AC6B4, 0x295AC6B8, 0x295AC6BC,
+			0x295AC6C0, 0x295AC6C4, 0x295AC6C8, 0x295AC6CC, 0x295AC6D0, 0x295AC6D4, 0x295AC6D8, 0x295AC6DC,
+			0x295AC6E0, 0x295AC6E4, 0x295AC6E8, 0x295AC6EC, 0x295AC6F0, 0x295AC6F4, 0x295AC6F8, 0x295AC6FC,
+			0x295AC700, 0x295AC704, 0x295AC708, 0x295AC70C, 0x295AC710, 0x295AC714, 0x295AC718, 0x295AC71C,
+			0x295AC720, 0x295AC724, 0x295AC728, 0x295AC72C, 0x295AC730, 0x295AC734, 0x295AC738, 0x295AC73C,
+			0x295AC740, 0x295AC744, 0x295AC748, 0x295AC74C, 0x295AC750, 0x295AC754, 0x295AC758, 0x295AC75C,
+			0x295AC760, 0x295AC764, 0x295AC768, 0x295AC76C, 0x295AC770, 0x295AC774, 0x295AC778, 0x295AC77C,
+			0x295AC780, 0x295AC784, 0x295AC788, 0x295AC78C, 0x295AC790, 0x295AC794, 0x295AC798, 0x295AC79C,
+			0x295AC7A0, 0x295AC7A4, 0x295AC7A8, 0x295AC7AC, 0x295AC7B0, 0x295AC7B4, 0x295AC7B8, 0x295AC7BC,
+			0x295AC7C0, 0x295AC7C4, 0x295AC7C8, 0x295AC7CC, 0x295AC7D0, 0x295AC7D4, 0x295AC7D8, 0x295AC7DC,
+			0x295AC7E0, 0x295AC7E4, 0x295AC7E8, 0x295AC7EC, 0x295AC7F0, 0x295AC7F4, 0x295AC7F8, 0x295AC7FC,
+		},
+	},
+	{
+		{
+			0x296AC600, 0x296AC604, 0x296AC608, 0x296AC60C, 0x296AC610, 0x296AC614, 0x296AC618, 0x296AC61C,
+			0x296AC620, 0x296AC624, 0x296AC628, 0x296AC62C, 0x296AC630, 0x296AC634, 0x296AC638, 0x296AC63C,
+			0x296AC640, 0x296AC644, 0x296AC648, 0x296AC64C, 0x296AC650, 0x296AC654, 0x296AC658, 0x296AC65C,
+			0x296AC660, 0x296AC664, 0x296AC668, 0x296AC66C, 0x296AC670, 0x296AC674, 0x296AC678, 0x296AC67C,
+			0x296AC680, 0x296AC684, 0x296AC688, 0x296AC68C, 0x296AC690, 0x296AC694, 0x296AC698, 0x296AC69C,
+			0x296AC6A0, 0x296AC6A4, 0x296AC6A8, 0x296AC6AC, 0x296AC6B0, 0x296AC6B4, 0x296AC6B8, 0x296AC6BC,
+			0x296AC6C0, 0x296AC6C4, 0x296AC6C8, 0x296AC6CC, 0x296AC6D0, 0x296AC6D4, 0x296AC6D8, 0x296AC6DC,
+			0x296AC6E0, 0x296AC6E4, 0x296AC6E8, 0x296AC6EC, 0x296AC6F0, 0x296AC6F4, 0x296AC6F8, 0x296AC6FC,
+			0x296AC700, 0x296AC704, 0x296AC708, 0x296AC70C, 0x296AC710, 0x296AC714, 0x296AC718, 0x296AC71C,
+			0x296AC720, 0x296AC724, 0x296AC728, 0x296AC72C, 0x296AC730, 0x296AC734, 0x296AC738, 0x296AC73C,
+			0x296AC740, 0x296AC744, 0x296AC748, 0x296AC74C, 0x296AC750, 0x296AC754, 0x296AC758, 0x296AC75C,
+			0x296AC760, 0x296AC764, 0x296AC768, 0x296AC76C, 0x296AC770, 0x296AC774, 0x296AC778, 0x296AC77C,
+			0x296AC780, 0x296AC784, 0x296AC788, 0x296AC78C, 0x296AC790, 0x296AC794, 0x296AC798, 0x296AC79C,
+			0x296AC7A0, 0x296AC7A4, 0x296AC7A8, 0x296AC7AC, 0x296AC7B0, 0x296AC7B4, 0x296AC7B8, 0x296AC7BC,
+			0x296AC7C0, 0x296AC7C4, 0x296AC7C8, 0x296AC7CC, 0x296AC7D0, 0x296AC7D4, 0x296AC7D8, 0x296AC7DC,
+			0x296AC7E0, 0x296AC7E4, 0x296AC7E8, 0x296AC7EC, 0x296AC7F0, 0x296AC7F4, 0x296AC7F8, 0x296AC7FC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGWTON_TBL_ADDR	gIM_R2Y_EGLWTON_Tbl_Addr[3] = {
+	{
+		{
+			0x294ACA00, 0x294ACA04, 0x294ACA08, 0x294ACA0C, 0x294ACA10, 0x294ACA14, 0x294ACA18, 0x294ACA1C,
+			0x294ACA20, 0x294ACA24, 0x294ACA28, 0x294ACA2C, 0x294ACA30, 0x294ACA34, 0x294ACA38, 0x294ACA3C,
+			0x294ACA40, 0x294ACA44, 0x294ACA48, 0x294ACA4C, 0x294ACA50, 0x294ACA54, 0x294ACA58, 0x294ACA5C,
+			0x294ACA60, 0x294ACA64, 0x294ACA68, 0x294ACA6C, 0x294ACA70, 0x294ACA74, 0x294ACA78, 0x294ACA7C,
+			0x294ACA80, 0x294ACA84, 0x294ACA88, 0x294ACA8C, 0x294ACA90, 0x294ACA94, 0x294ACA98, 0x294ACA9C,
+			0x294ACAA0, 0x294ACAA4, 0x294ACAA8, 0x294ACAAC, 0x294ACAB0, 0x294ACAB4, 0x294ACAB8, 0x294ACABC,
+			0x294ACAC0, 0x294ACAC4, 0x294ACAC8, 0x294ACACC, 0x294ACAD0, 0x294ACAD4, 0x294ACAD8, 0x294ACADC,
+			0x294ACAE0, 0x294ACAE4, 0x294ACAE8, 0x294ACAEC, 0x294ACAF0, 0x294ACAF4, 0x294ACAF8, 0x294ACAFC,
+			0x294ACB00, 0x294ACB04, 0x294ACB08, 0x294ACB0C, 0x294ACB10, 0x294ACB14, 0x294ACB18, 0x294ACB1C,
+			0x294ACB20, 0x294ACB24, 0x294ACB28, 0x294ACB2C, 0x294ACB30, 0x294ACB34, 0x294ACB38, 0x294ACB3C,
+			0x294ACB40, 0x294ACB44, 0x294ACB48, 0x294ACB4C, 0x294ACB50, 0x294ACB54, 0x294ACB58, 0x294ACB5C,
+			0x294ACB60, 0x294ACB64, 0x294ACB68, 0x294ACB6C, 0x294ACB70, 0x294ACB74, 0x294ACB78, 0x294ACB7C,
+			0x294ACB80, 0x294ACB84, 0x294ACB88, 0x294ACB8C, 0x294ACB90, 0x294ACB94, 0x294ACB98, 0x294ACB9C,
+			0x294ACBA0, 0x294ACBA4, 0x294ACBA8, 0x294ACBAC, 0x294ACBB0, 0x294ACBB4, 0x294ACBB8, 0x294ACBBC,
+			0x294ACBC0, 0x294ACBC4, 0x294ACBC8, 0x294ACBCC, 0x294ACBD0, 0x294ACBD4, 0x294ACBD8, 0x294ACBDC,
+			0x294ACBE0, 0x294ACBE4, 0x294ACBE8, 0x294ACBEC, 0x294ACBF0, 0x294ACBF4, 0x294ACBF8, 0x294ACBFC,
+		},
+	},
+	{
+		{
+			0x295ACA00, 0x295ACA04, 0x295ACA08, 0x295ACA0C, 0x295ACA10, 0x295ACA14, 0x295ACA18, 0x295ACA1C,
+			0x295ACA20, 0x295ACA24, 0x295ACA28, 0x295ACA2C, 0x295ACA30, 0x295ACA34, 0x295ACA38, 0x295ACA3C,
+			0x295ACA40, 0x295ACA44, 0x295ACA48, 0x295ACA4C, 0x295ACA50, 0x295ACA54, 0x295ACA58, 0x295ACA5C,
+			0x295ACA60, 0x295ACA64, 0x295ACA68, 0x295ACA6C, 0x295ACA70, 0x295ACA74, 0x295ACA78, 0x295ACA7C,
+			0x295ACA80, 0x295ACA84, 0x295ACA88, 0x295ACA8C, 0x295ACA90, 0x295ACA94, 0x295ACA98, 0x295ACA9C,
+			0x295ACAA0, 0x295ACAA4, 0x295ACAA8, 0x295ACAAC, 0x295ACAB0, 0x295ACAB4, 0x295ACAB8, 0x295ACABC,
+			0x295ACAC0, 0x295ACAC4, 0x295ACAC8, 0x295ACACC, 0x295ACAD0, 0x295ACAD4, 0x295ACAD8, 0x295ACADC,
+			0x295ACAE0, 0x295ACAE4, 0x295ACAE8, 0x295ACAEC, 0x295ACAF0, 0x295ACAF4, 0x295ACAF8, 0x295ACAFC,
+			0x295ACB00, 0x295ACB04, 0x295ACB08, 0x295ACB0C, 0x295ACB10, 0x295ACB14, 0x295ACB18, 0x295ACB1C,
+			0x295ACB20, 0x295ACB24, 0x295ACB28, 0x295ACB2C, 0x295ACB30, 0x295ACB34, 0x295ACB38, 0x295ACB3C,
+			0x295ACB40, 0x295ACB44, 0x295ACB48, 0x295ACB4C, 0x295ACB50, 0x295ACB54, 0x295ACB58, 0x295ACB5C,
+			0x295ACB60, 0x295ACB64, 0x295ACB68, 0x295ACB6C, 0x295ACB70, 0x295ACB74, 0x295ACB78, 0x295ACB7C,
+			0x295ACB80, 0x295ACB84, 0x295ACB88, 0x295ACB8C, 0x295ACB90, 0x295ACB94, 0x295ACB98, 0x295ACB9C,
+			0x295ACBA0, 0x295ACBA4, 0x295ACBA8, 0x295ACBAC, 0x295ACBB0, 0x295ACBB4, 0x295ACBB8, 0x295ACBBC,
+			0x295ACBC0, 0x295ACBC4, 0x295ACBC8, 0x295ACBCC, 0x295ACBD0, 0x295ACBD4, 0x295ACBD8, 0x295ACBDC,
+			0x295ACBE0, 0x295ACBE4, 0x295ACBE8, 0x295ACBEC, 0x295ACBF0, 0x295ACBF4, 0x295ACBF8, 0x295ACBFC,
+		},
+	},
+	{
+		{
+			0x296ACA00, 0x296ACA04, 0x296ACA08, 0x296ACA0C, 0x296ACA10, 0x296ACA14, 0x296ACA18, 0x296ACA1C,
+			0x296ACA20, 0x296ACA24, 0x296ACA28, 0x296ACA2C, 0x296ACA30, 0x296ACA34, 0x296ACA38, 0x296ACA3C,
+			0x296ACA40, 0x296ACA44, 0x296ACA48, 0x296ACA4C, 0x296ACA50, 0x296ACA54, 0x296ACA58, 0x296ACA5C,
+			0x296ACA60, 0x296ACA64, 0x296ACA68, 0x296ACA6C, 0x296ACA70, 0x296ACA74, 0x296ACA78, 0x296ACA7C,
+			0x296ACA80, 0x296ACA84, 0x296ACA88, 0x296ACA8C, 0x296ACA90, 0x296ACA94, 0x296ACA98, 0x296ACA9C,
+			0x296ACAA0, 0x296ACAA4, 0x296ACAA8, 0x296ACAAC, 0x296ACAB0, 0x296ACAB4, 0x296ACAB8, 0x296ACABC,
+			0x296ACAC0, 0x296ACAC4, 0x296ACAC8, 0x296ACACC, 0x296ACAD0, 0x296ACAD4, 0x296ACAD8, 0x296ACADC,
+			0x296ACAE0, 0x296ACAE4, 0x296ACAE8, 0x296ACAEC, 0x296ACAF0, 0x296ACAF4, 0x296ACAF8, 0x296ACAFC,
+			0x296ACB00, 0x296ACB04, 0x296ACB08, 0x296ACB0C, 0x296ACB10, 0x296ACB14, 0x296ACB18, 0x296ACB1C,
+			0x296ACB20, 0x296ACB24, 0x296ACB28, 0x296ACB2C, 0x296ACB30, 0x296ACB34, 0x296ACB38, 0x296ACB3C,
+			0x296ACB40, 0x296ACB44, 0x296ACB48, 0x296ACB4C, 0x296ACB50, 0x296ACB54, 0x296ACB58, 0x296ACB5C,
+			0x296ACB60, 0x296ACB64, 0x296ACB68, 0x296ACB6C, 0x296ACB70, 0x296ACB74, 0x296ACB78, 0x296ACB7C,
+			0x296ACB80, 0x296ACB84, 0x296ACB88, 0x296ACB8C, 0x296ACB90, 0x296ACB94, 0x296ACB98, 0x296ACB9C,
+			0x296ACBA0, 0x296ACBA4, 0x296ACBA8, 0x296ACBAC, 0x296ACBB0, 0x296ACBB4, 0x296ACBB8, 0x296ACBBC,
+			0x296ACBC0, 0x296ACBC4, 0x296ACBC8, 0x296ACBCC, 0x296ACBD0, 0x296ACBD4, 0x296ACBD8, 0x296ACBDC,
+			0x296ACBE0, 0x296ACBE4, 0x296ACBE8, 0x296ACBEC, 0x296ACBF0, 0x296ACBF4, 0x296ACBF8, 0x296ACBFC,
+		},
+	},
+};
+
+static const T_IM_R2Y_CTRL_RDMA_EGMPSCL_TBL_ADDR	gIM_R2Y_EGMPSCL_Tbl_Addr[3] = {
+	{
+		{
+			0x294ACC00, 0x294ACC04, 0x294ACC08, 0x294ACC0C, 0x294ACC10, 0x294ACC14, 0x294ACC18, 0x294ACC1C,
+			0x294ACC20, 0x294ACC24, 0x294ACC28, 0x294ACC2C, 0x294ACC30, 0x294ACC34, 0x294ACC38, 0x294ACC3C,
+			0x294ACC40, 0x294ACC44, 0x294ACC48, 0x294ACC4C, 0x294ACC50, 0x294ACC54, 0x294ACC58, 0x294ACC5C,
+			0x294ACC60, 0x294ACC64, 0x294ACC68, 0x294ACC6C, 0x294ACC70, 0x294ACC74, 0x294ACC78, 0x294ACC7C,
+			0x294ACC80, 0x294ACC84, 0x294ACC88, 0x294ACC8C, 0x294ACC90, 0x294ACC94, 0x294ACC98, 0x294ACC9C,
+			0x294ACCA0, 0x294ACCA4, 0x294ACCA8, 0x294ACCAC, 0x294ACCB0, 0x294ACCB4, 0x294ACCB8, 0x294ACCBC,
+			0x294ACCC0, 0x294ACCC4, 0x294ACCC8, 0x294ACCCC, 0x294ACCD0, 0x294ACCD4, 0x294ACCD8, 0x294ACCDC,
+			0x294ACCE0, 0x294ACCE4, 0x294ACCE8, 0x294ACCEC, 0x294ACCF0, 0x294ACCF4, 0x294ACCF8, 0x294ACCFC,
+			0x294ACD00, 0x294ACD04, 0x294ACD08, 0x294ACD0C, 0x294ACD10, 0x294ACD14, 0x294ACD18, 0x294ACD1C,
+			0x294ACD20, 0x294ACD24, 0x294ACD28, 0x294ACD2C, 0x294ACD30, 0x294ACD34, 0x294ACD38, 0x294ACD3C,
+			0x294ACD40, 0x294ACD44, 0x294ACD48, 0x294ACD4C, 0x294ACD50, 0x294ACD54, 0x294ACD58, 0x294ACD5C,
+			0x294ACD60, 0x294ACD64, 0x294ACD68, 0x294ACD6C, 0x294ACD70, 0x294ACD74, 0x294ACD78, 0x294ACD7C,
+			0x294ACD80, 0x294ACD84, 0x294ACD88, 0x294ACD8C, 0x294ACD90, 0x294ACD94, 0x294ACD98, 0x294ACD9C,
+			0x294ACDA0, 0x294ACDA4, 0x294ACDA8, 0x294ACDAC, 0x294ACDB0, 0x294ACDB4, 0x294ACDB8,
+		},
+	},
+	{
+		{
+			0x295ACC00, 0x295ACC04, 0x295ACC08, 0x295ACC0C, 0x295ACC10, 0x295ACC14, 0x295ACC18, 0x295ACC1C,
+			0x295ACC20, 0x295ACC24, 0x295ACC28, 0x295ACC2C, 0x295ACC30, 0x295ACC34, 0x295ACC38, 0x295ACC3C,
+			0x295ACC40, 0x295ACC44, 0x295ACC48, 0x295ACC4C, 0x295ACC50, 0x295ACC54, 0x295ACC58, 0x295ACC5C,
+			0x295ACC60, 0x295ACC64, 0x295ACC68, 0x295ACC6C, 0x295ACC70, 0x295ACC74, 0x295ACC78, 0x295ACC7C,
+			0x295ACC80, 0x295ACC84, 0x295ACC88, 0x295ACC8C, 0x295ACC90, 0x295ACC94, 0x295ACC98, 0x295ACC9C,
+			0x295ACCA0, 0x295ACCA4, 0x295ACCA8, 0x295ACCAC, 0x295ACCB0, 0x295ACCB4, 0x295ACCB8, 0x295ACCBC,
+			0x295ACCC0, 0x295ACCC4, 0x295ACCC8, 0x295ACCCC, 0x295ACCD0, 0x295ACCD4, 0x295ACCD8, 0x295ACCDC,
+			0x295ACCE0, 0x295ACCE4, 0x295ACCE8, 0x295ACCEC, 0x295ACCF0, 0x295ACCF4, 0x295ACCF8, 0x295ACCFC,
+			0x295ACD00, 0x295ACD04, 0x295ACD08, 0x295ACD0C, 0x295ACD10, 0x295ACD14, 0x295ACD18, 0x295ACD1C,
+			0x295ACD20, 0x295ACD24, 0x295ACD28, 0x295ACD2C, 0x295ACD30, 0x295ACD34, 0x295ACD38, 0x295ACD3C,
+			0x295ACD40, 0x295ACD44, 0x295ACD48, 0x295ACD4C, 0x295ACD50, 0x295ACD54, 0x295ACD58, 0x295ACD5C,
+			0x295ACD60, 0x295ACD64, 0x295ACD68, 0x295ACD6C, 0x295ACD70, 0x295ACD74, 0x295ACD78, 0x295ACD7C,
+			0x295ACD80, 0x295ACD84, 0x295ACD88, 0x295ACD8C, 0x295ACD90, 0x295ACD94, 0x295ACD98, 0x295ACD9C,
+			0x295ACDA0, 0x295ACDA4, 0x295ACDA8, 0x295ACDAC, 0x295ACDB0, 0x295ACDB4, 0x295ACDB8,
+		},
+	},
+	{
+		{
+			0x296ACC00, 0x296ACC04, 0x296ACC08, 0x296ACC0C, 0x296ACC10, 0x296ACC14, 0x296ACC18, 0x296ACC1C,
+			0x296ACC20, 0x296ACC24, 0x296ACC28, 0x296ACC2C, 0x296ACC30, 0x296ACC34, 0x296ACC38, 0x296ACC3C,
+			0x296ACC40, 0x296ACC44, 0x296ACC48, 0x296ACC4C, 0x296ACC50, 0x296ACC54, 0x296ACC58, 0x296ACC5C,
+			0x296ACC60, 0x296ACC64, 0x296ACC68, 0x296ACC6C, 0x296ACC70, 0x296ACC74, 0x296ACC78, 0x296ACC7C,
+			0x296ACC80, 0x296ACC84, 0x296ACC88, 0x296ACC8C, 0x296ACC90, 0x296ACC94, 0x296ACC98, 0x296ACC9C,
+			0x296ACCA0, 0x296ACCA4, 0x296ACCA8, 0x296ACCAC, 0x296ACCB0, 0x296ACCB4, 0x296ACCB8, 0x296ACCBC,
+			0x296ACCC0, 0x296ACCC4, 0x296ACCC8, 0x296ACCCC, 0x296ACCD0, 0x296ACCD4, 0x296ACCD8, 0x296ACCDC,
+			0x296ACCE0, 0x296ACCE4, 0x296ACCE8, 0x296ACCEC, 0x296ACCF0, 0x296ACCF4, 0x296ACCF8, 0x296ACCFC,
+			0x296ACD00, 0x296ACD04, 0x296ACD08, 0x296ACD0C, 0x296ACD10, 0x296ACD14, 0x296ACD18, 0x296ACD1C,
+			0x296ACD20, 0x296ACD24, 0x296ACD28, 0x296ACD2C, 0x296ACD30, 0x296ACD34, 0x296ACD38, 0x296ACD3C,
+			0x296ACD40, 0x296ACD44, 0x296ACD48, 0x296ACD4C, 0x296ACD50, 0x296ACD54, 0x296ACD58, 0x296ACD5C,
+			0x296ACD60, 0x296ACD64, 0x296ACD68, 0x296ACD6C, 0x296ACD70, 0x296ACD74, 0x296ACD78, 0x296ACD7C,
+			0x296ACD80, 0x296ACD84, 0x296ACD88, 0x296ACD8C, 0x296ACD90, 0x296ACD94, 0x296ACD98, 0x296ACD9C,
+			0x296ACDA0, 0x296ACDA4, 0x296ACDA8, 0x296ACDAC, 0x296ACDB0, 0x296ACDB4, 0x296ACDB8,
+		},
+	},
+};
+#endif	// CO_DDIM_UTILITY_USE
+
+/*----------------------------------------------------------------------*/
+/* Macro																*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+// Nothing Special
+#endif
+
+/*----------------------------------------------------------------------*/
+/* Function																*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+// Nothing Special
+#endif
+
+
+/*----------------------------------------------------------------------*/
+/* Local Function														*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+static VOID im_r2y_reset( UCHAR pipe_no );
+static VOID im_r2y_manager_init( UCHAR pipe_no );
+static INT32 im_r2y_copy_reg_to_sdram_ushort( USHORT* const sdram_addr, const volatile USHORT* const reg_addr, const UINT32 array_num );
+static VOID im_r2y_calc_ring_pixs( UCHAR pipe_no );
+static VOID im_r2y_calc_top_msb_offset_sdram_input( UCHAR pipe_no );
+static VOID im_r2y_calc_yyr_address_sdram_input( UCHAR pipe_no );
+static VOID im_r2y_set_yyr_address_sdram_input( UCHAR pipe_no );
+static VOID im_r2y_set_out_pitch( UCHAR pipe_no, T_IM_R2Y_OUT_PITCH const r2y_out_pitch[D_IM_R2Y_YYW_CH_MAX] );
+static VOID im_r2y_calc_out_pitch( UCHAR pipe_no );
+static VOID im_r2y_calc_in_rect_sdram_input( UCHAR pipe_no );
+static VOID im_r2y_latest_addr_update( UCHAR pipe_no, const UINT32 yyw_no );
+static VOID im_r2y_get_loop_val( UCHAR pipe_no, UCHAR* loop_sta, UCHAR* loop_end );
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+#ifdef CO_R2Y_RDMA_ON
+static VOID im_r2y_start_rdma( T_IM_RDMA_CTRL* ctrl );
+static VOID im_r2y_set_rdma_val_ee0_ctrl( UCHAR pipe_no, const T_IM_R2Y_POST_RESIZE0_PARAM* const r2y_ctrl_post_resize );
+static VOID im_r2y_set_rdma_val_ee1_ctrl( UCHAR pipe_no, const T_IM_R2Y_POST_RESIZE1_PARAM* const r2y_ctrl_post_resize );
+static VOID im_r2y_set_rdma_val_deknee_table( UCHAR pipe_no, E_R2Y_DKN_RGBTBL tbl_type, const USHORT* const src_tbl );
+static VOID im_r2y_set_rdma_val_offset_ctrl( UCHAR pipe_no, const T_IM_R2Y_OFS* const ofs );
+static VOID im_r2y_set_rdma_val_wb_clip_ctrl( UCHAR pipe_no, const T_IM_R2Y_RGB_COLOR* const rgb_color );
+static VOID im_r2y_set_rdma_val_cc0_matrix_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_CC0* const r2y_ctrl_cc );
+static VOID im_r2y_set_rdma_val_cc0_matrix_coefficient_ctrl( UCHAR pipe_no, const SHORT* const cc0k );
+static VOID im_r2y_set_rdma_val_multi_axis_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_MULTI_AXIS* const r2y_ctrl_multi_axis );
+static VOID im_r2y_set_rdma_val_btc_offset_ctrl( UCHAR pipe_no, const T_IM_R2Y_TCOF* const r2y_ctrl_btc_offset );
+static VOID im_r2y_set_rdma_val_btc_tct_ctrl( UCHAR pipe_no, const T_IM_R2Y_TCT* const r2y_ctrl_btc_tct );
+static VOID im_r2y_set_rdma_val_btc_tchs_ctrl( UCHAR pipe_no, const T_IM_R2Y_TCHS* const r2y_ctrl_btc_tchs );
+static VOID im_r2y_set_rdma_val_tone_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_TONE* const r2y_ctrl_tone );
+static VOID im_r2y_set_rdma_val_gamma_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_GAMMA* const r2y_ctrl_gamma );
+static VOID im_r2y_set_rdma_val_cc1_matrix_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_CC1* const r2y_ctrl_cc );
+static VOID im_r2y_set_rdma_val_cc1_matrix_coefficient_ctrl( UCHAR pipe_no, const SHORT* const cc1k );
+static VOID im_r2y_set_rdma_val_yc_convert_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_YCC* const r2y_ctrl_ycc );
+static VOID im_r2y_set_rdma_val_ynr_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_YNR* const r2y_ctrl_ynr );
+static VOID im_r2y_set_rdma_val_eenr_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_CMN* const r2y_ctrl_edge_cmn );
+static VOID im_r2y_set_rdma_val_high_edge_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_HEDGE* const r2y_ctrl_hedge );
+static VOID im_r2y_set_rdma_val_medium_edge_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_MEDGE* const r2y_ctrl_medge );
+static VOID im_r2y_set_rdma_val_low_edge_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_LEDGE* const r2y_ctrl_ledge );
+static VOID im_r2y_set_rdma_val_edge_dot_noise_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_DOT_NOISE* const r2y_ctrl_edge_dot );
+static VOID im_r2y_set_rdma_val_edge_blend_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_BLEND* const r2y_ctrl_edge_blend );
+static VOID im_r2y_set_rdma_val_crv_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_EDGE_TEXTURE_ADJ_COMMON* const r2y_ctrl_c_ref_edge_texture_adj_common );
+static VOID im_r2y_set_rdma_val_egcrv_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_EDGE_ADJ* const r2y_ctrl_c_ref_edge_adj );
+static VOID im_r2y_set_rdma_val_ybcrv_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_YB_BLEND* const r2y_ctrl_c_ref_yb_blend );
+static VOID im_r2y_set_rdma_val_color_nr_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_CLPF* const r2y_ctrl_clpf );
+static VOID im_r2y_set_rdma_val_chroma_suppress_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_CS* const r2y_ctrl_cs );
+static VOID im_r2y_set_rdma_val_tone_ctrl_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num );
+static VOID im_r2y_set_rdma_val_gammma_diff_table( UCHAR pipe_no, UCHAR tbl_index, const ULLONG* const src_diff_tbl );
+static VOID im_r2y_set_rdma_val_gammma_full_table( UCHAR pipe_no, UCHAR tbl_index, const USHORT* const src_full_tbl );
+static VOID im_r2y_set_rdma_val_hedge_scale_table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num );
+static VOID im_r2y_set_rdma_val_hedge_step_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num );
+static VOID im_r2y_set_rdma_val_medge_scale_table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num );
+static VOID im_r2y_set_rdma_val_medge_step_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num );
+static VOID im_r2y_set_rdma_val_ledge_scale_table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num );
+static VOID im_r2y_set_rdma_val_ledge_step_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num );
+static VOID im_r2y_set_rdma_val_map_scale_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num );
+#endif	// CO_R2Y_RDMA_ON
+#endif	// CO_DDIM_UTILITY_USE
+
+
+/* R2Y reset sequence
+ */
+static VOID im_r2y_reset( UCHAR pipe_no )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_reset error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	Im_R2Y_On_Hclk( pipe_no );
+	Im_R2Y_On_Iclk( pipe_no );
+	Im_R2Y_On_Clk( pipe_no );	// TRG off control accompanies the R2Y reset
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.CNTL.word = 0x0000;
+	Im_R2Y_Off_Clk( pipe_no );
+	Im_R2Y_Off_Iclk( pipe_no );
+	Im_R2Y_Off_Hclk( pipe_no );
+	Im_R2Y_Off_Pclk( pipe_no );
+}
+
+/* Reset internal value
+ */
+static VOID im_r2y_manager_init( UCHAR pipe_no )
+{
+	UCHAR size_coef = 1;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_manager_init error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	if( pipe_no == D_IM_R2Y_PIPE12 ){
+		size_coef = 2;
+		pipe_no = 0;
+	}
+
+	// Initialize of State & Handler management information
+	memset( (USHORT*)&gIM_R2Y_State[pipe_no], 0, sizeof(T_IM_R2Y_STATE_MNG) * size_coef );
+
+	// Initialize of Address management information
+	memset( (USHORT*)&gIM_R2Y_Out_Mng[pipe_no], 0, sizeof(T_IM_R2Y_OUTPUT_MNG) * D_IM_R2Y_YYW_CH_MAX * size_coef );
+
+	// initialize of Resize information
+	memset( (USHORT*)&gIM_R2Y_Resize_Param[pipe_no], 0, sizeof(T_IM_R2Y_RESIZE_PARAM) * size_coef );
+
+	// Initialize of control information
+	memset( (USHORT*)&gIM_R2Y_yyra_ofs_info[pipe_no], 0, sizeof(T_IM_R2Y_YYRA_OFS_INFO) * size_coef );
+
+	// Initialize of PCLK/HCLK/CLK control information
+#ifdef CO_ACT_R2Y_CLOCK
+	memset( (USHORT*)&gIM_R2Y_Clk_Ctrl_Cnt[pipe_no], 0, sizeof(gIM_R2Y_Clk_Ctrl_Cnt) * size_coef );
+	memset( (USHORT*)&gIM_R2Y_Clk_Ctrl_Disable[pipe_no], 0, sizeof(gIM_R2Y_Clk_Ctrl_Disable) * size_coef );
+#endif	// CO_ACT_R2Y_CLOCK
+#ifdef CO_ACT_R2Y_PCLOCK
+	memset( (USHORT*)&gIM_R2Y_Pclk_Ctrl_Cnt[pipe_no], 0, sizeof(gIM_R2Y_Pclk_Ctrl_Cnt) * size_coef );
+	memset( (USHORT*)&gIM_R2Y_Pclk_Ctrl_Disable[pipe_no], 0, sizeof(gIM_R2Y_Pclk_Ctrl_Disable) * size_coef );
+#endif	// CO_ACT_R2Y_PCLOCK
+#ifdef CO_ACT_R2Y_HCLOCK
+	memset( (USHORT*)&gIM_R2Y_Hclk_Ctrl_Cnt[pipe_no], 0, sizeof(gIM_R2Y_Hclk_Ctrl_Cnt) * size_coef );
+	memset( (USHORT*)&gIM_R2Y_Hclk_Ctrl_Disable[pipe_no], 0, sizeof(gIM_R2Y_Hclk_Ctrl_Disable) * size_coef );
+#endif	// CO_ACT_R2Y_HCLOCK
+#ifdef CO_ACT_R2Y_ICLOCK
+	memset( (USHORT*)&gIM_R2Y_Iclk_Ctrl_Cnt[pipe_no], 0, sizeof(gIM_R2Y_Iclk_Ctrl_Cnt) * size_coef );
+	memset( (USHORT*)&gIM_R2Y_Iclk_Ctrl_Disable[pipe_no], 0, sizeof(gIM_R2Y_Iclk_Ctrl_Disable) * size_coef );
+#endif	// CO_ACT_R2Y_ICLOCK
+
+	return;
+}
+
+/* Copy USHORT registar value to SDRAM.
+ * Registar access is ULONG.
+ */
+static INT32 im_r2y_copy_reg_to_sdram_ushort( USHORT* const sdram_addr, const volatile USHORT* const reg_addr, const UINT32 array_num )
+{
+	UINT32 loopcnt;
+	union {
+		ULONG word;
+		USHORT hword[2];
+	} conv_wok;
+	volatile ULONG* reg_addr_ulong;
+
+	reg_addr_ulong = (ULONG*)reg_addr;
+	for( loopcnt = 0; loopcnt < (array_num / 2); loopcnt++ ) {
+		conv_wok.word = reg_addr_ulong[loopcnt];
+		sdram_addr[loopcnt * 2] = conv_wok.hword[0];
+		sdram_addr[loopcnt * 2 + 1] = conv_wok.hword[1];
+	}
+
+	if( (array_num % 2) != 0 ) {
+		conv_wok.word = reg_addr_ulong[loopcnt];
+		sdram_addr[loopcnt * 2] = conv_wok.hword[0];
+	}
+
+	return D_DDIM_OK;
+}
+
+/* Calculate padding pixs and referenced pixs with filter mode
+ */
+static VOID im_r2y_calc_ring_pixs( UCHAR pipe_no )
+{
+	static const T_IM_R2Y_RING_PIXS ring_pixs_info_tbl[2][2] = {	// YCFBYP, YCFPDD
+		{	// YCFBYP=0
+			{ D_IM_R2Y_ENABLE_OFF, 3, 0, 6 },	// YCFBYP=0, YCFPDD=0
+			{ D_IM_R2Y_ENABLE_ON,  3, 6, 0 },	// YCFBYP=0, YCFPDD=1
+		},
+		{	// YCFBYP=1
+			{ D_IM_R2Y_ENABLE_OFF, 0, 0, 0 },	// YCFBYP=1, YCFPDD=0
+			{ D_IM_R2Y_ENABLE_ON,  0, 0, 0 },	// YCFBYP=1, YCFPDD=1	NG Setting
+		}
+	};
+
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_calc_ring_pixs error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		// Get current ring pixel information
+		gIM_R2Y_State[loop_cnt].ring_pixs_info = ring_pixs_info_tbl[gIM_R2Y_State[loop_cnt].ycf_bypass][gIM_R2Y_State[loop_cnt].ycf_padding];
+
+#ifdef IM_R2Y_DEBUG_PRINT
+		Ddim_Print(( "im_r2y_calc_ring_pixs(): en=%u ring=%u pad=%u ref=%u\n",
+					 gIM_R2Y_State[loop_cnt].ring_pixs_info.pad_enable,
+					 gIM_R2Y_State[loop_cnt].ring_pixs_info.ring_pixs,
+					 gIM_R2Y_State[loop_cnt].ring_pixs_info.pad_pixs,
+					 gIM_R2Y_State[loop_cnt].ring_pixs_info.ref_pixs ));
+#endif
+	}
+}
+
+/* Calculate top-left pixel MSB offset bit.
+ */
+static VOID im_r2y_calc_top_msb_offset_sdram_input( UCHAR pipe_no )
+{
+	static const UCHAR msb_offset_pack12[D_IM_R2Y_PACK12_MSB_CYCLE_PIXS * 2] = {
+		0, 4, 0, 4
+	};
+	static const UCHAR msb_offset_pack8_16[1] = {
+		0
+	};
+	USHORT trim_left[D_IM_R2Y_PORT_MAX];
+	USHORT msb_array_idx[D_IM_R2Y_PORT_MAX];
+	USHORT cycle_pixs;
+	UCHAR const* p_msb_offset;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_calc_top_msb_offset_sdram_input error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	switch( gIM_R2Y_State[pipe_no].input_dtype ) {
+		case D_IM_R2Y_READ_DTYP_PACK8:	// FALL THROUGH
+		case D_IM_R2Y_READ_DTYP_PACK16:
+			p_msb_offset = &msb_offset_pack8_16[0];
+			cycle_pixs = 1;
+			msb_array_idx[D_IM_R2Y_PORT_0] = 0;
+			msb_array_idx[D_IM_R2Y_PORT_1] = 0;
+			msb_array_idx[D_IM_R2Y_PORT_2] = 0;
+			break;
+//		case D_IM_R2Y_READ_DTYP_PACK12:
+		default:
+			p_msb_offset = &msb_offset_pack12[0];
+			cycle_pixs = D_IM_R2Y_PACK12_MSB_CYCLE_PIXS;
+			msb_array_idx[D_IM_R2Y_PORT_0] = (gIM_R2Y_State[pipe_no].top_offset[D_IM_R2Y_PORT_0] == 0)?(0):(1);
+			msb_array_idx[D_IM_R2Y_PORT_1] = (gIM_R2Y_State[pipe_no].top_offset[D_IM_R2Y_PORT_1] == 0)?(0):(1);
+			msb_array_idx[D_IM_R2Y_PORT_2] = (gIM_R2Y_State[pipe_no].top_offset[D_IM_R2Y_PORT_2] == 0)?(0):(1);
+			break;
+	}
+
+	trim_left[D_IM_R2Y_PORT_0] = gIM_R2Y_State[pipe_no].input_size.img_left;
+	trim_left[D_IM_R2Y_PORT_1] = gIM_R2Y_State[pipe_no].input_size.img_left;
+	trim_left[D_IM_R2Y_PORT_2] = gIM_R2Y_State[pipe_no].input_size.img_left;
+
+	msb_array_idx[D_IM_R2Y_PORT_0] += (USHORT)( trim_left[D_IM_R2Y_PORT_0] % cycle_pixs );
+	msb_array_idx[D_IM_R2Y_PORT_1] += (USHORT)( trim_left[D_IM_R2Y_PORT_1] % cycle_pixs );
+	msb_array_idx[D_IM_R2Y_PORT_2] += (USHORT)( trim_left[D_IM_R2Y_PORT_2] % cycle_pixs );
+
+#ifdef IM_R2Y_DEBUG_PRINT
+#if 0
+	Ddim_Print(( "im_r2y_calc_top_msb_offset_sdram_input(): msb=%u\n", p_msb_offset[msb_array_idx] ));
+#endif
+#endif
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYROFS.bit.YYROFS_0 = p_msb_offset[msb_array_idx[D_IM_R2Y_PORT_0]];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYROFS.bit.YYROFS_1 = p_msb_offset[msb_array_idx[D_IM_R2Y_PORT_1]];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYROFS.bit.YYROFS_2 = p_msb_offset[msb_array_idx[D_IM_R2Y_PORT_2]];
+
+	Im_R2Y_Off_Pclk( pipe_no );
+}
+
+/* Calculate RGB trimming bytes from RGB address set by Im_R2Y_Set_InAddr_Info()
+ */
+static VOID im_r2y_calc_yyr_address_sdram_input( UCHAR pipe_no )
+{
+	ULONG tmp_top;
+	ULONG tmp_left;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_calc_yyr_address_sdram_input error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	// Setting of offset pixs
+	gIM_R2Y_yyra_ofs_info[pipe_no].ofs_x_pixs = gIM_R2Y_State[pipe_no].input_size.img_left;
+	gIM_R2Y_yyra_ofs_info[pipe_no].ofs_y_pixs = gIM_R2Y_State[pipe_no].input_size.img_top;
+
+	// Auto calcurate of Overlap width
+	switch( gIM_R2Y_State[pipe_no].input_dtype ) {
+		case D_IM_R2Y_READ_DTYP_PACK12:
+			tmp_top  = (gIM_R2Y_State[pipe_no].input_global * gIM_R2Y_yyra_ofs_info[pipe_no].ofs_y_pixs);
+			tmp_left = (gIM_R2Y_yyra_ofs_info[pipe_no].ofs_x_pixs * 3 / 2);	// x1.5
+			break;
+		case D_IM_R2Y_READ_DTYP_PACK16:
+			tmp_top  = (gIM_R2Y_State[pipe_no].input_global * gIM_R2Y_yyra_ofs_info[pipe_no].ofs_y_pixs);
+			tmp_left = (gIM_R2Y_yyra_ofs_info[pipe_no].ofs_x_pixs * 2);		// x2.0
+			break;
+		default:// D_IM_R2Y_READ_DTYP_PACK8
+			tmp_top  = (gIM_R2Y_State[pipe_no].input_global * gIM_R2Y_yyra_ofs_info[pipe_no].ofs_y_pixs);
+			tmp_left = (gIM_R2Y_yyra_ofs_info[pipe_no].ofs_x_pixs);			// x1.0
+			break;
+	}
+
+	gIM_R2Y_yyra_ofs_info[pipe_no].ofs_bytes = (tmp_top + tmp_left);
+}
+
+/* Calculate YYRA address after trimming.
+ */
+static VOID im_r2y_set_yyr_address_sdram_input( UCHAR pipe_no )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_set_yyr_address_sdram_input error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRA.bit.YYRA_0 = (gIM_R2Y_State[pipe_no].in_addr[D_IM_R2Y_PORT_0] + gIM_R2Y_yyra_ofs_info[pipe_no].ofs_bytes);
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRA.bit.YYRA_1 = (gIM_R2Y_State[pipe_no].in_addr[D_IM_R2Y_PORT_1] + gIM_R2Y_yyra_ofs_info[pipe_no].ofs_bytes);
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRA.bit.YYRA_2 = (gIM_R2Y_State[pipe_no].in_addr[D_IM_R2Y_PORT_2] + gIM_R2Y_yyra_ofs_info[pipe_no].ofs_bytes);
+
+	Im_R2Y_Off_Pclk( pipe_no );
+}
+
+/* Set output(YYW) start and pitch registers.
+ */
+static VOID im_r2y_set_out_pitch( UCHAR pipe_no, T_IM_R2Y_OUT_PITCH const r2y_out_pitch[D_IM_R2Y_YYW_CH_MAX] )
+{
+	UINT32 yyw_no;
+	T_IM_R2Y_OUT_PITCH r2y_out_pitch_temp = {
+		.x_start_pos = 0,
+		.x_pitch = 0,
+		.y_start_pos = 0,
+		.y_pitch = 0,
+	};
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_out_pitch == NULL ) {
+		Ddim_Assertion(( "im_r2y_set_out_pitch error. r2y_out_pitch == NULL\n" ));
+		return;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_set_out_pitch error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk(pipe_no);
+	for( yyw_no = D_IM_R2Y_YYW_CH_0; yyw_no < D_IM_R2Y_YYW_CH_MAX - 1; yyw_no++ ) {
+		switch( yyw_no ) {
+			default:
+				break;
+			case D_IM_R2Y_YYW_CH_0:
+				if( gIM_R2Y_State[pipe_no].yyw_enable[yyw_no] == D_IM_R2Y_ENABLE_OFF ) {
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HSTA.bit.RSZ0HSTA = 0x00000000;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT = D_IM_R2Y_STA_PIT_1_0;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VSTA.bit.RSZ0VSTA = 0x00000000;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT = D_IM_R2Y_STA_PIT_1_0;
+				}
+				else {
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HSTA.bit.RSZ0HSTA = r2y_out_pitch[yyw_no].x_start_pos;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT = r2y_out_pitch[yyw_no].x_pitch;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VSTA.bit.RSZ0VSTA = r2y_out_pitch[yyw_no].y_start_pos;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT = r2y_out_pitch[yyw_no].y_pitch;
+				}
+				r2y_out_pitch_temp.x_start_pos	= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HSTA.bit.RSZ0HSTA;
+				r2y_out_pitch_temp.x_pitch		= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT;
+				r2y_out_pitch_temp.y_start_pos	= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VSTA.bit.RSZ0VSTA;
+				r2y_out_pitch_temp.y_pitch		= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT;
+#ifdef IM_R2Y_DEBUG_PRINT          
+				Ddim_Print(( "im_r2y_set_out_pitch(): yyw_no=%u, hsta=%x, hpit=%x, vsta=%x, vpit=%x\n",
+						0,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HSTA.bit.RSZ0HSTA,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VSTA.bit.RSZ0VSTA,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT
+						));
+#endif
+				break;
+			case D_IM_R2Y_YYW_CH_1:
+				if( gIM_R2Y_State[pipe_no].yyw_enable[yyw_no] == D_IM_R2Y_ENABLE_OFF ) {
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HSTA.bit.RSZ1HSTA = 0x00000000;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT = D_IM_R2Y_STA_PIT_1_0;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VSTA.bit.RSZ1VSTA = 0x00000000;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT = D_IM_R2Y_STA_PIT_1_0;
+				}
+				else {
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HSTA.bit.RSZ1HSTA = r2y_out_pitch[yyw_no].x_start_pos;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT = r2y_out_pitch[yyw_no].x_pitch;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VSTA.bit.RSZ1VSTA = r2y_out_pitch[yyw_no].y_start_pos;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT = r2y_out_pitch[yyw_no].y_pitch;
+				}
+				r2y_out_pitch_temp.x_start_pos	= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HSTA.bit.RSZ1HSTA;
+				r2y_out_pitch_temp.x_pitch		= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT;
+				r2y_out_pitch_temp.y_start_pos	= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VSTA.bit.RSZ1VSTA;
+				r2y_out_pitch_temp.y_pitch		= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT;
+#ifdef IM_R2Y_DEBUG_PRINT
+				Ddim_Print(( "im_r2y_set_out_pitch(): yyw_no=%u, hsta=%x, hpit=%x, vsta=%x, vpit=%x\n",
+						1,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HSTA.bit.RSZ1HSTA,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VSTA.bit.RSZ1VSTA,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT
+						));
+#endif
+				break;
+			case D_IM_R2Y_YYW_CH_2:
+				if( gIM_R2Y_State[pipe_no].yyw_enable[yyw_no] == D_IM_R2Y_ENABLE_OFF ) {
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HSTA.bit.RSZ2HSTA = 0x00000000;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HPIT.bit.RSZ2HPIT = D_IM_R2Y_STA_PIT_1_0;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VSTA.bit.RSZ2VSTA = 0x00000000;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VPIT.bit.RSZ2VPIT = D_IM_R2Y_STA_PIT_1_0;
+				}
+				else {
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HSTA.bit.RSZ2HSTA = r2y_out_pitch[yyw_no].x_start_pos;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HPIT.bit.RSZ2HPIT = r2y_out_pitch[yyw_no].x_pitch;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VSTA.bit.RSZ2VSTA = r2y_out_pitch[yyw_no].y_start_pos;
+					gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VPIT.bit.RSZ2VPIT = r2y_out_pitch[yyw_no].y_pitch;
+				}
+				r2y_out_pitch_temp.x_start_pos	= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HSTA.bit.RSZ2HSTA;
+				r2y_out_pitch_temp.x_pitch		= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HPIT.bit.RSZ2HPIT;
+				r2y_out_pitch_temp.y_start_pos	= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VSTA.bit.RSZ2VSTA;
+				r2y_out_pitch_temp.y_pitch		= gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VPIT.bit.RSZ2VPIT;
+#ifdef IM_R2Y_DEBUG_PRINT
+				Ddim_Print(( "im_r2y_set_out_pitch(): yyw_no=%u, hsta=%x, hpit=%x, vsta=%x, vpit=%x\n",
+						1,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HSTA.bit.RSZ2HSTA,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HPIT.bit.RSZ2HPIT,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VSTA.bit.RSZ2VSTA,
+						gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VPIT.bit.RSZ2VPIT
+						));
+#endif
+				break;
+		}
+		gIM_R2Y_Resize_Param[pipe_no].r2y_resize_pitch.output_pitch[yyw_no].output_x_start_pos	= r2y_out_pitch_temp.x_start_pos;
+		gIM_R2Y_Resize_Param[pipe_no].r2y_resize_pitch.output_pitch[yyw_no].output_x_pitch		= r2y_out_pitch_temp.x_pitch;
+		gIM_R2Y_Resize_Param[pipe_no].r2y_resize_pitch.output_pitch[yyw_no].output_y_start_pos	= r2y_out_pitch_temp.y_start_pos;
+		gIM_R2Y_Resize_Param[pipe_no].r2y_resize_pitch.output_pitch[yyw_no].output_y_pitch		= r2y_out_pitch_temp.y_pitch;
+	}
+	Im_R2Y_Off_Pclk(pipe_no);
+}
+
+/* Calculate output(YYW) start and pitch value.
+ */
+static VOID im_r2y_calc_out_pitch( UCHAR pipe_no )
+{
+	UINT32 yyw_no;
+	ULONG  input_width;			// XXXX_XXXX_XXXX_XXXX_XXXX_XXXX_XXXX_XXXX . (32bits)
+	ULONG  input_lines;			// XXXX_XXXX_XXXX_XXXX_XXXX_XXXX_XXXX_XXXX . (32bits)
+	ULONG  input_calc_width;	// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  input_calc_lines;	// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  input_calc_width_l;	// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  input_calc_lines_l;	// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  input_calc_width_c;	// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  input_calc_lines_c;	// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  x_pitch;				// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  y_pitch;				// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  x_start;				// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  y_start;				// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  x_ref;				// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	ULONG  y_ref;				// XXXX_XXXX_XXXX_XXXX_XX . XX_XXXX_XXXX_XXXX (32bits)
+	T_IM_R2Y_OUT_PITCH r2y_out_pitch[D_IM_R2Y_YYW_CH_MAX];
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_calc_out_pitch error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	if( gIM_R2Y_State[pipe_no].yyw_rect_valid != D_IM_R2Y_ENABLE_ON ) {
+		return;
+	}
+
+	// calc. and set new output size to r2y_ctrl(YYW)
+	/*
+	 * refer JDSR2Y_F2E section 5.2.3 Output size
+	 *
+	 * Parameter Description
+	 *     for SDRAM input mode:
+	 *        R_HSZ = YYRHSIZ
+	 *        R_VSZ = YYRVSIZ
+	 *     for direct input mode:
+	 *        R_HSZ = H_Size is based on processing of connection origin.
+	 *        R_VSZ = V_Size is based on processing of connection origin.
+	 *     common parameter:
+	 *        mYCF = R2YMODE.YCFPDD + R2YMODE.YCFBYP
+	 *            mYCF = 0 : RP = 6
+	 *            mYCF > 0 : RP = 0
+	 *        F_HSZ = R_HSZ - RP
+	 *        F_VSZ = R_VSZ - RP
+	 *
+	 * Calculating formula
+	 *     for Bi-linear interpolation(YYW ch0/ch1/ch2 resizer)
+	 *         RS_HSZx = ((((F_HSZ - 1) * 16384 - RSZxHSTA) / RSZxHPIT) + 1)
+	 *             ==>
+	 *         RSZxHPIT = ((F_HSZ - 1) * 16384) / (RS_HSZx - 1)					(RSZxHSTA assume 0)
+	 *
+	 *         RS_VSZx = ((((F_VSZ - 1) * 16384 - RSZxVSTA) / RSZxVPIT) + 1)
+	 *             ==>
+	 *         RSZxVPIT = ((F_VSZ - 1) * 16384) / (RS_VSZx - 1)					(RSZxVSTA assume 0)
+	 *
+	 *     for Bi-cubic interpolation(YYW ch0/ch1 resizer)
+	 *         RS_HSZx = ((((F_HSZ - 2) * 16384 - RSZxHSTA - 1) / RSZxHPIT) + 1)
+	 *             ==>
+	 *         RSZxHPIT = ((F_HSZ - 2) * 16384 - 1) / (RS_HSZx - 1)				(RSZxHSTA assume 0)
+	 *
+	 *         RS_VSZx = ((((F_VSZ - 2) * 16384 - RSZxVSTA - 1) / RSZxVPIT) + 1)
+	 *             ==>
+	 *         RSZxVPIT = ((F_VSZ - 2) * 16384 - 1) / (RS_VSZx - 1)				(RSZxVSTA assume 0)
+	 */
+
+	input_width = gIM_R2Y_State[pipe_no].input_size.img_width
+				- gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	input_lines = gIM_R2Y_State[pipe_no].input_size.img_lines
+				- gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+
+	input_calc_width_l = ((ULONG)(input_width - 1)) * D_IM_R2Y_STA_PIT_1_0;
+	input_calc_lines_l = ((ULONG)(input_lines - 1)) * D_IM_R2Y_STA_PIT_1_0;
+	input_calc_width_c = ((ULONG)(input_width - 2)) * D_IM_R2Y_STA_PIT_1_0 - 1;
+	input_calc_lines_c = ((ULONG)(input_lines - 2)) * D_IM_R2Y_STA_PIT_1_0 - 1;
+
+#ifdef IM_R2Y_DEBUG_PRINT
+#if 1
+	Ddim_Print(( "im_r2y_calc_out_pitch(): input_calc_width_l=%lx, input_calc_lines_l=%lx\n",
+			input_calc_width_l,
+			input_calc_lines_l
+			));
+	Ddim_Print(( "im_r2y_calc_out_pitch(): input_calc_width_c=%lx, input_calc_lines_c=%lx\n",
+			input_calc_width_c,
+			input_calc_lines_c
+			));
+#endif
+#endif
+
+	for( yyw_no = D_IM_R2Y_YYW_CH_0; yyw_no < D_IM_R2Y_YYW_CH_MAX - 1; yyw_no++ ) {
+		if( (input_width == gIM_R2Y_State[pipe_no].yyw_width[yyw_no])
+		 && (input_lines == gIM_R2Y_State[pipe_no].yyw_lines[yyw_no])
+			) {
+			// x1.0 mode (dot by dot mode)
+			x_pitch = D_IM_R2Y_STA_PIT_1_0;
+			y_pitch = D_IM_R2Y_STA_PIT_1_0;
+			x_start = 0;
+			y_start = 0;
+		}
+		else {
+			// Resized mode
+
+			switch( yyw_no ){
+				case D_IM_R2Y_YYW_CH_0:		// FALL THROUGH
+				case D_IM_R2Y_YYW_CH_1:
+					if( gIM_R2Y_State[pipe_no].resize_mode[yyw_no] == D_IM_R2Y_RSZ_BICUBIC ){
+						input_calc_width = input_calc_width_c;
+						input_calc_lines = input_calc_lines_c;
+					}
+					else{
+						input_calc_width = input_calc_width_l;
+						input_calc_lines = input_calc_lines_l;
+					}
+					break;
+//				case D_IM_R2Y_YYW_CH_2:
+				default:
+					input_calc_width = input_calc_width_l;
+					input_calc_lines = input_calc_lines_l;
+					break;
+			}
+			x_pitch = (ULONG)input_calc_width / (im_r2y_rounddown_2(gIM_R2Y_State[pipe_no].yyw_width[yyw_no]) - 1);
+			y_pitch = (ULONG)input_calc_lines / (im_r2y_rounddown_2(gIM_R2Y_State[pipe_no].yyw_lines[yyw_no]) - 1);
+
+			// YYW2 is only supported image size reducion
+			if( yyw_no == D_IM_R2Y_YYW_CH_2 ) {
+				if( x_pitch < D_IM_R2Y_STA_PIT_1_0 ) {
+#ifdef IM_R2Y_DEBUG_PRINT
+					Ddim_Print(( "YYW2 width overflow. pit=%lx\n", x_pitch ));
+#endif
+					x_pitch = D_IM_R2Y_STA_PIT_1_0;
+				}
+				if( y_pitch < D_IM_R2Y_STA_PIT_1_0 ) {
+#ifdef IM_R2Y_DEBUG_PRINT
+					Ddim_Print(( "YYW2 lines overflow. pit=%lx\n", y_pitch ));
+#endif
+					y_pitch = D_IM_R2Y_STA_PIT_1_0;
+				}
+			}
+
+			x_ref = (im_r2y_rounddown_2(gIM_R2Y_State[pipe_no].yyw_width[yyw_no]) - 1) * x_pitch;
+			if( input_calc_width < x_ref ) {
+				x_start = 0;
+			}
+			else {
+				x_start = input_calc_width - x_ref;
+			}
+			y_ref = (im_r2y_rounddown_2(gIM_R2Y_State[pipe_no].yyw_lines[yyw_no]) - 1) * y_pitch;
+			if( input_calc_lines < y_ref ) {
+				y_start = 0;
+			}
+			else {
+				y_start = input_calc_lines - y_ref;
+			}
+		}
+
+		r2y_out_pitch[yyw_no].x_start_pos = x_start;
+		r2y_out_pitch[yyw_no].y_start_pos = y_start;
+		r2y_out_pitch[yyw_no].x_pitch = x_pitch;
+		r2y_out_pitch[yyw_no].y_pitch = y_pitch;
+
+#ifdef IM_R2Y_DEBUG_PRINT
+#if 1
+		{
+			ULONG width;
+			ULONG lines;
+			Ddim_Print(( "im_r2y_calc_out_pitch(): yyw_width=%u, yyw_lines=%u\n",
+					gIM_R2Y_State[pipe_no].yyw_width[yyw_no],
+					gIM_R2Y_State[pipe_no].yyw_lines[yyw_no]
+					));
+			Ddim_Print(( "im_r2y_calc_out_pitch(): yyw_no=%u, hsta=%lx, hpit=%lx, vsta=%lx, vpit=%lx\n",
+					yyw_no,
+					x_start,
+					x_pitch,
+					y_start,
+					y_pitch
+					));
+
+
+			if( gIM_R2Y_State[pipe_no].yyw_enable[yyw_no] == D_IM_R2Y_ENABLE_OFF ) {
+				continue;
+			}
+
+			if( r2y_out_pitch[yyw_no].x_pitch != 0 ) {
+				width = (input_calc_width - r2y_out_pitch[yyw_no].x_start_pos) / (r2y_out_pitch[yyw_no].x_pitch) + 1;
+			}
+			else {
+				width = 0;
+			}
+
+			if( r2y_out_pitch[yyw_no].y_pitch != 0 ) {
+				lines = (input_calc_lines - r2y_out_pitch[yyw_no].y_start_pos) / (r2y_out_pitch[yyw_no].y_pitch) + 1;
+			}
+			else {
+				lines = 0;
+			}
+			Ddim_Print(( "im_r2y_calc_out_pitch(): recalc width=%u, line=%u\n", (UINT32)(width), (UINT32)(lines) ));
+		}
+#endif
+#endif
+	}
+
+	im_r2y_set_out_pitch( pipe_no, r2y_out_pitch );
+}
+
+/* Calculate input(YYR) width and lines when SDRAM input mode.
+ */
+static VOID im_r2y_calc_in_rect_sdram_input( UCHAR pipe_no )
+{
+	USHORT img_width;
+	USHORT img_lines;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_calc_in_rect_sdram_input error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	// YYRHSIZ (2pixels alignment & Advancing)
+	img_width = gIM_R2Y_State[pipe_no].input_size.img_width;
+	img_width = im_r2y_min( img_width, (USHORT)D_IM_R2Y_YYRHSIZ_MAX );
+	img_width = im_r2y_max( img_width, (USHORT)(D_IM_R2Y_YYRHSIZ_MIN + gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs) );
+
+	// YYRVSIZ
+	img_lines = gIM_R2Y_State[pipe_no].input_size.img_lines;
+	img_lines = im_r2y_min( img_lines, (USHORT)D_IM_R2Y_YYRVSIZ_MAX );
+	img_lines = im_r2y_max( img_lines, (USHORT)(D_IM_R2Y_YYRVSIZ_MIN + gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs) );
+
+	Im_R2Y_On_Pclk(pipe_no);
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRHSIZ.word = img_width;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRVSIZ.word = img_lines;
+	Im_R2Y_Off_Pclk(pipe_no);
+}
+
+/* Update of Address information
+ */
+static VOID im_r2y_latest_addr_update( UCHAR pipe_no, const UINT32 yyw_no )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "im_r2y_latest_addr_update error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	switch( yyw_no ){
+		case D_IM_R2Y_YYW_CH_1:
+			gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_idx = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWBANK.bit.BANK1STS;
+			break;
+		case D_IM_R2Y_YYW_CH_2:
+			gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_idx = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWBANK.bit.BANK2STS;
+			break;
+		case D_IM_R2Y_YYW_CH_0A:
+			gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_idx = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWBANK.bit.BANKASTS;
+			break;
+//		case D_IM_R2Y_YYW_CH_0:
+		default:
+			gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_idx = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWBANK.bit.BANK0STS;
+			break;
+	}
+	gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_addr = gIM_R2Y_Out_Mng[pipe_no][yyw_no].bank_info.output_addr[ gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_idx ];
+
+	Im_R2Y_Off_Pclk( pipe_no );
+}
+
+#ifdef IM_R2Y_STATUS_PRINT
+// Calculate YYW0 output image width
+static UINT32 im_r2y_calc_yyw0_out_width( UCHAR pipe_no )
+{
+	UINT32 in_pixs;
+	UINT32 out_pixs;
+	UINT32 ref_pixs;
+	UCHAR reduct_val;
+
+	Im_R2Y_On_Pclk( pipe_no );
+	if( gIM_R2Y_State[pipe_no].video_photo_mode == D_IM_R2Y_MODE_SDRAM_INPUT ) {
+		// Photo mode.
+		in_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRHSIZ.word;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+	else {
+		// Video mode.
+		in_pixs = gIM_R2Y_State[pipe_no].input_size.img_width;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+
+	if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HSTA.bit.RSZ0HSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT == D_IM_R2Y_STA_PIT_1_0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VSTA.bit.RSZ0VSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT == D_IM_R2Y_STA_PIT_1_0)
+	 ) {
+		// dot by dot output mode(not resized)
+		out_pixs = ((in_pixs - ref_pixs) & 0x1FFE);
+	}
+	else {
+		if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT == 0) || (in_pixs == 0) ) {
+			out_pixs = 0xffffffff;
+		}
+		else {
+			// Resize 0 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RSZ0MD == D_IM_R2Y_RSZ_BICUBIC ){
+				out_pixs = ((((in_pixs - ref_pixs - 2) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HSTA.bit.RSZ0HSTA - 1) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT) + 1);
+			}
+			else{
+				out_pixs = ((((in_pixs - ref_pixs - 1) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HSTA.bit.RSZ0HSTA) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT) + 1);
+			}
+
+			// Reduction 0 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RDC0EN == D_IM_R2Y_ENABLE_ON ){
+				switch( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RDC0MD ){
+					case D_IM_R2Y_RDC_MODE_DIV_2:
+						reduct_val = 2;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_4:
+						reduct_val = 4;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_8:
+						reduct_val = 8;
+						break;
+					default:
+						reduct_val = 1;
+						break;
+				}
+				out_pixs /= reduct_val;
+			}
+
+			// Edge enhancement 0 block
+			out_pixs = out_pixs & 0x1FFE;
+
+			// YC Trimming 0 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.TRM0EN == D_IM_R2Y_ENABLE_ON ){
+				out_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM0H.bit.TRM0HSIZ;
+			}
+		}
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return out_pixs;
+}
+
+// Calculate YYW0 output image lines
+static UINT32 im_r2y_calc_yyw0_out_lines( UCHAR pipe_no )
+{
+	UINT32 in_pixs;
+	UINT32 out_pixs;
+	UINT32 ref_pixs;
+	UCHAR reduct_val;
+
+	Im_R2Y_On_Pclk( pipe_no );
+	if( gIM_R2Y_State[pipe_no].video_photo_mode == D_IM_R2Y_MODE_SDRAM_INPUT ) {
+		// Photo mode.
+		in_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRVSIZ.word;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+	else {
+		// Video mode.
+		in_pixs = gIM_R2Y_State[pipe_no].input_size.img_lines;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+
+	if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HSTA.bit.RSZ0HSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0HPIT.bit.RSZ0HPIT == D_IM_R2Y_STA_PIT_1_0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VSTA.bit.RSZ0VSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT == D_IM_R2Y_STA_PIT_1_0)
+	 ) {
+		// dot by dot output mode(not resized)
+		out_pixs = ((in_pixs - ref_pixs) & 0x1FFE);
+	}
+	else {
+		if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT == 0) || (in_pixs == 0) ) {
+			out_pixs = 0xffffffff;
+		}
+		else {
+			// Resize 0 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RSZ0MD == D_IM_R2Y_RSZ_BICUBIC ){
+				out_pixs = ((((in_pixs - ref_pixs - 2) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VSTA.bit.RSZ0VSTA - 1) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT) + 1);
+			}
+			else{
+				out_pixs = ((((in_pixs - ref_pixs - 1) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VSTA.bit.RSZ0VSTA) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ0VPIT.bit.RSZ0VPIT) + 1);
+			}
+
+			// Reduction 0 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RDC0EN == D_IM_R2Y_ENABLE_ON ){
+				switch( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RDC0MD ){
+					case D_IM_R2Y_RDC_MODE_DIV_2:
+						reduct_val = 2;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_4:
+						reduct_val = 4;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_8:
+						reduct_val = 8;
+						break;
+					default:
+						reduct_val = 1;
+						break;
+				}
+				out_pixs /= reduct_val;
+			}
+
+			// CSS0 block
+			out_pixs = out_pixs & 0x1FFE;
+
+			// YC Trimming 0 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.TRM0EN == D_IM_R2Y_ENABLE_ON ){
+				out_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM0V.bit.TRM0VSIZ;
+			}
+		}
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return out_pixs;
+}
+
+// Calculate YYW0a output image width
+static UINT32 im_r2y_calc_yyw0a_out_width( UCHAR pipe_no )
+{
+	UINT32 out_pixs;
+	UCHAR reduct_val;
+
+	out_pixs = im_r2y_calc_yyw0_out_width( pipe_no );
+
+	switch( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.CH0AMD ){
+		case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_4_Y:
+			reduct_val = 4;
+			break;
+		case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_8_Y:
+			reduct_val = 8;
+			break;
+		case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_32_SP:
+			reduct_val = 32;
+			break;
+//		case D_IM_R2Y_YYW0A_OUTPUT_MODE_STOP:
+		default:
+			return 0xffffffff;
+	}
+
+	if( out_pixs % reduct_val ){
+		out_pixs = out_pixs / reduct_val + 1;
+	}
+	else{
+		out_pixs = out_pixs / reduct_val;
+	}
+	out_pixs = ( out_pixs + 1 ) & 0x1FFE;
+
+	return out_pixs;
+}
+
+// Calculate YYW0a output image lines
+static UINT32 im_r2y_calc_yyw0a_out_lines( UCHAR pipe_no )
+{
+	UINT32 out_pixs;
+	UCHAR reduct_val;
+
+	out_pixs = im_r2y_calc_yyw0_out_lines( pipe_no );
+
+	switch( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.CH0AMD ){
+		case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_4_Y:
+			reduct_val = 4;
+			break;
+		case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_8_Y:
+			reduct_val = 8;
+			break;
+		case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_32_SP:
+			reduct_val = 32;
+			break;
+//		case D_IM_R2Y_YYW0A_OUTPUT_MODE_STOP:
+		default:
+			return 0xffffffff;
+	}
+
+	if( out_pixs % reduct_val ){
+		out_pixs = out_pixs / reduct_val + 1;
+	}
+	else{
+		out_pixs = out_pixs / reduct_val;
+	}
+	out_pixs = ( out_pixs + 1 ) & 0x1FFE;
+
+	return out_pixs;
+}
+
+// Calculate YYW1 output image width
+static UINT32 im_r2y_calc_yyw1_out_width( UCHAR pipe_no )
+{
+	UINT32 in_pixs;
+	UINT32 out_pixs;
+	UINT32 ref_pixs;
+	UCHAR reduct_val;
+
+	Im_R2Y_On_Pclk( pipe_no );
+	if( gIM_R2Y_State[pipe_no].video_photo_mode == D_IM_R2Y_MODE_SDRAM_INPUT ) {
+		// Photo mode.
+		in_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRHSIZ.word;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+	else {
+		// Video mode.
+		in_pixs = gIM_R2Y_State[pipe_no].input_size.img_width;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+
+	if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HSTA.bit.RSZ1HSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT == D_IM_R2Y_STA_PIT_1_0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VSTA.bit.RSZ1VSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT == D_IM_R2Y_STA_PIT_1_0)
+	 ) {
+		// dot by dot output mode(not resized)
+		out_pixs = ((in_pixs - ref_pixs) & 0x1FFE);
+	}
+	else {
+		if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT == 0) || (in_pixs == 0) ) {
+			out_pixs = 0xffffffff;
+		}
+		else {
+			// Resize 1 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RSZ1MD == D_IM_R2Y_RSZ_BICUBIC ){
+				out_pixs = ((((in_pixs - ref_pixs - 2) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HSTA.bit.RSZ1HSTA - 1) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT) + 1);
+			}
+			else{
+				out_pixs = ((((in_pixs - ref_pixs - 1) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HSTA.bit.RSZ1HSTA) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT) + 1);
+			}
+
+			// Reduction 1 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RDC1EN == D_IM_R2Y_ENABLE_ON ){
+				switch( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RDC1MD ){
+					case D_IM_R2Y_RDC_MODE_DIV_2:
+						reduct_val = 2;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_4:
+						reduct_val = 4;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_8:
+						reduct_val = 8;
+						break;
+					default:
+						reduct_val = 1;
+						break;
+				}
+				out_pixs /= reduct_val;
+			}
+
+			// Edge enhancement 1 block
+			out_pixs = out_pixs & 0x1FFE;
+
+			// YC Trimming 1 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.TRM1EN == D_IM_R2Y_ENABLE_ON ){
+				out_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM1H.bit.TRM1HSIZ;
+			}
+		}
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return out_pixs;
+}
+
+// Calculate YYW1 output image lines
+static UINT32 im_r2y_calc_yyw1_out_lines( UCHAR pipe_no )
+{
+	UINT32 in_pixs;
+	UINT32 out_pixs;
+	UINT32 ref_pixs;
+	UCHAR reduct_val;
+
+	Im_R2Y_On_Pclk( pipe_no );
+	if( gIM_R2Y_State[pipe_no].video_photo_mode == D_IM_R2Y_MODE_SDRAM_INPUT ) {
+		// Photo mode.
+		in_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRVSIZ.word;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+	else {
+		// Video mode.
+		in_pixs = gIM_R2Y_State[pipe_no].input_size.img_lines;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+
+	if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HSTA.bit.RSZ1HSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1HPIT.bit.RSZ1HPIT == D_IM_R2Y_STA_PIT_1_0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VSTA.bit.RSZ1VSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT == D_IM_R2Y_STA_PIT_1_0)
+	 ) {
+		// dot by dot output mode(not resized)
+		out_pixs = ((in_pixs - ref_pixs) & 0x1FFE);
+	}
+	else {
+		if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT == 0) || (in_pixs == 0) ) {
+			out_pixs = 0xffffffff;
+		}
+		else {
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RSZ1MD == D_IM_R2Y_RSZ_BICUBIC ){
+				out_pixs = ((((in_pixs - ref_pixs - 2) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VSTA.bit.RSZ1VSTA - 1) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT) + 1);
+			}
+			else{
+				out_pixs = ((((in_pixs - ref_pixs - 1) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VSTA.bit.RSZ1VSTA) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ1VPIT.bit.RSZ1VPIT) + 1);
+			}
+
+			// Reduction 1 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RDC1EN == D_IM_R2Y_ENABLE_ON ){
+				switch( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RDC1MD ){
+					case D_IM_R2Y_RDC_MODE_DIV_2:
+						reduct_val = 2;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_4:
+						reduct_val = 4;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_8:
+						reduct_val = 8;
+						break;
+					default:
+						reduct_val = 1;
+						break;
+				}
+				out_pixs /= reduct_val;
+			}
+
+			// CSS1 block
+			out_pixs = out_pixs & 0x1FFE;
+
+			// YC Trimming 1 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.TRM1EN == D_IM_R2Y_ENABLE_ON ){
+				out_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM1V.bit.TRM1VSIZ;
+			}
+		}
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return out_pixs;
+}
+
+// Calculate YYW2 output image width
+static UINT32 im_r2y_calc_yyw2_out_width( UCHAR pipe_no )
+{
+	UINT32 in_pixs;
+	UINT32 out_pixs;
+	UINT32 ref_pixs;
+	UCHAR reduct_val;
+
+	Im_R2Y_On_Pclk( pipe_no );
+	if( gIM_R2Y_State[pipe_no].video_photo_mode == D_IM_R2Y_MODE_SDRAM_INPUT ) {
+		// Photo mode.
+		in_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRHSIZ.word;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+	else {
+		// Video mode.
+		in_pixs = gIM_R2Y_State[pipe_no].input_size.img_width;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+
+	if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HSTA.bit.RSZ2HSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HPIT.bit.RSZ2HPIT == D_IM_R2Y_STA_PIT_1_0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VSTA.bit.RSZ2VSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VPIT.bit.RSZ2VPIT == D_IM_R2Y_STA_PIT_1_0)
+	 ) {
+		// dot by dot output mode(not resized)
+		out_pixs = ((in_pixs - ref_pixs) & 0x1FFE);
+	}
+	else {
+		if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HPIT.bit.RSZ2HPIT == 0) || (in_pixs == 0) ) {
+			out_pixs = 0xffffffff;
+		}
+		else {
+			// Resize 2 block
+			out_pixs = ((((in_pixs - ref_pixs - 1) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HSTA.bit.RSZ2HSTA) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HPIT.bit.RSZ2HPIT) + 1);
+
+			// Reduction 2 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.RDC2EN == D_IM_R2Y_ENABLE_ON ){
+				switch( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.RDC2MD ){
+					case D_IM_R2Y_RDC_MODE_DIV_2:
+						reduct_val = 2;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_4:
+						reduct_val = 4;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_8:
+						reduct_val = 8;
+						break;
+					default:
+						reduct_val = 1;
+						break;
+				}
+				out_pixs /= reduct_val;
+			}
+			out_pixs = out_pixs & 0x1FFE;
+
+			// YC Trimming 2 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.TRM2EN == D_IM_R2Y_ENABLE_ON ){
+				out_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM2H.bit.TRM2HSIZ;
+			}
+		}
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return out_pixs;
+}
+
+// Calculate YYW2 output image lines
+static UINT32 im_r2y_calc_yyw2_out_lines( UCHAR pipe_no )
+{
+	UINT32 in_pixs;
+	UINT32 out_pixs;
+	UINT32 ref_pixs;
+	UCHAR reduct_val;
+
+	Im_R2Y_On_Pclk( pipe_no );
+	if( gIM_R2Y_State[pipe_no].video_photo_mode == D_IM_R2Y_MODE_SDRAM_INPUT ) {
+		// Photo mode.
+		in_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRVSIZ.word;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+	else {
+		// Video mode.
+		in_pixs = gIM_R2Y_State[pipe_no].input_size.img_lines;
+		ref_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ref_pixs;
+	}
+
+	if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HSTA.bit.RSZ2HSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2HPIT.bit.RSZ2HPIT == D_IM_R2Y_STA_PIT_1_0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VSTA.bit.RSZ2VSTA == 0)
+	 && (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VPIT.bit.RSZ2VPIT == D_IM_R2Y_STA_PIT_1_0)
+	 ) {
+		// dot by dot output mode(not resized)
+		out_pixs = ((in_pixs - ref_pixs) & 0x1FFE);
+	}
+	else {
+		if( (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VPIT.bit.RSZ2VPIT == 0) || (in_pixs == 0) ) {
+			out_pixs = 0xffffffff;
+		}
+		else {
+			// Resize 2 block
+			out_pixs = ((((in_pixs - ref_pixs - 1) * D_IM_R2Y_STA_PIT_1_0 - gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VSTA.bit.RSZ2VSTA) / gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.RSZ2VPIT.bit.RSZ2VPIT) + 1);
+
+			// Reduction 2 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.RDC2EN == D_IM_R2Y_ENABLE_ON ){
+				switch( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.RDC2MD ){
+					case D_IM_R2Y_RDC_MODE_DIV_2:
+						reduct_val = 2;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_4:
+						reduct_val = 4;
+						break;
+					case D_IM_R2Y_RDC_MODE_DIV_8:
+						reduct_val = 8;
+						break;
+					default:
+						reduct_val = 1;
+						break;
+				}
+				out_pixs /= reduct_val;
+			}
+
+			// YC Trimming 2 block
+			if( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.TRM2EN == D_IM_R2Y_ENABLE_ON ){
+				out_pixs = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM2V.bit.TRM2VSIZ;
+			}
+		}
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return out_pixs;
+}
+#endif
+
+/* Is F_R2Y active
+ */
+static UCHAR im_r2y_is_act_fr2y( UCHAR pipe_no )
+{
+	UCHAR t_r2y_enable;
+
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Print(( "im_r2y_is_act_fr2y:pipe_no err\n" ));
+		return 0;
+	}
+
+	Im_R2Y_On_Pclk( pipe_no );
+	t_r2y_enable = (gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.CNTL.bit.TRG != D_IM_R2Y_FR2YTRG_IDLE)?(D_IM_R2Y_ENABLE_ON):(D_IM_R2Y_ENABLE_OFF);
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return t_r2y_enable;
+}
+
+// Control access enable register.
+static INT32 im_r2y_set_access_enable( UCHAR pipe_no, volatile T_IM_R2Y_ACCESS_ENABLE_MANAGE* const acc_en_mng, const UCHAR acc_enable, const UCHAR wait_enable, const CHAR errmsg[] )
+{
+	INT32 ret = D_DDIM_OK;
+	UCHAR cnt;
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	Im_R2Y_On_Pclk( pipe_no );
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		cnt = acc_en_mng->ctrl_cnt[loop_cnt];
+		if( acc_enable == 0 ) {
+			if( cnt != 0 ) {
+				cnt--;
+				if( cnt == 0 ) {
+					if( im_r2y_yyw_is_activated( loop_cnt ) ) {
+						// Macro busy error
+						Ddim_Assertion(( errmsg ));
+						ret = D_IM_R2Y_MACRO_BUSY;
+					}
+					else{
+						acc_en_mng->reg_set_func( loop_cnt, 0 );
+					}
+				}
+			}
+		}
+		else {
+			if( cnt == 0 ) {
+				if( im_r2y_yyw_is_activated( loop_cnt ) ) {
+					// Macro busy error
+					Ddim_Assertion(( errmsg ));
+					ret = D_IM_R2Y_MACRO_BUSY;
+				}
+				else{
+					cnt++;
+					acc_en_mng->reg_set_func( loop_cnt, 1 );
+
+					if( wait_enable != D_IM_R2Y_WAIT_OFF ) {
+						im_r2y_wait_usec( D_IM_R2Y_SRAM_WAIT_USEC );
+					}
+				}
+			}
+			else if((0 < cnt) && (cnt < 255)) {
+				cnt++;
+			}
+		}
+		acc_en_mng->ctrl_cnt[loop_cnt] = cnt;
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return ret;
+}
+
+static VOID im_r2y_set_histogram_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.HSTAEN = enable;
+}
+
+static VOID im_r2y_set_rgb_deknee_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YYRAEN_RGB_DEKNEE = enable;
+}
+
+static VOID im_r2y_set_tct_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCTCTL.bit.TCTAEN = enable;
+}
+
+static VOID im_r2y_set_btc_histogram_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSCTL.bit.TCHAEN = enable;
+}
+
+static VOID im_r2y_set_high_edge_scl_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EHSAEN = enable;
+}
+
+static VOID im_r2y_set_high_edge_step_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EHTAEN = enable;
+}
+
+static VOID im_r2y_set_medium_edge_scl_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EMSAEN = enable;
+}
+
+static VOID im_r2y_set_medium_edge_step_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EMTAEN = enable;
+}
+
+static VOID im_r2y_set_low_edge_scl_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.ELSAEN = enable;
+}
+
+static VOID im_r2y_set_low_edge_step_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.ELTAEN = enable;
+}
+
+static VOID im_r2y_set_map_scl_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPCTL.bit.EMPAEN = enable;
+}
+
+static VOID im_r2y_set_tone_control_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCAEN = enable;
+}
+
+static VOID im_r2y_set_gamma_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.GAM.GMCTL.bit.GMAEN = enable;
+}
+
+static VOID im_r2y_set_gamma_yb_tbl_access_enable( UCHAR pipe_no, const UCHAR enable )
+{
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.GAM.GMCTL.bit.GMYAEN = enable;
+}
+
+static VOID im_r2y_get_loop_val( UCHAR pipe_no, UCHAR* loop_sta, UCHAR* loop_end )
+{
+	switch( pipe_no ){
+		case D_IM_R2Y_PIPE1:
+			*loop_sta = 0;
+			*loop_end = 0;
+			break;
+		case D_IM_R2Y_PIPE2:
+			*loop_sta = 1;
+			*loop_end = 1;
+			break;
+//		case D_IM_R2Y_PIPE12:
+		default:
+			*loop_sta = 0;
+			*loop_end = 1;
+			break;
+	}
+}
+
+
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+#ifdef CO_R2Y_RDMA_ON
+static VOID im_r2y_start_rdma( T_IM_RDMA_CTRL* ctrl )
+{
+	INT32 ercd;
+
+	ercd = Im_RDMA_Ctrl_Quick_Start_Sync( D_DDIM_USER_SEM_WAIT_FEVR, ctrl, E_IM_RDMA_INT_MODE_OR );
+
+	if( ercd != D_IM_RDMA_OK ){
+		Ddim_Print(( "im_r2y_start_rdma error. %x\n", ercd ));
+	}
+}
+
+static VOID im_r2y_set_rdma_val_ee0_ctrl( UCHAR pipe_no, const T_IM_R2Y_POST_RESIZE0_PARAM* const r2y_ctrl_post_resize )
+{
+	T_IM_R2Y_CTRL_RDMA_EE0_VAL ee0_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EE0_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	ee0_ctrl.EE0CTL.bit.EE0EN = r2y_ctrl_post_resize->edge_enable;
+	ee0_ctrl.EE0CTL.bit.EE0TC = r2y_ctrl_post_resize->gradation_enable;
+
+	ee0_ctrl.EE0HPFK.bit.EE0HPFK0 = r2y_ctrl_post_resize->hpf_k[0];
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK1, r2y_ctrl_post_resize->hpf_k[1] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK2, r2y_ctrl_post_resize->hpf_k[2] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK3, r2y_ctrl_post_resize->hpf_k[3] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK4, r2y_ctrl_post_resize->hpf_k[4] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK5, r2y_ctrl_post_resize->hpf_k[5] );
+	ee0_ctrl.EE0NRLV.bit.EE0NRLV = r2y_ctrl_post_resize->strength;
+
+	ee0_ctrl.EE0CORPOF.bit.EE0CORPOF_0 = r2y_ctrl_post_resize->coring_p_offset[0];
+	ee0_ctrl.EE0CORPOF.bit.EE0CORPOF_1 = r2y_ctrl_post_resize->coring_p_offset[1];
+	ee0_ctrl.EE0CORPOF.bit.EE0CORPOF_2 = r2y_ctrl_post_resize->coring_p_offset[2];
+	ee0_ctrl.EE0CORPOF.bit.EE0CORPOF_3 = r2y_ctrl_post_resize->coring_p_offset[3];
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CORPGA, union io_r2y_ee0corpga, EE0CORPGA_0, r2y_ctrl_post_resize->coring_p_gain[0] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CORPGA, union io_r2y_ee0corpga, EE0CORPGA_1, r2y_ctrl_post_resize->coring_p_gain[1] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CORPGA, union io_r2y_ee0corpga, EE0CORPGA_2, r2y_ctrl_post_resize->coring_p_gain[2] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CORPGA, union io_r2y_ee0corpga, EE0CORPGA_3, r2y_ctrl_post_resize->coring_p_gain[3] );
+	ee0_ctrl.EE0CORPBD.bit.EE0CORPBD_1 = r2y_ctrl_post_resize->coring_p_border[0];
+	ee0_ctrl.EE0CORPBD.bit.EE0CORPBD_2 = r2y_ctrl_post_resize->coring_p_border[1];
+	ee0_ctrl.EE0CORPBD.bit.EE0CORPBD_3 = r2y_ctrl_post_resize->coring_p_border[2];
+
+	ee0_ctrl.EE0CORMOF.bit.EE0CORMOF_0 = r2y_ctrl_post_resize->coring_m_offset[0];
+	ee0_ctrl.EE0CORMOF.bit.EE0CORMOF_1 = r2y_ctrl_post_resize->coring_m_offset[1];
+	ee0_ctrl.EE0CORMOF.bit.EE0CORMOF_2 = r2y_ctrl_post_resize->coring_m_offset[2];
+	ee0_ctrl.EE0CORMOF.bit.EE0CORMOF_3 = r2y_ctrl_post_resize->coring_m_offset[3];
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CORMGA, union io_r2y_ee0cormga, EE0CORMGA_0, r2y_ctrl_post_resize->coring_m_gain[0] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CORMGA, union io_r2y_ee0cormga, EE0CORMGA_1, r2y_ctrl_post_resize->coring_m_gain[1] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CORMGA, union io_r2y_ee0cormga, EE0CORMGA_2, r2y_ctrl_post_resize->coring_m_gain[2] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CORMGA, union io_r2y_ee0cormga, EE0CORMGA_3, r2y_ctrl_post_resize->coring_m_gain[3] );
+	ee0_ctrl.EE0CORMBD.bit.EE0CORMBD_1 = r2y_ctrl_post_resize->coring_m_border[0];
+	ee0_ctrl.EE0CORMBD.bit.EE0CORMBD_2 = r2y_ctrl_post_resize->coring_m_border[1];
+	ee0_ctrl.EE0CORMBD.bit.EE0CORMBD_3 = r2y_ctrl_post_resize->coring_m_border[2];
+
+	ee0_ctrl.EE0SCLSUP.bit.EE0SCLSUP = r2y_ctrl_post_resize->scale_reduct_coef;
+
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_0 = r2y_ctrl_post_resize->scale_p_offset[0];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_1 = r2y_ctrl_post_resize->scale_p_offset[1];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_2 = r2y_ctrl_post_resize->scale_p_offset[2];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_3 = r2y_ctrl_post_resize->scale_p_offset[3];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_4 = r2y_ctrl_post_resize->scale_p_offset[4];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_5 = r2y_ctrl_post_resize->scale_p_offset[5];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_6 = r2y_ctrl_post_resize->scale_p_offset[6];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_7 = r2y_ctrl_post_resize->scale_p_offset[7];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_8 = r2y_ctrl_post_resize->scale_p_offset[8];
+	ee0_ctrl.EE0SCLPOF.bit.EE0SCLPOF_9 = r2y_ctrl_post_resize->scale_p_offset[9];
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_0, r2y_ctrl_post_resize->scale_p_gain[0] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_1, r2y_ctrl_post_resize->scale_p_gain[1] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_2, r2y_ctrl_post_resize->scale_p_gain[2] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_3, r2y_ctrl_post_resize->scale_p_gain[3] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_4, r2y_ctrl_post_resize->scale_p_gain[4] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_5, r2y_ctrl_post_resize->scale_p_gain[5] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_6, r2y_ctrl_post_resize->scale_p_gain[6] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_7, r2y_ctrl_post_resize->scale_p_gain[7] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_8, r2y_ctrl_post_resize->scale_p_gain[8] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_9, r2y_ctrl_post_resize->scale_p_gain[9] );
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_1 = r2y_ctrl_post_resize->scale_p_border[0];
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_2 = r2y_ctrl_post_resize->scale_p_border[1];
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_3 = r2y_ctrl_post_resize->scale_p_border[2];
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_4 = r2y_ctrl_post_resize->scale_p_border[3];
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_5 = r2y_ctrl_post_resize->scale_p_border[4];
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_6 = r2y_ctrl_post_resize->scale_p_border[5];
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_7 = r2y_ctrl_post_resize->scale_p_border[6];
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_8 = r2y_ctrl_post_resize->scale_p_border[7];
+	ee0_ctrl.EE0SCLPBD.bit.EE0SCLPBD_9 = r2y_ctrl_post_resize->scale_p_border[8];
+
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_0 = r2y_ctrl_post_resize->scale_m_offset[0];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_1 = r2y_ctrl_post_resize->scale_m_offset[1];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_2 = r2y_ctrl_post_resize->scale_m_offset[2];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_3 = r2y_ctrl_post_resize->scale_m_offset[3];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_4 = r2y_ctrl_post_resize->scale_m_offset[4];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_5 = r2y_ctrl_post_resize->scale_m_offset[5];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_6 = r2y_ctrl_post_resize->scale_m_offset[6];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_7 = r2y_ctrl_post_resize->scale_m_offset[7];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_8 = r2y_ctrl_post_resize->scale_m_offset[8];
+	ee0_ctrl.EE0SCLMOF.bit.EE0SCLMOF_9 = r2y_ctrl_post_resize->scale_m_offset[9];
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_0, r2y_ctrl_post_resize->scale_m_gain[0] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_1, r2y_ctrl_post_resize->scale_m_gain[1] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_2, r2y_ctrl_post_resize->scale_m_gain[2] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_3, r2y_ctrl_post_resize->scale_m_gain[3] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_4, r2y_ctrl_post_resize->scale_m_gain[4] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_5, r2y_ctrl_post_resize->scale_m_gain[5] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_6, r2y_ctrl_post_resize->scale_m_gain[6] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_7, r2y_ctrl_post_resize->scale_m_gain[7] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_8, r2y_ctrl_post_resize->scale_m_gain[8] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_9, r2y_ctrl_post_resize->scale_m_gain[9] );
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_1 = r2y_ctrl_post_resize->scale_m_border[0];
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_2 = r2y_ctrl_post_resize->scale_m_border[1];
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_3 = r2y_ctrl_post_resize->scale_m_border[2];
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_4 = r2y_ctrl_post_resize->scale_m_border[3];
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_5 = r2y_ctrl_post_resize->scale_m_border[4];
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_6 = r2y_ctrl_post_resize->scale_m_border[5];
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_7 = r2y_ctrl_post_resize->scale_m_border[6];
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_8 = r2y_ctrl_post_resize->scale_m_border[7];
+	ee0_ctrl.EE0SCLMBD.bit.EE0SCLMBD_9 = r2y_ctrl_post_resize->scale_m_border[8];
+
+	ee0_ctrl.EE0TONPOF.bit.EE0TONPOF_0 = r2y_ctrl_post_resize->gradation_p_offset[0];
+	ee0_ctrl.EE0TONPOF.bit.EE0TONPOF_1 = r2y_ctrl_post_resize->gradation_p_offset[1];
+	ee0_ctrl.EE0TONPOF.bit.EE0TONPOF_2 = r2y_ctrl_post_resize->gradation_p_offset[2];
+	ee0_ctrl.EE0TONPOF.bit.EE0TONPOF_3 = r2y_ctrl_post_resize->gradation_p_offset[3];
+	ee0_ctrl.EE0TONPOF.bit.EE0TONPOF_4 = r2y_ctrl_post_resize->gradation_p_offset[4];
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_0, r2y_ctrl_post_resize->gradation_p_gain[0] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_1, r2y_ctrl_post_resize->gradation_p_gain[1] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_2, r2y_ctrl_post_resize->gradation_p_gain[2] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_3, r2y_ctrl_post_resize->gradation_p_gain[3] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_4, r2y_ctrl_post_resize->gradation_p_gain[4] );
+	ee0_ctrl.EE0TONPBD.bit.EE0TONPBD_1 = r2y_ctrl_post_resize->gradation_p_border[0];
+	ee0_ctrl.EE0TONPBD.bit.EE0TONPBD_2 = r2y_ctrl_post_resize->gradation_p_border[1];
+	ee0_ctrl.EE0TONPBD.bit.EE0TONPBD_3 = r2y_ctrl_post_resize->gradation_p_border[2];
+	ee0_ctrl.EE0TONPBD.bit.EE0TONPBD_4 = r2y_ctrl_post_resize->gradation_p_border[3];
+
+	ee0_ctrl.EE0TONMOF.bit.EE0TONMOF_0 = r2y_ctrl_post_resize->gradation_m_offset[0];
+	ee0_ctrl.EE0TONMOF.bit.EE0TONMOF_1 = r2y_ctrl_post_resize->gradation_m_offset[1];
+	ee0_ctrl.EE0TONMOF.bit.EE0TONMOF_2 = r2y_ctrl_post_resize->gradation_m_offset[2];
+	ee0_ctrl.EE0TONMOF.bit.EE0TONMOF_3 = r2y_ctrl_post_resize->gradation_m_offset[3];
+	ee0_ctrl.EE0TONMOF.bit.EE0TONMOF_4 = r2y_ctrl_post_resize->gradation_m_offset[4];
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_0, r2y_ctrl_post_resize->gradation_m_gain[0] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_1, r2y_ctrl_post_resize->gradation_m_gain[1] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_2, r2y_ctrl_post_resize->gradation_m_gain[2] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_3, r2y_ctrl_post_resize->gradation_m_gain[3] );
+	im_r2y_set_reg_signed_a( ee0_ctrl.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_4, r2y_ctrl_post_resize->gradation_m_gain[4] );
+	ee0_ctrl.EE0TONMBD.bit.EE0TONMBD_1 = r2y_ctrl_post_resize->gradation_m_border[0];
+	ee0_ctrl.EE0TONMBD.bit.EE0TONMBD_2 = r2y_ctrl_post_resize->gradation_m_border[1];
+	ee0_ctrl.EE0TONMBD.bit.EE0TONMBD_3 = r2y_ctrl_post_resize->gradation_m_border[2];
+	ee0_ctrl.EE0TONMBD.bit.EE0TONMBD_4 = r2y_ctrl_post_resize->gradation_m_border[3];
+
+	ee0_ctrl.EE0CLPPOF.bit.EE0CLPPOF_0 = r2y_ctrl_post_resize->level_clip_p_offset[0];
+	ee0_ctrl.EE0CLPPOF.bit.EE0CLPPOF_1 = r2y_ctrl_post_resize->level_clip_p_offset[1];
+	ee0_ctrl.EE0CLPPOF.bit.EE0CLPPOF_2 = r2y_ctrl_post_resize->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CLPPGA, union io_r2y_ee0clppga, EE0CLPPGA_0, r2y_ctrl_post_resize->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CLPPGA, union io_r2y_ee0clppga, EE0CLPPGA_1, r2y_ctrl_post_resize->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CLPPGA, union io_r2y_ee0clppga, EE0CLPPGA_2, r2y_ctrl_post_resize->level_clip_p_gain[2] );
+	ee0_ctrl.EE0CLPPBD.bit.EE0CLPPBD_1 = r2y_ctrl_post_resize->level_clip_p_border[0];
+	ee0_ctrl.EE0CLPPBD.bit.EE0CLPPBD_2 = r2y_ctrl_post_resize->level_clip_p_border[1];
+
+	ee0_ctrl.EE0CLPMOF.bit.EE0CLPMOF_0 = r2y_ctrl_post_resize->level_clip_m_offset[0];
+	ee0_ctrl.EE0CLPMOF.bit.EE0CLPMOF_1 = r2y_ctrl_post_resize->level_clip_m_offset[1];
+	ee0_ctrl.EE0CLPMOF.bit.EE0CLPMOF_2 = r2y_ctrl_post_resize->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CLPMGA, union io_r2y_ee0clpmga, EE0CLPMGA_0, r2y_ctrl_post_resize->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CLPMGA, union io_r2y_ee0clpmga, EE0CLPMGA_1, r2y_ctrl_post_resize->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( ee0_ctrl.EE0CLPMGA, union io_r2y_ee0clpmga, EE0CLPMGA_2, r2y_ctrl_post_resize->level_clip_m_gain[2] );
+	ee0_ctrl.EE0CLPMBD.bit.EE0CLPMBD_1 = r2y_ctrl_post_resize->level_clip_m_border[0];
+	ee0_ctrl.EE0CLPMBD.bit.EE0CLPMBD_2 = r2y_ctrl_post_resize->level_clip_m_border[1];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EE0_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&ee0_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_ee1_ctrl( UCHAR pipe_no, const T_IM_R2Y_POST_RESIZE1_PARAM* const r2y_ctrl_post_resize )
+{
+	T_IM_R2Y_CTRL_RDMA_EE1_VAL ee1_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EE1_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	ee1_ctrl.EE1CTL.bit.EE1EN = r2y_ctrl_post_resize->edge_enable;
+	ee1_ctrl.EE1CTL.bit.EE1TC = r2y_ctrl_post_resize->gradation_enable;
+
+	ee1_ctrl.EE1HPFK.bit.EE1HPFK0 = r2y_ctrl_post_resize->hpf_k[0];
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK1, r2y_ctrl_post_resize->hpf_k[1] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK2, r2y_ctrl_post_resize->hpf_k[2] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK3, r2y_ctrl_post_resize->hpf_k[3] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK4, r2y_ctrl_post_resize->hpf_k[4] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK5, r2y_ctrl_post_resize->hpf_k[5] );
+	ee1_ctrl.EE1NRLV.bit.EE1NRLV = r2y_ctrl_post_resize->strength;
+
+	ee1_ctrl.EE1CORPOF.bit.EE1CORPOF_0 = r2y_ctrl_post_resize->coring_p_offset[0];
+	ee1_ctrl.EE1CORPOF.bit.EE1CORPOF_1 = r2y_ctrl_post_resize->coring_p_offset[1];
+	ee1_ctrl.EE1CORPOF.bit.EE1CORPOF_2 = r2y_ctrl_post_resize->coring_p_offset[2];
+	ee1_ctrl.EE1CORPOF.bit.EE1CORPOF_3 = r2y_ctrl_post_resize->coring_p_offset[3];
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CORPGA, union io_r2y_ee1corpga, EE1CORPGA_0, r2y_ctrl_post_resize->coring_p_gain[0] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CORPGA, union io_r2y_ee1corpga, EE1CORPGA_1, r2y_ctrl_post_resize->coring_p_gain[1] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CORPGA, union io_r2y_ee1corpga, EE1CORPGA_2, r2y_ctrl_post_resize->coring_p_gain[2] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CORPGA, union io_r2y_ee1corpga, EE1CORPGA_3, r2y_ctrl_post_resize->coring_p_gain[3] );
+	ee1_ctrl.EE1CORPBD.bit.EE1CORPBD_1 = r2y_ctrl_post_resize->coring_p_border[0];
+	ee1_ctrl.EE1CORPBD.bit.EE1CORPBD_2 = r2y_ctrl_post_resize->coring_p_border[1];
+	ee1_ctrl.EE1CORPBD.bit.EE1CORPBD_3 = r2y_ctrl_post_resize->coring_p_border[2];
+
+	ee1_ctrl.EE1CORMOF.bit.EE1CORMOF_0 = r2y_ctrl_post_resize->coring_m_offset[0];
+	ee1_ctrl.EE1CORMOF.bit.EE1CORMOF_1 = r2y_ctrl_post_resize->coring_m_offset[1];
+	ee1_ctrl.EE1CORMOF.bit.EE1CORMOF_2 = r2y_ctrl_post_resize->coring_m_offset[2];
+	ee1_ctrl.EE1CORMOF.bit.EE1CORMOF_3 = r2y_ctrl_post_resize->coring_m_offset[3];
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CORMGA, union io_r2y_ee1cormga, EE1CORMGA_0, r2y_ctrl_post_resize->coring_m_gain[0] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CORMGA, union io_r2y_ee1cormga, EE1CORMGA_1, r2y_ctrl_post_resize->coring_m_gain[1] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CORMGA, union io_r2y_ee1cormga, EE1CORMGA_2, r2y_ctrl_post_resize->coring_m_gain[2] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CORMGA, union io_r2y_ee1cormga, EE1CORMGA_3, r2y_ctrl_post_resize->coring_m_gain[3] );
+	ee1_ctrl.EE1CORMBD.bit.EE1CORMBD_1 = r2y_ctrl_post_resize->coring_m_border[0];
+	ee1_ctrl.EE1CORMBD.bit.EE1CORMBD_2 = r2y_ctrl_post_resize->coring_m_border[1];
+	ee1_ctrl.EE1CORMBD.bit.EE1CORMBD_3 = r2y_ctrl_post_resize->coring_m_border[2];
+
+	ee1_ctrl.EE1SCLSUP.bit.EE1SCLSUP = r2y_ctrl_post_resize->scale_reduct_coef;
+
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_0 = r2y_ctrl_post_resize->scale_p_offset[0];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_1 = r2y_ctrl_post_resize->scale_p_offset[1];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_2 = r2y_ctrl_post_resize->scale_p_offset[2];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_3 = r2y_ctrl_post_resize->scale_p_offset[3];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_4 = r2y_ctrl_post_resize->scale_p_offset[4];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_5 = r2y_ctrl_post_resize->scale_p_offset[5];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_6 = r2y_ctrl_post_resize->scale_p_offset[6];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_7 = r2y_ctrl_post_resize->scale_p_offset[7];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_8 = r2y_ctrl_post_resize->scale_p_offset[8];
+	ee1_ctrl.EE1SCLPOF.bit.EE1SCLPOF_9 = r2y_ctrl_post_resize->scale_p_offset[9];
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_0, r2y_ctrl_post_resize->scale_p_gain[0] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_1, r2y_ctrl_post_resize->scale_p_gain[1] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_2, r2y_ctrl_post_resize->scale_p_gain[2] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_3, r2y_ctrl_post_resize->scale_p_gain[3] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_4, r2y_ctrl_post_resize->scale_p_gain[4] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_5, r2y_ctrl_post_resize->scale_p_gain[5] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_6, r2y_ctrl_post_resize->scale_p_gain[6] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_7, r2y_ctrl_post_resize->scale_p_gain[7] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_8, r2y_ctrl_post_resize->scale_p_gain[8] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_9, r2y_ctrl_post_resize->scale_p_gain[9] );
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_1 = r2y_ctrl_post_resize->scale_p_border[0];
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_2 = r2y_ctrl_post_resize->scale_p_border[1];
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_3 = r2y_ctrl_post_resize->scale_p_border[2];
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_4 = r2y_ctrl_post_resize->scale_p_border[3];
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_5 = r2y_ctrl_post_resize->scale_p_border[4];
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_6 = r2y_ctrl_post_resize->scale_p_border[5];
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_7 = r2y_ctrl_post_resize->scale_p_border[6];
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_8 = r2y_ctrl_post_resize->scale_p_border[7];
+	ee1_ctrl.EE1SCLPBD.bit.EE1SCLPBD_9 = r2y_ctrl_post_resize->scale_p_border[8];
+
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_0 = r2y_ctrl_post_resize->scale_m_offset[0];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_1 = r2y_ctrl_post_resize->scale_m_offset[1];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_2 = r2y_ctrl_post_resize->scale_m_offset[2];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_3 = r2y_ctrl_post_resize->scale_m_offset[3];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_4 = r2y_ctrl_post_resize->scale_m_offset[4];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_5 = r2y_ctrl_post_resize->scale_m_offset[5];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_6 = r2y_ctrl_post_resize->scale_m_offset[6];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_7 = r2y_ctrl_post_resize->scale_m_offset[7];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_8 = r2y_ctrl_post_resize->scale_m_offset[8];
+	ee1_ctrl.EE1SCLMOF.bit.EE1SCLMOF_9 = r2y_ctrl_post_resize->scale_m_offset[9];
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_0, r2y_ctrl_post_resize->scale_m_gain[0] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_1, r2y_ctrl_post_resize->scale_m_gain[1] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_2, r2y_ctrl_post_resize->scale_m_gain[2] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_3, r2y_ctrl_post_resize->scale_m_gain[3] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_4, r2y_ctrl_post_resize->scale_m_gain[4] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_5, r2y_ctrl_post_resize->scale_m_gain[5] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_6, r2y_ctrl_post_resize->scale_m_gain[6] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_7, r2y_ctrl_post_resize->scale_m_gain[7] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_8, r2y_ctrl_post_resize->scale_m_gain[8] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_9, r2y_ctrl_post_resize->scale_m_gain[9] );
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_1 = r2y_ctrl_post_resize->scale_m_border[0];
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_2 = r2y_ctrl_post_resize->scale_m_border[1];
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_3 = r2y_ctrl_post_resize->scale_m_border[2];
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_4 = r2y_ctrl_post_resize->scale_m_border[3];
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_5 = r2y_ctrl_post_resize->scale_m_border[4];
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_6 = r2y_ctrl_post_resize->scale_m_border[5];
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_7 = r2y_ctrl_post_resize->scale_m_border[6];
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_8 = r2y_ctrl_post_resize->scale_m_border[7];
+	ee1_ctrl.EE1SCLMBD.bit.EE1SCLMBD_9 = r2y_ctrl_post_resize->scale_m_border[8];
+
+	ee1_ctrl.EE1TONPOF.bit.EE1TONPOF_0 = r2y_ctrl_post_resize->gradation_p_offset[0];
+	ee1_ctrl.EE1TONPOF.bit.EE1TONPOF_1 = r2y_ctrl_post_resize->gradation_p_offset[1];
+	ee1_ctrl.EE1TONPOF.bit.EE1TONPOF_2 = r2y_ctrl_post_resize->gradation_p_offset[2];
+	ee1_ctrl.EE1TONPOF.bit.EE1TONPOF_3 = r2y_ctrl_post_resize->gradation_p_offset[3];
+	ee1_ctrl.EE1TONPOF.bit.EE1TONPOF_4 = r2y_ctrl_post_resize->gradation_p_offset[4];
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_0, r2y_ctrl_post_resize->gradation_p_gain[0] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_1, r2y_ctrl_post_resize->gradation_p_gain[1] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_2, r2y_ctrl_post_resize->gradation_p_gain[2] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_3, r2y_ctrl_post_resize->gradation_p_gain[3] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_4, r2y_ctrl_post_resize->gradation_p_gain[4] );
+	ee1_ctrl.EE1TONPBD.bit.EE1TONPBD_1 = r2y_ctrl_post_resize->gradation_p_border[0];
+	ee1_ctrl.EE1TONPBD.bit.EE1TONPBD_2 = r2y_ctrl_post_resize->gradation_p_border[1];
+	ee1_ctrl.EE1TONPBD.bit.EE1TONPBD_3 = r2y_ctrl_post_resize->gradation_p_border[2];
+	ee1_ctrl.EE1TONPBD.bit.EE1TONPBD_4 = r2y_ctrl_post_resize->gradation_p_border[3];
+
+	ee1_ctrl.EE1TONMOF.bit.EE1TONMOF_0 = r2y_ctrl_post_resize->gradation_m_offset[0];
+	ee1_ctrl.EE1TONMOF.bit.EE1TONMOF_1 = r2y_ctrl_post_resize->gradation_m_offset[1];
+	ee1_ctrl.EE1TONMOF.bit.EE1TONMOF_2 = r2y_ctrl_post_resize->gradation_m_offset[2];
+	ee1_ctrl.EE1TONMOF.bit.EE1TONMOF_3 = r2y_ctrl_post_resize->gradation_m_offset[3];
+	ee1_ctrl.EE1TONMOF.bit.EE1TONMOF_4 = r2y_ctrl_post_resize->gradation_m_offset[4];
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_0, r2y_ctrl_post_resize->gradation_m_gain[0] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_1, r2y_ctrl_post_resize->gradation_m_gain[1] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_2, r2y_ctrl_post_resize->gradation_m_gain[2] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_3, r2y_ctrl_post_resize->gradation_m_gain[3] );
+	im_r2y_set_reg_signed_a( ee1_ctrl.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_4, r2y_ctrl_post_resize->gradation_m_gain[4] );
+	ee1_ctrl.EE1TONMBD.bit.EE1TONMBD_1 = r2y_ctrl_post_resize->gradation_m_border[0];
+	ee1_ctrl.EE1TONMBD.bit.EE1TONMBD_2 = r2y_ctrl_post_resize->gradation_m_border[1];
+	ee1_ctrl.EE1TONMBD.bit.EE1TONMBD_3 = r2y_ctrl_post_resize->gradation_m_border[2];
+	ee1_ctrl.EE1TONMBD.bit.EE1TONMBD_4 = r2y_ctrl_post_resize->gradation_m_border[3];
+
+	ee1_ctrl.EE1CLPPOF.bit.EE1CLPPOF_0 = r2y_ctrl_post_resize->level_clip_p_offset[0];
+	ee1_ctrl.EE1CLPPOF.bit.EE1CLPPOF_1 = r2y_ctrl_post_resize->level_clip_p_offset[1];
+	ee1_ctrl.EE1CLPPOF.bit.EE1CLPPOF_2 = r2y_ctrl_post_resize->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CLPPGA, union io_r2y_ee1clppga, EE1CLPPGA_0, r2y_ctrl_post_resize->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CLPPGA, union io_r2y_ee1clppga, EE1CLPPGA_1, r2y_ctrl_post_resize->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CLPPGA, union io_r2y_ee1clppga, EE1CLPPGA_2, r2y_ctrl_post_resize->level_clip_p_gain[2] );
+	ee1_ctrl.EE1CLPPBD.bit.EE1CLPPBD_1 = r2y_ctrl_post_resize->level_clip_p_border[0];
+	ee1_ctrl.EE1CLPPBD.bit.EE1CLPPBD_2 = r2y_ctrl_post_resize->level_clip_p_border[1];
+
+	ee1_ctrl.EE1CLPMOF.bit.EE1CLPMOF_0 = r2y_ctrl_post_resize->level_clip_m_offset[0];
+	ee1_ctrl.EE1CLPMOF.bit.EE1CLPMOF_1 = r2y_ctrl_post_resize->level_clip_m_offset[1];
+	ee1_ctrl.EE1CLPMOF.bit.EE1CLPMOF_2 = r2y_ctrl_post_resize->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CLPMGA, union io_r2y_ee1clpmga, EE1CLPMGA_0, r2y_ctrl_post_resize->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CLPMGA, union io_r2y_ee1clpmga, EE1CLPMGA_1, r2y_ctrl_post_resize->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( ee1_ctrl.EE1CLPMGA, union io_r2y_ee1clpmga, EE1CLPMGA_2, r2y_ctrl_post_resize->level_clip_m_gain[2] );
+	ee1_ctrl.EE1CLPMBD.bit.EE1CLPMBD_1 = r2y_ctrl_post_resize->level_clip_m_border[0];
+	ee1_ctrl.EE1CLPMBD.bit.EE1CLPMBD_2 = r2y_ctrl_post_resize->level_clip_m_border[1];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EE1_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&ee1_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_deknee_table( UCHAR pipe_no, E_R2Y_DKN_RGBTBL tbl_type, const USHORT* const src_tbl )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	switch( tbl_type ){
+		case E_R2Y_DKN_RGBTBL_G:
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_Deknee_Tbl_G_Addr[pipe_no]);
+			break;
+		case E_R2Y_DKN_RGBTBL_B:
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_Deknee_Tbl_B_Addr[pipe_no]);
+			break;
+		default:	// E_R2Y_DKN_RGBTBL_R
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_Deknee_Tbl_R_Addr[pipe_no]);
+			break;
+	}
+	rdma_ctrl.transfer_byte = sizeof( U_IM_R2Y_CTRL_RDMA_DEKNEE_TBL_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_offset_ctrl( UCHAR pipe_no, const T_IM_R2Y_OFS* const ofs )
+{
+	T_IM_R2Y_CTRL_RDMA_OFST_VAL ofst_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_OFST_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	im_r2y_set_reg_signed_a( ofst_ctrl.OFST, union io_r2y_ofst, OFSTR, ofs->R );
+	im_r2y_set_reg_signed_a( ofst_ctrl.OFST, union io_r2y_ofst, OFSTG, ofs->G );
+	im_r2y_set_reg_signed_a( ofst_ctrl.OFST, union io_r2y_ofst, OFSTB, ofs->B );
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_OFST_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&ofst_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_wb_clip_ctrl( UCHAR pipe_no, const T_IM_R2Y_RGB_COLOR* const rgb_color )
+{
+	T_IM_R2Y_CTRL_RDMA_WB_CLIP_VAL wb_clip_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_WB_CLIP_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	wb_clip_ctrl.WBLV.bit.WBLVR = rgb_color->R;
+	wb_clip_ctrl.WBLV.bit.WBLVG = rgb_color->G;
+	wb_clip_ctrl.WBLV.bit.WBLVB = rgb_color->B;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_WB_CLIP_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&wb_clip_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_cc0_matrix_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_CC0* const r2y_ctrl_cc )
+{
+	T_IM_R2Y_CTRL_RDMA_CC0_VAL cc0_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_CC0_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	cc0_ctrl.CC0CTL.bit.CC0DP = r2y_ctrl_cc->posi_dec;
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_0_0, r2y_ctrl_cc->cc_matrix[0][0] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_0_1, r2y_ctrl_cc->cc_matrix[0][1] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_0_2, r2y_ctrl_cc->cc_matrix[0][2] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_1_0, r2y_ctrl_cc->cc_matrix[1][0] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_1_1, r2y_ctrl_cc->cc_matrix[1][1] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_1_2, r2y_ctrl_cc->cc_matrix[1][2] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_2_0, r2y_ctrl_cc->cc_matrix[2][0] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_2_1, r2y_ctrl_cc->cc_matrix[2][1] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0K, union io_r2y_cc0k, CC0K_2_2, r2y_ctrl_cc->cc_matrix[2][2] );
+	cc0_ctrl.CC0YBOF.bit.CC0YBOF_0 = r2y_ctrl_cc->cybof[0];
+	cc0_ctrl.CC0YBOF.bit.CC0YBOF_1 = r2y_ctrl_cc->cybof[1];
+	cc0_ctrl.CC0YBOF.bit.CC0YBOF_2 = r2y_ctrl_cc->cybof[2];
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0YBGA, union io_r2y_cc0ybga, CC0YBGA_0, r2y_ctrl_cc->cybga[0] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0YBGA, union io_r2y_cc0ybga, CC0YBGA_1, r2y_ctrl_cc->cybga[1] );
+	im_r2y_set_reg_signed_a( cc0_ctrl.CC0YBGA, union io_r2y_cc0ybga, CC0YBGA_2, r2y_ctrl_cc->cybga[2] );
+	cc0_ctrl.CC0YBBD.bit.CC0YBBD_1 = r2y_ctrl_cc->cybbd[0];
+	cc0_ctrl.CC0YBBD.bit.CC0YBBD_2 = r2y_ctrl_cc->cybbd[1];
+	cc0_ctrl.CCYC.bit.CCYC_0_0 = r2y_ctrl_cc->cyc[0];
+	cc0_ctrl.CCYC.bit.CCYC_0_1 = r2y_ctrl_cc->cyc[1];
+	cc0_ctrl.CCYC.bit.CCYC_0_2 = r2y_ctrl_cc->cyc[2];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_CC0_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&cc0_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_cc0_matrix_coefficient_ctrl( UCHAR pipe_no, const SHORT* const cc0k )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_CC0_COEF_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_CC0_COEF_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)cc0k;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_multi_axis_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_MULTI_AXIS* const r2y_ctrl_multi_axis )
+{
+	T_IM_R2Y_CTRL_RDMA_MCYC_VAL mcyc_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_MCYC_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	// MCYC10~MCYC22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_0_0, r2y_ctrl_multi_axis->cyc_coeff[0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_0_1, r2y_ctrl_multi_axis->cyc_coeff[1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_0_2, r2y_ctrl_multi_axis->cyc_coeff[2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_1_0, r2y_ctrl_multi_axis->cyc_coeff[3] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_1_1, r2y_ctrl_multi_axis->cyc_coeff[4] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_1_2, r2y_ctrl_multi_axis->cyc_coeff[5] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_2_0, r2y_ctrl_multi_axis->cyc_coeff[6] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_2_1, r2y_ctrl_multi_axis->cyc_coeff[7] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYC, union io_r2y_mcyc, MCYC_2_2, r2y_ctrl_multi_axis->cyc_coeff[8] );
+
+	// MCB1A~MCB4D
+	mcyc_ctrl.MCB1AB.bit.MCB1A = r2y_ctrl_multi_axis->boundary[0];
+	mcyc_ctrl.MCB1AB.bit.MCB1B = r2y_ctrl_multi_axis->boundary[1];
+	mcyc_ctrl.MCB1CD.bit.MCB1C = r2y_ctrl_multi_axis->boundary[2];
+	mcyc_ctrl.MCB1CD.bit.MCB1D = r2y_ctrl_multi_axis->boundary[3];
+	mcyc_ctrl.MCB2AB.bit.MCB2A = r2y_ctrl_multi_axis->boundary[4];
+	mcyc_ctrl.MCB2AB.bit.MCB2B = r2y_ctrl_multi_axis->boundary[5];
+	mcyc_ctrl.MCB2CD.bit.MCB2C = r2y_ctrl_multi_axis->boundary[6];
+	mcyc_ctrl.MCB2CD.bit.MCB2D = r2y_ctrl_multi_axis->boundary[7];
+	mcyc_ctrl.MCB3AB.bit.MCB3A = r2y_ctrl_multi_axis->boundary[8];
+	mcyc_ctrl.MCB3AB.bit.MCB3B = r2y_ctrl_multi_axis->boundary[9];
+	mcyc_ctrl.MCB3CD.bit.MCB3C = r2y_ctrl_multi_axis->boundary[10];
+	mcyc_ctrl.MCB3CD.bit.MCB3D = r2y_ctrl_multi_axis->boundary[11];
+	mcyc_ctrl.MCB4AB.bit.MCB4A = r2y_ctrl_multi_axis->boundary[12];
+	mcyc_ctrl.MCB4AB.bit.MCB4B = r2y_ctrl_multi_axis->boundary[13];
+	mcyc_ctrl.MCB4CD.bit.MCB4C = r2y_ctrl_multi_axis->boundary[14];
+	mcyc_ctrl.MCB4CD.bit.MCB4D = r2y_ctrl_multi_axis->boundary[15];
+
+	// MCID1~MCID4
+	mcyc_ctrl.MCID1.bit.MCID1A = r2y_ctrl_multi_axis->area_index[0][0];
+	mcyc_ctrl.MCID1.bit.MCID1B = r2y_ctrl_multi_axis->area_index[0][1];
+	mcyc_ctrl.MCID1.bit.MCID1C = r2y_ctrl_multi_axis->area_index[0][2];
+	mcyc_ctrl.MCID1.bit.MCID1D = r2y_ctrl_multi_axis->area_index[0][3];
+	mcyc_ctrl.MCID1.bit.MCID1E = r2y_ctrl_multi_axis->area_index[0][4];
+	mcyc_ctrl.MCID2.bit.MCID2A = r2y_ctrl_multi_axis->area_index[1][0];
+	mcyc_ctrl.MCID2.bit.MCID2B = r2y_ctrl_multi_axis->area_index[1][1];
+	mcyc_ctrl.MCID2.bit.MCID2C = r2y_ctrl_multi_axis->area_index[1][2];
+	mcyc_ctrl.MCID2.bit.MCID2D = r2y_ctrl_multi_axis->area_index[1][3];
+	mcyc_ctrl.MCID2.bit.MCID2E = r2y_ctrl_multi_axis->area_index[1][4];
+	mcyc_ctrl.MCID3.bit.MCID3A = r2y_ctrl_multi_axis->area_index[2][0];
+	mcyc_ctrl.MCID3.bit.MCID3B = r2y_ctrl_multi_axis->area_index[2][1];
+	mcyc_ctrl.MCID3.bit.MCID3C = r2y_ctrl_multi_axis->area_index[2][2];
+	mcyc_ctrl.MCID3.bit.MCID3D = r2y_ctrl_multi_axis->area_index[2][3];
+	mcyc_ctrl.MCID3.bit.MCID3E = r2y_ctrl_multi_axis->area_index[2][4];
+	mcyc_ctrl.MCID4.bit.MCID4A = r2y_ctrl_multi_axis->area_index[3][0];
+	mcyc_ctrl.MCID4.bit.MCID4B = r2y_ctrl_multi_axis->area_index[3][1];
+	mcyc_ctrl.MCID4.bit.MCID4C = r2y_ctrl_multi_axis->area_index[3][2];
+	mcyc_ctrl.MCID4.bit.MCID4D = r2y_ctrl_multi_axis->area_index[3][3];
+	mcyc_ctrl.MCID4.bit.MCID4E = r2y_ctrl_multi_axis->area_index[3][4];
+
+	// MCKA_0_00~MCKA_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKA.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[4][2][2] );
+
+	// MCKB_0_00~MCKB_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKB.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[4][2][2] );
+
+	// MCKC_0_00~MCKC_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKC.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[4][2][2] );
+
+	// MCKD_0_00~MCKD_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKD.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[4][2][2] );
+
+	// MCKE_0_00~MCKE_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKE.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[4][2][2] );
+
+	// MCKF_0_00~MCKF_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKF.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[4][2][2] );
+
+	// MCKG_0_00~MCKG_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKG.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[4][2][2] );
+
+	// MCKH_0_00~MCKH_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKH.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[4][2][2] );
+
+	// MCKI_0_00~MCKI_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKI.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[4][2][2] );
+
+	// MCKJ_0_00~MCKJ_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKJ.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[4][2][2] );
+
+	// MCKK_0_00~MCKK_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKK.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[4][2][2] );
+
+	// MCKL_0_00~MCKL_4_22
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[0][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[0][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[0][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[1][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[1][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[1][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[2][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[2][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[2][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[3][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[3][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[3][2][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[4][0][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[4][1][2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[4][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCKL.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[4][2][2] );
+
+	// MCLA_0_00~MCLA_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLA.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[4][2][1] );
+
+	// MCLB_0_00~MCLB_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLB.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[4][2][1] );
+
+	// MCLC_0_00~MCLC_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLC.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[4][2][1] );
+
+	// MCLD_0_00~MCLD_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLD.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[4][2][1] );
+
+	// MCLE_0_00~MCLE_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLE.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[4][2][1] );
+
+	// MCLF_0_00~MCLF_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLF.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[4][2][1] );
+
+	// MCLG_0_00~MCLG_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLG.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[4][2][1] );
+
+	// MCLH_0_00~MCLH_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLH.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[4][2][1] );
+
+	// MCLI_0_00~MCLI_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLI.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[4][2][1] );
+
+	// MCLJ_0_00~MCLJ_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[4][2][1] );
+
+	// MCLK_0_00~MCLK_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLK.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[4][2][1] );
+
+	// MCLL_0_00~MCLL_4_21
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[0][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[0][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[0][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[0][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[0][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[0][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[1][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[1][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[1][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[1][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[1][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[1][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[2][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[2][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[2][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[2][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[2][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[2][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[3][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[3][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[3][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[3][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[3][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[3][2][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[4][0][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[4][0][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[4][1][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[4][1][1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[4][2][0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCLL.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[4][2][1] );
+
+	mcyc_ctrl.MCYCBALP.bit.MCYCBALP = r2y_ctrl_multi_axis->cyc_alpha_blend;
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYCBGA, union io_r2y_mcycbga, MCYCBGA_1, r2y_ctrl_multi_axis->cyc_blend_gain[0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYCBGA, union io_r2y_mcycbga, MCYCBGA_2, r2y_ctrl_multi_axis->cyc_blend_gain[1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYCBGA, union io_r2y_mcycbga, MCYCBGA_3, r2y_ctrl_multi_axis->cyc_blend_gain[2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCYCBGA, union io_r2y_mcycbga, MCYCBGA_4, r2y_ctrl_multi_axis->cyc_blend_gain[3] );
+	mcyc_ctrl.MCYCBBD.bit.MCYCBBD_1 = r2y_ctrl_multi_axis->cyc_blend_border[0];
+	mcyc_ctrl.MCYCBBD.bit.MCYCBBD_2 = r2y_ctrl_multi_axis->cyc_blend_border[1];
+	mcyc_ctrl.MCBABALP.bit.MCBABALP = r2y_ctrl_multi_axis->cba_alpha_blend;
+	mcyc_ctrl.MCBABOF.bit.MCBABOF_0 = r2y_ctrl_multi_axis->cba_blend_offset[0];
+	mcyc_ctrl.MCBABOF.bit.MCBABOF_1 = r2y_ctrl_multi_axis->cba_blend_offset[1];
+	mcyc_ctrl.MCBABOF.bit.MCBABOF_2 = r2y_ctrl_multi_axis->cba_blend_offset[2];
+	mcyc_ctrl.MCBABOF.bit.MCBABOF_3 = r2y_ctrl_multi_axis->cba_blend_offset[3];
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCBABGA, union io_r2y_mcbabga, MCBABGA_0, r2y_ctrl_multi_axis->cba_blend_gain[0] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCBABGA, union io_r2y_mcbabga, MCBABGA_1, r2y_ctrl_multi_axis->cba_blend_gain[1] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCBABGA, union io_r2y_mcbabga, MCBABGA_2, r2y_ctrl_multi_axis->cba_blend_gain[2] );
+	im_r2y_set_reg_signed_a( mcyc_ctrl.MCBABGA, union io_r2y_mcbabga, MCBABGA_3, r2y_ctrl_multi_axis->cba_blend_gain[3] );
+	mcyc_ctrl.MCBABBD.bit.MCBABBD_1 = r2y_ctrl_multi_axis->cba_blend_border[0];
+	mcyc_ctrl.MCBABBD.bit.MCBABBD_2 = r2y_ctrl_multi_axis->cba_blend_border[1];
+	mcyc_ctrl.MCBABBD.bit.MCBABBD_3 = r2y_ctrl_multi_axis->cba_blend_border[2];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_MCYC_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&mcyc_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_btc_offset_ctrl( UCHAR pipe_no, const T_IM_R2Y_TCOF* const r2y_ctrl_btc_offset )
+{
+	T_IM_R2Y_CTRL_RDMA_BTC_TCOF_VAL btc_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_BTC_TCOF_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	im_r2y_set_reg_signed_a( btc_ctrl.TCOF, union io_r2y_tcof, TCOFR, r2y_ctrl_btc_offset->R );
+	im_r2y_set_reg_signed_a( btc_ctrl.TCOF, union io_r2y_tcof, TCOFG, r2y_ctrl_btc_offset->G );
+	im_r2y_set_reg_signed_a( btc_ctrl.TCOF, union io_r2y_tcof, TCOFB, r2y_ctrl_btc_offset->B );
+	im_r2y_set_reg_signed_a( btc_ctrl.TCOF, union io_r2y_tcof, TCOFYB, r2y_ctrl_btc_offset->Yb );
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_BTC_TCOF_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&btc_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_btc_tct_ctrl( UCHAR pipe_no, const T_IM_R2Y_TCT* const r2y_ctrl_btc_tct )
+{
+	T_IM_R2Y_CTRL_RDMA_BTC_TCT_VAL btc_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_BTC_TCT_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	btc_ctrl.TCTCTL.bit.TCTEN   = r2y_ctrl_btc_tct->tct_enable;
+	btc_ctrl.TCTSTA.bit.TCTHSTA = r2y_ctrl_btc_tct->start_x;
+	btc_ctrl.TCTSTA.bit.TCTVSTA = r2y_ctrl_btc_tct->start_y;
+	btc_ctrl.TCTB.bit.TCTBHSIZ  = r2y_ctrl_btc_tct->block_hsiz;
+	btc_ctrl.TCTB.bit.TCTBVSIZ  = r2y_ctrl_btc_tct->block_vsiz;
+	btc_ctrl.TCTB.bit.TCTBHNUM  = r2y_ctrl_btc_tct->block_hnum;
+	btc_ctrl.TCTB.bit.TCTBVNUM  = r2y_ctrl_btc_tct->block_vnum;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_BTC_TCT_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&btc_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_btc_tchs_ctrl( UCHAR pipe_no, const T_IM_R2Y_TCHS* const r2y_ctrl_btc_tchs )
+{
+	T_IM_R2Y_CTRL_RDMA_BTC_TCHS_VAL btc_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_BTC_TCHS_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	btc_ctrl.TCHSCTL.bit.TCHSEN    = r2y_ctrl_btc_tchs->hist_enable;
+	btc_ctrl.TCHSCTL.bit.TCHSHCYC  = r2y_ctrl_btc_tchs->sampling_hcyc;
+	btc_ctrl.TCHSCTL.bit.TCHSVCYC  = r2y_ctrl_btc_tchs->sampling_vcyc;
+	btc_ctrl.TCHSCTL.bit.TCHSRGBMD = r2y_ctrl_btc_tchs->histogram_mode;
+	btc_ctrl.TCHSCTL.bit.TCHSMN    = r2y_ctrl_btc_tchs->hist_minus_mode;
+	btc_ctrl.TCHSSTA.bit.TCHSHSTA  = r2y_ctrl_btc_tchs->tchs_window.img_top;
+	btc_ctrl.TCHSSTA.bit.TCHSVSTA  = r2y_ctrl_btc_tchs->tchs_window.img_left;
+	btc_ctrl.TCHSSIZ.bit.TCHSHSIZ  = r2y_ctrl_btc_tchs->tchs_window.img_width;
+	btc_ctrl.TCHSSIZ.bit.TCHSVSIZ  = r2y_ctrl_btc_tchs->tchs_window.img_lines;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_BTC_TCHS_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&btc_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_tone_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_TONE* const r2y_ctrl_tone )
+{
+	T_IM_R2Y_CTRL_RDMA_TONE_VAL tone_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_TONE_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	tone_ctrl.TCCTL.bit.TCEN     = r2y_ctrl_tone->tone_enable;
+	tone_ctrl.TCCTL.bit.TCYBEN   = r2y_ctrl_tone->tone_yb_enable;
+	tone_ctrl.TCCTL.bit.TCBLEN   = r2y_ctrl_tone->table_blend_enable;
+	tone_ctrl.TCCTL.bit.TCRES    = r2y_ctrl_tone->table_resol;
+	tone_ctrl.TCCTL.bit.TCTBL    = r2y_ctrl_tone->table_select;
+	tone_ctrl.TCCTL.bit.TCYOUT   = r2y_ctrl_tone->ytc_out;
+	tone_ctrl.TCCTL.bit.TCINTBIT = r2y_ctrl_tone->int_bit;
+	tone_ctrl.TCCTL.bit.TCBLND   = r2y_ctrl_tone->table_blend_ratio;
+
+	tone_ctrl.TCYC.bit.TCYC_0_0 = r2y_ctrl_tone->yc_matrix[0];
+	tone_ctrl.TCYC.bit.TCYC_0_1 = r2y_ctrl_tone->yc_matrix[1];
+	tone_ctrl.TCYC.bit.TCYC_0_2 = r2y_ctrl_tone->yc_matrix[2];
+
+	tone_ctrl.TCEP.bit.TCEP_0 = r2y_ctrl_tone->table_endp[0];
+	tone_ctrl.TCEP.bit.TCEP_1 = r2y_ctrl_tone->table_endp[1];
+	tone_ctrl.TCEP.bit.TCEP_2 = r2y_ctrl_tone->table_endp[2];
+	tone_ctrl.TCEP.bit.TCEP_3 = r2y_ctrl_tone->table_endp[3];
+
+	tone_ctrl.TCCLPR.bit.TCCLPRP = r2y_ctrl_tone->clip_p_r;
+	tone_ctrl.TCCLPR.bit.TCCLPRM = r2y_ctrl_tone->clip_m_r;
+	tone_ctrl.TCCLPG.bit.TCCLPGP = r2y_ctrl_tone->clip_p_g;
+	tone_ctrl.TCCLPG.bit.TCCLPGM = r2y_ctrl_tone->clip_m_g;
+	tone_ctrl.TCCLPB.bit.TCCLPBP = r2y_ctrl_tone->clip_p_b;
+	tone_ctrl.TCCLPB.bit.TCCLPBM = r2y_ctrl_tone->clip_m_b;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_TONE_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&tone_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_gamma_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_GAMMA* const r2y_ctrl_gamma )
+{
+	T_IM_R2Y_CTRL_RDMA_GAMMA_VAL gamma_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GAMMA_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	gamma_ctrl.GMCTL.bit.GMEN  = r2y_ctrl_gamma->gamma_enable;
+	gamma_ctrl.GMCTL.bit.GMMD  = r2y_ctrl_gamma->gamma_mode;
+	gamma_ctrl.GMCTL.bit.GAMSW = r2y_ctrl_gamma->gamma_yb_tbl_simul;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_GAMMA_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&gamma_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_cc1_matrix_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_CC1* const r2y_ctrl_cc )
+{
+	T_IM_R2Y_CTRL_RDMA_CC1_VAL cc1_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_CC1_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	cc1_ctrl.CC1CTL.bit.CC1DP = r2y_ctrl_cc->posi_dec;
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_0_0, r2y_ctrl_cc->cc_matrix[0][0] );
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_0_1, r2y_ctrl_cc->cc_matrix[0][1] );
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_0_2, r2y_ctrl_cc->cc_matrix[0][2] );
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_1_0, r2y_ctrl_cc->cc_matrix[1][0] );
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_1_1, r2y_ctrl_cc->cc_matrix[1][1] );
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_1_2, r2y_ctrl_cc->cc_matrix[1][2] );
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_2_0, r2y_ctrl_cc->cc_matrix[2][0] );
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_2_1, r2y_ctrl_cc->cc_matrix[2][1] );
+	im_r2y_set_reg_signed_a( cc1_ctrl.CC1K, union io_r2y_cc1k, CC1K_2_2, r2y_ctrl_cc->cc_matrix[2][2] );
+
+	cc1_ctrl.CC1CLPR.bit.CC1CLPRP = r2y_ctrl_cc->clip_p_r;
+	cc1_ctrl.CC1CLPR.bit.CC1CLPRM = r2y_ctrl_cc->clip_m_r;
+	cc1_ctrl.CC1CLPG.bit.CC1CLPGP = r2y_ctrl_cc->clip_p_g;
+	cc1_ctrl.CC1CLPG.bit.CC1CLPGM = r2y_ctrl_cc->clip_m_g;
+	cc1_ctrl.CC1CLPB.bit.CC1CLPBP = r2y_ctrl_cc->clip_p_b;
+	cc1_ctrl.CC1CLPB.bit.CC1CLPBM = r2y_ctrl_cc->clip_m_b;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_CC1_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&cc1_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_cc1_matrix_coefficient_ctrl( UCHAR pipe_no, const SHORT* const cc1k )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_CC1_COEF_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_CC1_COEF_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)cc1k;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_yc_convert_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_YCC* const r2y_ctrl_ycc )
+{
+	T_IM_R2Y_CTRL_RDMA_YCC_VAL ycc_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_YCC_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_0_0, r2y_ctrl_ycc->yc_coeff[0][0] );
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_0_1, r2y_ctrl_ycc->yc_coeff[0][1] );
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_0_2, r2y_ctrl_ycc->yc_coeff[0][2] );
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_1_0, r2y_ctrl_ycc->yc_coeff[1][0] );
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_1_1, r2y_ctrl_ycc->yc_coeff[1][1] );
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_1_2, r2y_ctrl_ycc->yc_coeff[1][2] );
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_2_0, r2y_ctrl_ycc->yc_coeff[2][0] );
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_2_1, r2y_ctrl_ycc->yc_coeff[2][1] );
+	im_r2y_set_reg_signed_a( ycc_ctrl.YC, union io_r2y_yc, YC_2_2, r2y_ctrl_ycc->yc_coeff[2][2] );
+	ycc_ctrl.YBLEND.bit.YYBLND = r2y_ctrl_ycc->y_blend_ratio;
+	ycc_ctrl.YBLEND.bit.YBBLND = r2y_ctrl_ycc->yb_blend_ratio;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_YCC_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&ycc_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_ynr_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_YNR* const r2y_ctrl_ynr )
+{
+	T_IM_R2Y_CTRL_RDMA_YNR_VAL ynr_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_YNR_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	ynr_ctrl.NRCTL.bit.NRMD    = r2y_ctrl_ynr->nr_mode;
+	ynr_ctrl.NRCTL.bit.NRBLEND = r2y_ctrl_ynr->blend_ratio;
+	ynr_ctrl.NROF.bit.NROF_0   = r2y_ctrl_ynr->offset[0];
+	ynr_ctrl.NROF.bit.NROF_1   = r2y_ctrl_ynr->offset[1];
+	ynr_ctrl.NROF.bit.NROF_2   = r2y_ctrl_ynr->offset[2];
+	ynr_ctrl.NROF.bit.NROF_3   = r2y_ctrl_ynr->offset[3];
+	im_r2y_set_reg_signed_a( ynr_ctrl.NRGA, union io_r2y_nrga, NRGA_0, r2y_ctrl_ynr->gain[0] );
+	im_r2y_set_reg_signed_a( ynr_ctrl.NRGA, union io_r2y_nrga, NRGA_1, r2y_ctrl_ynr->gain[1] );
+	im_r2y_set_reg_signed_a( ynr_ctrl.NRGA, union io_r2y_nrga, NRGA_2, r2y_ctrl_ynr->gain[2] );
+	im_r2y_set_reg_signed_a( ynr_ctrl.NRGA, union io_r2y_nrga, NRGA_3, r2y_ctrl_ynr->gain[3] );
+	ynr_ctrl.NRBD.bit.NRBD_1 = r2y_ctrl_ynr->border[0];
+	ynr_ctrl.NRBD.bit.NRBD_2 = r2y_ctrl_ynr->border[1];
+	ynr_ctrl.NRBD.bit.NRBD_3 = r2y_ctrl_ynr->border[2];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_YNR_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&ynr_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_eenr_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_CMN* const r2y_ctrl_edge_cmn )
+{
+	T_IM_R2Y_CTRL_RDMA_EENR_VAL eenr_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EENR_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	eenr_ctrl.EGSMCTL.bit.EGSMT    = r2y_ctrl_edge_cmn->reduction_mode;
+	eenr_ctrl.EGSMTT.bit.EGSMTTH   = r2y_ctrl_edge_cmn->threshold;
+	eenr_ctrl.EGSMTT.bit.EGSMTTXGA = r2y_ctrl_edge_cmn->texture_gain;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EENR_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&eenr_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_high_edge_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_HEDGE* const r2y_ctrl_hedge )
+{
+	T_IM_R2Y_CTRL_RDMA_EGHW_VAL eghw_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGHW_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	eghw_ctrl.EGHWCTL.bit.EGHWEN     = r2y_ctrl_hedge->edge_enable;
+	eghw_ctrl.EGHWCTL.bit.EGHWMP     = r2y_ctrl_hedge->scale_enable;
+	eghw_ctrl.EGHWCTL.bit.EGHWTC     = r2y_ctrl_hedge->table_clip_select;
+	eghw_ctrl.EGHWCTL.bit.EGHWSCLRES = r2y_ctrl_hedge->scale_table_resol;
+	eghw_ctrl.EGHWCTL.bit.EGHWSCLTBL = r2y_ctrl_hedge->scale_table_select;
+	eghw_ctrl.EGHWCTL.bit.EGHWTCRES  = r2y_ctrl_hedge->gradation_table_resol;
+	eghw_ctrl.EGHWCTL.bit.EGHWTCTBL  = r2y_ctrl_hedge->gradation_table_select;
+	eghw_ctrl.EGHWCTL.bit.EGHWNRLV   = r2y_ctrl_hedge->nr_level;
+
+	eghw_ctrl.EGHWHPFK.bit.EGHWHPFK0 = r2y_ctrl_hedge->hpf_k[0];
+	im_r2y_set_reg_signed_a( eghw_ctrl.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK1, r2y_ctrl_hedge->hpf_k[1] );
+	im_r2y_set_reg_signed_a( eghw_ctrl.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK2, r2y_ctrl_hedge->hpf_k[2] );
+	im_r2y_set_reg_signed_a( eghw_ctrl.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK3, r2y_ctrl_hedge->hpf_k[3] );
+	im_r2y_set_reg_signed_a( eghw_ctrl.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK4, r2y_ctrl_hedge->hpf_k[4] );
+	im_r2y_set_reg_signed_a( eghw_ctrl.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK5, r2y_ctrl_hedge->hpf_k[5] );
+
+	eghw_ctrl.EGHWCORPOF.bit.EGHWCORPOF_0 = r2y_ctrl_hedge->corp_offset[0];
+	eghw_ctrl.EGHWCORPOF.bit.EGHWCORPOF_1 = r2y_ctrl_hedge->corp_offset[1];
+	eghw_ctrl.EGHWCORPOF.bit.EGHWCORPOF_2 = r2y_ctrl_hedge->corp_offset[2];
+	eghw_ctrl.EGHWCORPOF.bit.EGHWCORPOF_3 = r2y_ctrl_hedge->corp_offset[3];
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCORPGA, union io_r2y_eghwcorpga, EGHWCORPGA_0, r2y_ctrl_hedge->corp_gain[0] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCORPGA, union io_r2y_eghwcorpga, EGHWCORPGA_1, r2y_ctrl_hedge->corp_gain[1] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCORPGA, union io_r2y_eghwcorpga, EGHWCORPGA_2, r2y_ctrl_hedge->corp_gain[2] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCORPGA, union io_r2y_eghwcorpga, EGHWCORPGA_3, r2y_ctrl_hedge->corp_gain[3] );
+	eghw_ctrl.EGHWCORPBD.bit.EGHWCORPBD_1 = r2y_ctrl_hedge->corp_border[0];
+	eghw_ctrl.EGHWCORPBD.bit.EGHWCORPBD_2 = r2y_ctrl_hedge->corp_border[1];
+	eghw_ctrl.EGHWCORPBD.bit.EGHWCORPBD_3 = r2y_ctrl_hedge->corp_border[2];
+
+	eghw_ctrl.EGHWCORMOF.bit.EGHWCORMOF_0 = r2y_ctrl_hedge->corm_offset[0];
+	eghw_ctrl.EGHWCORMOF.bit.EGHWCORMOF_1 = r2y_ctrl_hedge->corm_offset[1];
+	eghw_ctrl.EGHWCORMOF.bit.EGHWCORMOF_2 = r2y_ctrl_hedge->corm_offset[2];
+	eghw_ctrl.EGHWCORMOF.bit.EGHWCORMOF_3 = r2y_ctrl_hedge->corm_offset[3];
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCORMGA, union io_r2y_eghwcormga, EGHWCORMGA_0, r2y_ctrl_hedge->corm_gain[0] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCORMGA, union io_r2y_eghwcormga, EGHWCORMGA_1, r2y_ctrl_hedge->corm_gain[1] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCORMGA, union io_r2y_eghwcormga, EGHWCORMGA_2, r2y_ctrl_hedge->corm_gain[2] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCORMGA, union io_r2y_eghwcormga, EGHWCORMGA_3, r2y_ctrl_hedge->corm_gain[3] );
+	eghw_ctrl.EGHWCORMBD.bit.EGHWCORMBD_1 = r2y_ctrl_hedge->corm_border[0];
+	eghw_ctrl.EGHWCORMBD.bit.EGHWCORMBD_2 = r2y_ctrl_hedge->corm_border[1];
+	eghw_ctrl.EGHWCORMBD.bit.EGHWCORMBD_3 = r2y_ctrl_hedge->corm_border[2];
+
+	eghw_ctrl.EGHWSCLSUP.bit.EGHWSCLSUP = r2y_ctrl_hedge->sup_scl;
+
+	eghw_ctrl.EGHWCLPPOF.bit.EGHWCLPPOF_0 = r2y_ctrl_hedge->level_clip_p_offset[0];
+	eghw_ctrl.EGHWCLPPOF.bit.EGHWCLPPOF_1 = r2y_ctrl_hedge->level_clip_p_offset[1];
+	eghw_ctrl.EGHWCLPPOF.bit.EGHWCLPPOF_2 = r2y_ctrl_hedge->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCLPPGA, union io_r2y_eghwclppga, EGHWCLPPGA_0, r2y_ctrl_hedge->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCLPPGA, union io_r2y_eghwclppga, EGHWCLPPGA_1, r2y_ctrl_hedge->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCLPPGA, union io_r2y_eghwclppga, EGHWCLPPGA_2, r2y_ctrl_hedge->level_clip_p_gain[2] );
+	eghw_ctrl.EGHWCLPPBD.bit.EGHWCLPPBD_1 = r2y_ctrl_hedge->level_clip_p_border[0];
+	eghw_ctrl.EGHWCLPPBD.bit.EGHWCLPPBD_2 = r2y_ctrl_hedge->level_clip_p_border[1];
+
+	eghw_ctrl.EGHWCLPMOF.bit.EGHWCLPMOF_0 = r2y_ctrl_hedge->level_clip_m_offset[0];
+	eghw_ctrl.EGHWCLPMOF.bit.EGHWCLPMOF_1 = r2y_ctrl_hedge->level_clip_m_offset[1];
+	eghw_ctrl.EGHWCLPMOF.bit.EGHWCLPMOF_2 = r2y_ctrl_hedge->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCLPMGA, union io_r2y_eghwclpmga, EGHWCLPMGA_0, r2y_ctrl_hedge->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCLPMGA, union io_r2y_eghwclpmga, EGHWCLPMGA_1, r2y_ctrl_hedge->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( eghw_ctrl.EGHWCLPMGA, union io_r2y_eghwclpmga, EGHWCLPMGA_2, r2y_ctrl_hedge->level_clip_m_gain[2] );
+	eghw_ctrl.EGHWCLPMBD.bit.EGHWCLPMBD_1 = r2y_ctrl_hedge->level_clip_m_border[0];
+	eghw_ctrl.EGHWCLPMBD.bit.EGHWCLPMBD_2 = r2y_ctrl_hedge->level_clip_m_border[1];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EGHW_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&eghw_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_medium_edge_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_MEDGE* const r2y_ctrl_medge )
+{
+	T_IM_R2Y_CTRL_RDMA_EGMW_VAL egmw_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGMW_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	egmw_ctrl.EGMWCTL.bit.EGMWEN     = r2y_ctrl_medge->edge_enable;
+	egmw_ctrl.EGMWCTL.bit.EGMWMP     = r2y_ctrl_medge->scale_enable;
+	egmw_ctrl.EGMWCTL.bit.EGMWTC     = r2y_ctrl_medge->table_clip_select;
+	egmw_ctrl.EGMWCTL.bit.EGMWSCLRES = r2y_ctrl_medge->scale_table_resol;
+	egmw_ctrl.EGMWCTL.bit.EGMWSCLTBL = r2y_ctrl_medge->scale_table_select;
+	egmw_ctrl.EGMWCTL.bit.EGMWTCRES  = r2y_ctrl_medge->gradation_table_resol;
+	egmw_ctrl.EGMWCTL.bit.EGMWTCTBL  = r2y_ctrl_medge->gradation_table_select;
+	egmw_ctrl.EGMWCTL.bit.EGMWNRLV   = r2y_ctrl_medge->nr_level;
+
+	egmw_ctrl.EGMWHPFK.bit.EGMWHPFK0 = r2y_ctrl_medge->hpf_k[0];
+	im_r2y_set_reg_signed_a( egmw_ctrl.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK1, r2y_ctrl_medge->hpf_k[1] );
+	im_r2y_set_reg_signed_a( egmw_ctrl.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK2, r2y_ctrl_medge->hpf_k[2] );
+	im_r2y_set_reg_signed_a( egmw_ctrl.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK3, r2y_ctrl_medge->hpf_k[3] );
+	im_r2y_set_reg_signed_a( egmw_ctrl.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK4, r2y_ctrl_medge->hpf_k[4] );
+	im_r2y_set_reg_signed_a( egmw_ctrl.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK5, r2y_ctrl_medge->hpf_k[5] );
+
+	egmw_ctrl.EGMWCORPOF.bit.EGMWCORPOF_0 = r2y_ctrl_medge->corp_offset[0];
+	egmw_ctrl.EGMWCORPOF.bit.EGMWCORPOF_1 = r2y_ctrl_medge->corp_offset[1];
+	egmw_ctrl.EGMWCORPOF.bit.EGMWCORPOF_2 = r2y_ctrl_medge->corp_offset[2];
+	egmw_ctrl.EGMWCORPOF.bit.EGMWCORPOF_3 = r2y_ctrl_medge->corp_offset[3];
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCORPGA, union io_r2y_egmwcorpga, EGMWCORPGA_0, r2y_ctrl_medge->corp_gain[0] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCORPGA, union io_r2y_egmwcorpga, EGMWCORPGA_1, r2y_ctrl_medge->corp_gain[1] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCORPGA, union io_r2y_egmwcorpga, EGMWCORPGA_2, r2y_ctrl_medge->corp_gain[2] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCORPGA, union io_r2y_egmwcorpga, EGMWCORPGA_3, r2y_ctrl_medge->corp_gain[3] );
+	egmw_ctrl.EGMWCORPBD.bit.EGMWCORPBD_1 = r2y_ctrl_medge->corp_border[0];
+	egmw_ctrl.EGMWCORPBD.bit.EGMWCORPBD_2 = r2y_ctrl_medge->corp_border[1];
+	egmw_ctrl.EGMWCORPBD.bit.EGMWCORPBD_3 = r2y_ctrl_medge->corp_border[2];
+
+	egmw_ctrl.EGMWCORMOF.bit.EGMWCORMOF_0 = r2y_ctrl_medge->corm_offset[0];
+	egmw_ctrl.EGMWCORMOF.bit.EGMWCORMOF_1 = r2y_ctrl_medge->corm_offset[1];
+	egmw_ctrl.EGMWCORMOF.bit.EGMWCORMOF_2 = r2y_ctrl_medge->corm_offset[2];
+	egmw_ctrl.EGMWCORMOF.bit.EGMWCORMOF_3 = r2y_ctrl_medge->corm_offset[3];
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCORMGA, union io_r2y_egmwcormga, EGMWCORMGA_0, r2y_ctrl_medge->corm_gain[0] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCORMGA, union io_r2y_egmwcormga, EGMWCORMGA_1, r2y_ctrl_medge->corm_gain[1] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCORMGA, union io_r2y_egmwcormga, EGMWCORMGA_2, r2y_ctrl_medge->corm_gain[2] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCORMGA, union io_r2y_egmwcormga, EGMWCORMGA_3, r2y_ctrl_medge->corm_gain[3] );
+	egmw_ctrl.EGMWCORMBD.bit.EGMWCORMBD_1 = r2y_ctrl_medge->corm_border[0];
+	egmw_ctrl.EGMWCORMBD.bit.EGMWCORMBD_2 = r2y_ctrl_medge->corm_border[1];
+	egmw_ctrl.EGMWCORMBD.bit.EGMWCORMBD_3 = r2y_ctrl_medge->corm_border[2];
+
+	egmw_ctrl.EGMWSCLSUP.bit.EGMWSCLSUP = r2y_ctrl_medge->sup_scl;
+
+	egmw_ctrl.EGMWCLPPOF.bit.EGMWCLPPOF_0 = r2y_ctrl_medge->level_clip_p_offset[0];
+	egmw_ctrl.EGMWCLPPOF.bit.EGMWCLPPOF_1 = r2y_ctrl_medge->level_clip_p_offset[1];
+	egmw_ctrl.EGMWCLPPOF.bit.EGMWCLPPOF_2 = r2y_ctrl_medge->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCLPPGA, union io_r2y_egmwclppga, EGMWCLPPGA_0, r2y_ctrl_medge->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCLPPGA, union io_r2y_egmwclppga, EGMWCLPPGA_1, r2y_ctrl_medge->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCLPPGA, union io_r2y_egmwclppga, EGMWCLPPGA_2, r2y_ctrl_medge->level_clip_p_gain[2] );
+	egmw_ctrl.EGMWCLPPBD.bit.EGMWCLPPBD_1 = r2y_ctrl_medge->level_clip_p_border[0];
+	egmw_ctrl.EGMWCLPPBD.bit.EGMWCLPPBD_2 = r2y_ctrl_medge->level_clip_p_border[1];
+
+	egmw_ctrl.EGMWCLPMOF.bit.EGMWCLPMOF_0 = r2y_ctrl_medge->level_clip_m_offset[0];
+	egmw_ctrl.EGMWCLPMOF.bit.EGMWCLPMOF_1 = r2y_ctrl_medge->level_clip_m_offset[1];
+	egmw_ctrl.EGMWCLPMOF.bit.EGMWCLPMOF_2 = r2y_ctrl_medge->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCLPMGA, union io_r2y_egmwclpmga, EGMWCLPMGA_0, r2y_ctrl_medge->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCLPMGA, union io_r2y_egmwclpmga, EGMWCLPMGA_1, r2y_ctrl_medge->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( egmw_ctrl.EGMWCLPMGA, union io_r2y_egmwclpmga, EGMWCLPMGA_2, r2y_ctrl_medge->level_clip_m_gain[2] );
+	egmw_ctrl.EGMWCLPMBD.bit.EGMWCLPMBD_1 = r2y_ctrl_medge->level_clip_m_border[0];
+	egmw_ctrl.EGMWCLPMBD.bit.EGMWCLPMBD_2 = r2y_ctrl_medge->level_clip_m_border[1];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EGMW_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&egmw_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_low_edge_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_LEDGE* const r2y_ctrl_ledge )
+{
+	T_IM_R2Y_CTRL_RDMA_EGLW_VAL eglw_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGLW_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	eglw_ctrl.EGLWCTL.bit.EGLWEN     = r2y_ctrl_ledge->edge_enable;
+	eglw_ctrl.EGLWCTL.bit.EGLWMP     = r2y_ctrl_ledge->scale_enable;
+	eglw_ctrl.EGLWCTL.bit.EGLWTC     = r2y_ctrl_ledge->table_clip_select;
+	eglw_ctrl.EGLWCTL.bit.EGLWSCLRES = r2y_ctrl_ledge->scale_table_resol;
+	eglw_ctrl.EGLWCTL.bit.EGLWSCLTBL = r2y_ctrl_ledge->scale_table_select;
+	eglw_ctrl.EGLWCTL.bit.EGLWTCRES  = r2y_ctrl_ledge->gradation_table_resol;
+	eglw_ctrl.EGLWCTL.bit.EGLWTCTBL  = r2y_ctrl_ledge->gradation_table_select;
+
+	eglw_ctrl.EGLWHPFK.bit.EGLWHPFK0 = r2y_ctrl_ledge->hpf_k[0];
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK1, r2y_ctrl_ledge->hpf_k[1] );
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK2, r2y_ctrl_ledge->hpf_k[2] );
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK3, r2y_ctrl_ledge->hpf_k[3] );
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK4, r2y_ctrl_ledge->hpf_k[4] );
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK5, r2y_ctrl_ledge->hpf_k[5] );
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK6, r2y_ctrl_ledge->hpf_k[6] );
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK7, r2y_ctrl_ledge->hpf_k[7] );
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK8, r2y_ctrl_ledge->hpf_k[8] );
+	im_r2y_set_reg_signed_a( eglw_ctrl.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK9, r2y_ctrl_ledge->hpf_k[9] );
+
+	eglw_ctrl.EGLWCORPOF.bit.EGLWCORPOF_0 = r2y_ctrl_ledge->corp_offset[0];
+	eglw_ctrl.EGLWCORPOF.bit.EGLWCORPOF_1 = r2y_ctrl_ledge->corp_offset[1];
+	eglw_ctrl.EGLWCORPOF.bit.EGLWCORPOF_2 = r2y_ctrl_ledge->corp_offset[2];
+	eglw_ctrl.EGLWCORPOF.bit.EGLWCORPOF_3 = r2y_ctrl_ledge->corp_offset[3];
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCORPGA, union io_r2y_eglwcorpga, EGLWCORPGA_0, r2y_ctrl_ledge->corp_gain[0] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCORPGA, union io_r2y_eglwcorpga, EGLWCORPGA_1, r2y_ctrl_ledge->corp_gain[1] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCORPGA, union io_r2y_eglwcorpga, EGLWCORPGA_2, r2y_ctrl_ledge->corp_gain[2] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCORPGA, union io_r2y_eglwcorpga, EGLWCORPGA_3, r2y_ctrl_ledge->corp_gain[3] );
+	eglw_ctrl.EGLWCORPBD.bit.EGLWCORPBD_1 = r2y_ctrl_ledge->corp_border[0];
+	eglw_ctrl.EGLWCORPBD.bit.EGLWCORPBD_2 = r2y_ctrl_ledge->corp_border[1];
+	eglw_ctrl.EGLWCORPBD.bit.EGLWCORPBD_3 = r2y_ctrl_ledge->corp_border[2];
+
+	eglw_ctrl.EGLWCORMOF.bit.EGLWCORMOF_0 = r2y_ctrl_ledge->corm_offset[0];
+	eglw_ctrl.EGLWCORMOF.bit.EGLWCORMOF_1 = r2y_ctrl_ledge->corm_offset[1];
+	eglw_ctrl.EGLWCORMOF.bit.EGLWCORMOF_2 = r2y_ctrl_ledge->corm_offset[2];
+	eglw_ctrl.EGLWCORMOF.bit.EGLWCORMOF_3 = r2y_ctrl_ledge->corm_offset[3];
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCORMGA, union io_r2y_eglwcormga, EGLWCORMGA_0, r2y_ctrl_ledge->corm_gain[0] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCORMGA, union io_r2y_eglwcormga, EGLWCORMGA_1, r2y_ctrl_ledge->corm_gain[1] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCORMGA, union io_r2y_eglwcormga, EGLWCORMGA_2, r2y_ctrl_ledge->corm_gain[2] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCORMGA, union io_r2y_eglwcormga, EGLWCORMGA_3, r2y_ctrl_ledge->corm_gain[3] );
+	eglw_ctrl.EGLWCORMBD.bit.EGLWCORMBD_1 = r2y_ctrl_ledge->corm_border[0];
+	eglw_ctrl.EGLWCORMBD.bit.EGLWCORMBD_2 = r2y_ctrl_ledge->corm_border[1];
+	eglw_ctrl.EGLWCORMBD.bit.EGLWCORMBD_3 = r2y_ctrl_ledge->corm_border[2];
+
+	eglw_ctrl.EGLWSCLSUP.bit.EGLWSCLSUP = r2y_ctrl_ledge->sup_scl;
+
+	eglw_ctrl.EGLWCLPPOF.bit.EGLWCLPPOF_0 = r2y_ctrl_ledge->level_clip_p_offset[0];
+	eglw_ctrl.EGLWCLPPOF.bit.EGLWCLPPOF_1 = r2y_ctrl_ledge->level_clip_p_offset[1];
+	eglw_ctrl.EGLWCLPPOF.bit.EGLWCLPPOF_2 = r2y_ctrl_ledge->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCLPPGA, union io_r2y_eglwclppga, EGLWCLPPGA_0, r2y_ctrl_ledge->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCLPPGA, union io_r2y_eglwclppga, EGLWCLPPGA_1, r2y_ctrl_ledge->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCLPPGA, union io_r2y_eglwclppga, EGLWCLPPGA_2, r2y_ctrl_ledge->level_clip_p_gain[2] );
+	eglw_ctrl.EGLWCLPPBD.bit.EGLWCLPPBD_1 = r2y_ctrl_ledge->level_clip_p_border[0];
+	eglw_ctrl.EGLWCLPPBD.bit.EGLWCLPPBD_2 = r2y_ctrl_ledge->level_clip_p_border[1];
+
+	eglw_ctrl.EGLWCLPMOF.bit.EGLWCLPMOF_0 = r2y_ctrl_ledge->level_clip_m_offset[0];
+	eglw_ctrl.EGLWCLPMOF.bit.EGLWCLPMOF_1 = r2y_ctrl_ledge->level_clip_m_offset[1];
+	eglw_ctrl.EGLWCLPMOF.bit.EGLWCLPMOF_2 = r2y_ctrl_ledge->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCLPMGA, union io_r2y_eglwclpmga, EGLWCLPMGA_0, r2y_ctrl_ledge->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCLPMGA, union io_r2y_eglwclpmga, EGLWCLPMGA_1, r2y_ctrl_ledge->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( eglw_ctrl.EGLWCLPMGA, union io_r2y_eglwclpmga, EGLWCLPMGA_2, r2y_ctrl_ledge->level_clip_m_gain[2] );
+	eglw_ctrl.EGLWCLPMBD.bit.EGLWCLPMBD_1 = r2y_ctrl_ledge->level_clip_m_border[0];
+	eglw_ctrl.EGLWCLPMBD.bit.EGLWCLPMBD_2 = r2y_ctrl_ledge->level_clip_m_border[1];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EGLW_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&eglw_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_edge_dot_noise_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_DOT_NOISE* const r2y_ctrl_edge_dot )
+{
+	T_IM_R2Y_CTRL_RDMA_EGDT_VAL egdt_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGDT_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	egdt_ctrl.EGDTCTL.bit.EGDTHW     = r2y_ctrl_edge_dot->hf_enable;
+	egdt_ctrl.EGDTCTL.bit.EGDTMW     = r2y_ctrl_edge_dot->mf_enable;
+	egdt_ctrl.EGDTHWTH.bit.EGDTHWTHP = r2y_ctrl_edge_dot->hf_p_threshold;
+	egdt_ctrl.EGDTHWTH.bit.EGDTHWTHM = r2y_ctrl_edge_dot->hf_m_threshold;
+	egdt_ctrl.EGDTHWK.bit.EGDTHWKP   = r2y_ctrl_edge_dot->hf_p_coef;
+	egdt_ctrl.EGDTHWK.bit.EGDTHWKM   = r2y_ctrl_edge_dot->hf_m_coef;
+	egdt_ctrl.EGDTMWTH.bit.EGDTMWTHP = r2y_ctrl_edge_dot->mf_p_threshold;
+	egdt_ctrl.EGDTMWTH.bit.EGDTMWTHM = r2y_ctrl_edge_dot->mf_m_threshold;
+	egdt_ctrl.EGDTMWK.bit.EGDTMWKP   = r2y_ctrl_edge_dot->mf_p_coef;
+	egdt_ctrl.EGDTMWK.bit.EGDTMWKM   = r2y_ctrl_edge_dot->mf_m_coef;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EGDT_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&egdt_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_edge_blend_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_BLEND* const r2y_ctrl_edge_blend )
+{
+	T_IM_R2Y_CTRL_RDMA_EGCMP_VAL egcmp_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGCMP_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	egcmp_ctrl.EGCMPCTL.bit.EGCMPS = r2y_ctrl_edge_blend->blend_type;
+
+	egcmp_ctrl.EGCMPBD.bit.EGCMPBD_1 = r2y_ctrl_edge_blend->border[0];
+	egcmp_ctrl.EGCMPBD.bit.EGCMPBD_2 = r2y_ctrl_edge_blend->border[1];
+	egcmp_ctrl.EGCMPBD.bit.EGCMPBD_3 = r2y_ctrl_edge_blend->border[2];
+
+	egcmp_ctrl.EGCMPALPOF.bit.EGCMPALPOF_0 = r2y_ctrl_edge_blend->alpha_offset[0];
+	egcmp_ctrl.EGCMPALPOF.bit.EGCMPALPOF_1 = r2y_ctrl_edge_blend->alpha_offset[1];
+	egcmp_ctrl.EGCMPALPOF.bit.EGCMPALPOF_2 = r2y_ctrl_edge_blend->alpha_offset[2];
+	egcmp_ctrl.EGCMPALPOF.bit.EGCMPALPOF_3 = r2y_ctrl_edge_blend->alpha_offset[3];
+	im_r2y_set_reg_signed_a( egcmp_ctrl.EGCMPALPGA, union io_r2y_egcmpalpga, EGCMPALPGA_0, r2y_ctrl_edge_blend->alpha_gain[0] );
+	im_r2y_set_reg_signed_a( egcmp_ctrl.EGCMPALPGA, union io_r2y_egcmpalpga, EGCMPALPGA_1, r2y_ctrl_edge_blend->alpha_gain[1] );
+	im_r2y_set_reg_signed_a( egcmp_ctrl.EGCMPALPGA, union io_r2y_egcmpalpga, EGCMPALPGA_2, r2y_ctrl_edge_blend->alpha_gain[2] );
+	im_r2y_set_reg_signed_a( egcmp_ctrl.EGCMPALPGA, union io_r2y_egcmpalpga, EGCMPALPGA_3, r2y_ctrl_edge_blend->alpha_gain[3] );
+
+	egcmp_ctrl.EGCMPBTAOF.bit.EGCMPBTAOF_0 = r2y_ctrl_edge_blend->beta_offset[0];
+	egcmp_ctrl.EGCMPBTAOF.bit.EGCMPBTAOF_1 = r2y_ctrl_edge_blend->beta_offset[1];
+	egcmp_ctrl.EGCMPBTAOF.bit.EGCMPBTAOF_2 = r2y_ctrl_edge_blend->beta_offset[2];
+	egcmp_ctrl.EGCMPBTAOF.bit.EGCMPBTAOF_3 = r2y_ctrl_edge_blend->beta_offset[3];
+	im_r2y_set_reg_signed_a( egcmp_ctrl.EGCMPBTAGA, union io_r2y_egcmpbtaga, EGCMPBTAGA_0, r2y_ctrl_edge_blend->beta_gain[0] );
+	im_r2y_set_reg_signed_a( egcmp_ctrl.EGCMPBTAGA, union io_r2y_egcmpbtaga, EGCMPBTAGA_1, r2y_ctrl_edge_blend->beta_gain[1] );
+	im_r2y_set_reg_signed_a( egcmp_ctrl.EGCMPBTAGA, union io_r2y_egcmpbtaga, EGCMPBTAGA_2, r2y_ctrl_edge_blend->beta_gain[2] );
+	im_r2y_set_reg_signed_a( egcmp_ctrl.EGCMPBTAGA, union io_r2y_egcmpbtaga, EGCMPBTAGA_3, r2y_ctrl_edge_blend->beta_gain[3] );
+
+	egcmp_ctrl.EGCMPCLP.bit.EGCMPCLPP = r2y_ctrl_edge_blend->level_clip_p;
+	egcmp_ctrl.EGCMPCLP.bit.EGCMPCLPM = r2y_ctrl_edge_blend->level_clip_m;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EGCMP_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&egcmp_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_crv_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_EDGE_TEXTURE_ADJ_COMMON* const r2y_ctrl_c_ref_edge_texture_adj_common )
+{
+	T_IM_R2Y_CTRL_RDMA_CRV_VAL crv_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_CRV_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	im_r2y_set_reg_signed( crv_ctrl.CRVAF, union io_r2y_crvaf, CRVAFX1, r2y_ctrl_c_ref_edge_texture_adj_common->cb_a_focus1_pos );
+	im_r2y_set_reg_signed( crv_ctrl.CRVAF, union io_r2y_crvaf, CRVAFY1, r2y_ctrl_c_ref_edge_texture_adj_common->cr_a_focus1_pos );
+	im_r2y_set_reg_signed( crv_ctrl.CRVAF, union io_r2y_crvaf, CRVAFX2, r2y_ctrl_c_ref_edge_texture_adj_common->cb_a_focus2_pos );
+	im_r2y_set_reg_signed( crv_ctrl.CRVAF, union io_r2y_crvaf, CRVAFY2, r2y_ctrl_c_ref_edge_texture_adj_common->cr_a_focus2_pos );
+	im_r2y_set_reg_signed( crv_ctrl.CRVBF, union io_r2y_crvbf, CRVBFX1, r2y_ctrl_c_ref_edge_texture_adj_common->cb_b_focus1_pos );
+	im_r2y_set_reg_signed( crv_ctrl.CRVBF, union io_r2y_crvbf, CRVBFY1, r2y_ctrl_c_ref_edge_texture_adj_common->cr_b_focus1_pos );
+	im_r2y_set_reg_signed( crv_ctrl.CRVBF, union io_r2y_crvbf, CRVBFX2, r2y_ctrl_c_ref_edge_texture_adj_common->cb_b_focus2_pos );
+	im_r2y_set_reg_signed( crv_ctrl.CRVBF, union io_r2y_crvbf, CRVBFY2, r2y_ctrl_c_ref_edge_texture_adj_common->cr_b_focus2_pos );
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_CRV_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&crv_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_egcrv_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_EDGE_ADJ* const r2y_ctrl_c_ref_edge_adj )
+{
+	T_IM_R2Y_CTRL_RDMA_EGCRV_VAL egcrv_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGCRV_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	egcrv_ctrl.EGCRVCTL.bit.EGCRAE   = r2y_ctrl_c_ref_edge_adj->area_a_enable;
+	egcrv_ctrl.EGCRVCTL.bit.EGCRBE   = r2y_ctrl_c_ref_edge_adj->area_b_enable;
+	egcrv_ctrl.EGCRVCTL.bit.EGCRVMRG = r2y_ctrl_c_ref_edge_adj->merge_method;
+
+	egcrv_ctrl.EGCRVASCLOF.bit.EGCRVASCLOF1 = r2y_ctrl_c_ref_edge_adj->area_a_scale_offset;
+	im_r2y_set_reg_signed( egcrv_ctrl.EGCRVASCLGA, union io_r2y_egcrvasclga, EGCRVASCLGA_0, r2y_ctrl_c_ref_edge_adj->area_a_scale_gain[0] );
+	im_r2y_set_reg_signed( egcrv_ctrl.EGCRVASCLGA, union io_r2y_egcrvasclga, EGCRVASCLGA_1, r2y_ctrl_c_ref_edge_adj->area_a_scale_gain[1] );
+	egcrv_ctrl.EGCRVASCLBD.bit.EGCRVASCLBD1 = r2y_ctrl_c_ref_edge_adj->area_a_scale_border;
+	egcrv_ctrl.EGCRVASCLCP.bit.EGCRVASCLCPL = r2y_ctrl_c_ref_edge_adj->area_a_scale_clip_lo;
+	egcrv_ctrl.EGCRVASCLCP.bit.EGCRVASCLCPH = r2y_ctrl_c_ref_edge_adj->area_a_scale_clip_hi;
+	egcrv_ctrl.EGYASCLGA.bit.EGYASCLGA0     = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_gain_p;
+	egcrv_ctrl.EGYASCLGA.bit.EGYASCLGA1     = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_gain_m;
+	egcrv_ctrl.EGYASCLBD.bit.EGYASCLBD_0    = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_border[0];
+	egcrv_ctrl.EGYASCLBD.bit.EGYASCLBD_1    = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_border[1];
+	egcrv_ctrl.EGYASCLCLP.bit.EGYASCLCLPL   = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_clip_lo;
+	egcrv_ctrl.EGYASCLCLP.bit.EGYASCLCLPH   = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_clip_hi;
+
+	egcrv_ctrl.EGCRVBSCLOF.bit.EGCRVBSCLOF1 = r2y_ctrl_c_ref_edge_adj->area_b_scale_offset;
+	im_r2y_set_reg_signed( egcrv_ctrl.EGCRVBSCLGA, union io_r2y_egcrvbsclga, EGCRVBSCLGA_0, r2y_ctrl_c_ref_edge_adj->area_b_scale_gain[0] );
+	im_r2y_set_reg_signed( egcrv_ctrl.EGCRVBSCLGA, union io_r2y_egcrvbsclga, EGCRVBSCLGA_1, r2y_ctrl_c_ref_edge_adj->area_b_scale_gain[1] );
+	egcrv_ctrl.EGCRVBSCLBD.bit.EGCRVBSCLBD1 = r2y_ctrl_c_ref_edge_adj->area_b_scale_border;
+	egcrv_ctrl.EGCRVBSCLCP.bit.EGCRVBSCLCPL = r2y_ctrl_c_ref_edge_adj->area_b_scale_clip_lo;
+	egcrv_ctrl.EGCRVBSCLCP.bit.EGCRVBSCLCPH = r2y_ctrl_c_ref_edge_adj->area_b_scale_clip_hi;
+	egcrv_ctrl.EGYBSCLGA.bit.EGYBSCLGA0     = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_gain_p;
+	egcrv_ctrl.EGYBSCLGA.bit.EGYBSCLGA1     = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_gain_m;
+	egcrv_ctrl.EGYBSCLBD.bit.EGYBSCLBD_0    = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_border[0];
+	egcrv_ctrl.EGYBSCLBD.bit.EGYBSCLBD_1    = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_border[1];
+	egcrv_ctrl.EGYBSCLCLP.bit.EGYBSCLCLPL   = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_clip_lo;
+	egcrv_ctrl.EGYBSCLCLP.bit.EGYBSCLCLPH   = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_clip_hi;
+
+	egcrv_ctrl.EGCRVCLP.bit.EGCRVCLPP = r2y_ctrl_c_ref_edge_adj->level_clip_p;
+	egcrv_ctrl.EGCRVCLP.bit.EGCRVCLPM = r2y_ctrl_c_ref_edge_adj->level_clip_m;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_EGCRV_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&egcrv_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_ybcrv_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_YB_BLEND* const r2y_ctrl_c_ref_yb_blend )
+{
+	T_IM_R2Y_CTRL_RDMA_YBCRV_VAL ybcrv_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_YBCRV_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	ybcrv_ctrl.YBCRVCTL.bit.YBCRAE = r2y_ctrl_c_ref_yb_blend->area_a_enable;
+	ybcrv_ctrl.YBCRVCTL.bit.YBCRBE = r2y_ctrl_c_ref_yb_blend->area_b_enable;
+
+	ybcrv_ctrl.YBCRVAALPOF.bit.YBCRVAALPOF1 = r2y_ctrl_c_ref_yb_blend->area_a_offset;
+	im_r2y_set_reg_signed( ybcrv_ctrl.YBCRVAALPGA, union io_r2y_ybcrvaalpga, YBCRVAALPGA_0, r2y_ctrl_c_ref_yb_blend->area_a_gain[0] );
+	im_r2y_set_reg_signed( ybcrv_ctrl.YBCRVAALPGA, union io_r2y_ybcrvaalpga, YBCRVAALPGA_1, r2y_ctrl_c_ref_yb_blend->area_a_gain[1] );
+	ybcrv_ctrl.YBCRVAALPBD.bit.YBCRVAALPBD1 = r2y_ctrl_c_ref_yb_blend->area_a_border;
+	ybcrv_ctrl.YBCRVAALPCP.bit.YBCRVAALPCPL = r2y_ctrl_c_ref_yb_blend->area_a_scale_clip_lo;
+	ybcrv_ctrl.YBCRVAALPCP.bit.YBCRVAALPCPH = r2y_ctrl_c_ref_yb_blend->area_a_scale_clip_hi;
+	ybcrv_ctrl.YBYAALPGA.bit.YBYAALPGA0     = r2y_ctrl_c_ref_yb_blend->area_a_correct_gain_p;
+	ybcrv_ctrl.YBYAALPGA.bit.YBYAALPGA1     = r2y_ctrl_c_ref_yb_blend->area_a_correct_gain_m;
+	ybcrv_ctrl.YBYAALPBD.bit.YBYAALPBD_0    = r2y_ctrl_c_ref_yb_blend->area_a_correct_border[0];
+	ybcrv_ctrl.YBYAALPBD.bit.YBYAALPBD_1    = r2y_ctrl_c_ref_yb_blend->area_a_correct_border[1];
+	ybcrv_ctrl.YBYAALPCLP.bit.YBYAALPCLPL   = r2y_ctrl_c_ref_yb_blend->area_a_correct_clip_lo;
+	ybcrv_ctrl.YBYAALPCLP.bit.YBYAALPCLPH   = r2y_ctrl_c_ref_yb_blend->area_a_correct_clip_hi;
+
+	ybcrv_ctrl.YBCRVBALPOF.bit.YBCRVBALPOF1 = r2y_ctrl_c_ref_yb_blend->area_b_offset;
+	im_r2y_set_reg_signed( ybcrv_ctrl.YBCRVBALPGA, union io_r2y_ybcrvbalpga, YBCRVBALPGA_0, r2y_ctrl_c_ref_yb_blend->area_b_gain[0] );
+	im_r2y_set_reg_signed( ybcrv_ctrl.YBCRVBALPGA, union io_r2y_ybcrvbalpga, YBCRVBALPGA_1, r2y_ctrl_c_ref_yb_blend->area_b_gain[1] );
+	ybcrv_ctrl.YBCRVBALPBD.bit.YBCRVBALPBD1 = r2y_ctrl_c_ref_yb_blend->area_b_border;
+	ybcrv_ctrl.YBCRVBALPCP.bit.YBCRVBALPCPL = r2y_ctrl_c_ref_yb_blend->area_b_scale_clip_lo;
+	ybcrv_ctrl.YBCRVBALPCP.bit.YBCRVBALPCPH = r2y_ctrl_c_ref_yb_blend->area_b_scale_clip_hi;
+	ybcrv_ctrl.YBYBALPGA.bit.YBYBALPGA0     = r2y_ctrl_c_ref_yb_blend->area_b_correct_gain_p;
+	ybcrv_ctrl.YBYBALPGA.bit.YBYBALPGA1     = r2y_ctrl_c_ref_yb_blend->area_b_correct_gain_m;
+	ybcrv_ctrl.YBYBALPBD.bit.YBYBALPBD_0    = r2y_ctrl_c_ref_yb_blend->area_b_correct_border[0];
+	ybcrv_ctrl.YBYBALPBD.bit.YBYBALPBD_1    = r2y_ctrl_c_ref_yb_blend->area_b_correct_border[1];
+	ybcrv_ctrl.YBYBALPCLP.bit.YBYBALPCLPL   = r2y_ctrl_c_ref_yb_blend->area_b_correct_clip_lo;
+	ybcrv_ctrl.YBYBALPCLP.bit.YBYBALPCLPH   = r2y_ctrl_c_ref_yb_blend->area_b_correct_clip_hi;
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_YBCRV_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&ybcrv_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_color_nr_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_CLPF* const r2y_ctrl_clpf )
+{
+	T_IM_R2Y_CTRL_RDMA_CLPF_VAL clpf_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_CLPF_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	clpf_ctrl.CLPFCTL.bit.CLPFEN = r2y_ctrl_clpf->clpf_enable;
+	clpf_ctrl.CLPFCTL.bit.CLPFYA = r2y_ctrl_clpf->interlock_blend_enable;
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_0, r2y_ctrl_clpf->lpf_k[0] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_1, r2y_ctrl_clpf->lpf_k[1] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_2, r2y_ctrl_clpf->lpf_k[2] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_3, r2y_ctrl_clpf->lpf_k[3] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_4, r2y_ctrl_clpf->lpf_k[4] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_5, r2y_ctrl_clpf->lpf_k[5] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_6, r2y_ctrl_clpf->lpf_k[6] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_7, r2y_ctrl_clpf->lpf_k[7] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFK, union io_r2y_clpfk, CLPFK_8, r2y_ctrl_clpf->lpf_k[8] );
+	clpf_ctrl.CLPFOF.bit.CLPFOF_0 = r2y_ctrl_clpf->lpf_ib_offset[0];
+	clpf_ctrl.CLPFOF.bit.CLPFOF_1 = r2y_ctrl_clpf->lpf_ib_offset[1];
+	clpf_ctrl.CLPFOF.bit.CLPFOF_2 = r2y_ctrl_clpf->lpf_ib_offset[2];
+	clpf_ctrl.CLPFOF.bit.CLPFOF_3 = r2y_ctrl_clpf->lpf_ib_offset[3];
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFGA, union io_r2y_clpfga, CLPFGA_0, r2y_ctrl_clpf->lpf_ib_gain[0] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFGA, union io_r2y_clpfga, CLPFGA_1, r2y_ctrl_clpf->lpf_ib_gain[1] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFGA, union io_r2y_clpfga, CLPFGA_2, r2y_ctrl_clpf->lpf_ib_gain[2] );
+	im_r2y_set_reg_signed_a( clpf_ctrl.CLPFGA, union io_r2y_clpfga, CLPFGA_3, r2y_ctrl_clpf->lpf_ib_gain[3] );
+	clpf_ctrl.CLPFBD.bit.CLPFBD_1 = r2y_ctrl_clpf->lpf_ib_border[0];
+	clpf_ctrl.CLPFBD.bit.CLPFBD_2 = r2y_ctrl_clpf->lpf_ib_border[1];
+	clpf_ctrl.CLPFBD.bit.CLPFBD_3 = r2y_ctrl_clpf->lpf_ib_border[2];
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_CLPF_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&clpf_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_chroma_suppress_ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL_CS* const r2y_ctrl_cs )
+{
+	T_IM_R2Y_CTRL_RDMA_CSP_VAL csp_ctrl;
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_CSP_Addr[pipe_no]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	csp_ctrl.CSYCTL.bit.CSYEN  = r2y_ctrl_cs->csy_enable;
+	csp_ctrl.CSYCTL.bit.CSYKY  = r2y_ctrl_cs->csy_mix_ratio;
+	csp_ctrl.CSYCTL.bit.CSYTBL = r2y_ctrl_cs->csy_select_table;
+	csp_ctrl.CSYOF.bit.CSYOF_0 = r2y_ctrl_cs->csy_offset[0];
+	csp_ctrl.CSYOF.bit.CSYOF_1 = r2y_ctrl_cs->csy_offset[1];
+	csp_ctrl.CSYOF.bit.CSYOF_2 = r2y_ctrl_cs->csy_offset[2];
+	csp_ctrl.CSYOF.bit.CSYOF_3 = r2y_ctrl_cs->csy_offset[3];
+	im_r2y_set_reg_signed_a( csp_ctrl.CSYGA, union io_r2y_csyga, CSYGA_0, r2y_ctrl_cs->csy_gain[0] );
+	im_r2y_set_reg_signed_a( csp_ctrl.CSYGA, union io_r2y_csyga, CSYGA_1, r2y_ctrl_cs->csy_gain[1] );
+	im_r2y_set_reg_signed_a( csp_ctrl.CSYGA, union io_r2y_csyga, CSYGA_2, r2y_ctrl_cs->csy_gain[2] );
+	im_r2y_set_reg_signed_a( csp_ctrl.CSYGA, union io_r2y_csyga, CSYGA_3, r2y_ctrl_cs->csy_gain[3] );
+	csp_ctrl.CSYBD.bit.CSYBD_1 = r2y_ctrl_cs->csy_border[0];
+	csp_ctrl.CSYBD.bit.CSYBD_2 = r2y_ctrl_cs->csy_border[1];
+	csp_ctrl.CSYBD.bit.CSYBD_3 = r2y_ctrl_cs->csy_border[2];
+	csp_ctrl.YCRVFX.bit.YRV    = r2y_ctrl_cs->y_rev_enable;
+	csp_ctrl.YCRVFX.bit.CRV    = r2y_ctrl_cs->c_rev_enable;
+	csp_ctrl.YCRVFX.bit.CFIXEN = r2y_ctrl_cs->c_fixed_enable;
+	im_r2y_set_reg_signed( csp_ctrl.CFIX, union io_r2y_cfix, CFIXB, r2y_ctrl_cs->cb_fixed );
+	im_r2y_set_reg_signed( csp_ctrl.CFIX, union io_r2y_cfix, CFIXR, r2y_ctrl_cs->cr_fixed );
+	im_r2y_set_reg_signed_a( csp_ctrl.YCOF, union io_r2y_ycof, YOF, r2y_ctrl_cs->y_offset );
+	im_r2y_set_reg_signed_a( csp_ctrl.YCOF, union io_r2y_ycof, COFB, r2y_ctrl_cs->cb_offset );
+	im_r2y_set_reg_signed_a( csp_ctrl.YCOF, union io_r2y_ycof, COFR, r2y_ctrl_cs->cr_offset );
+
+	rdma_ctrl.transfer_byte = sizeof( T_IM_R2Y_CTRL_RDMA_CSP_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)&csp_ctrl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_tone_ctrl_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_TONE_Tbl_Addr[pipe_no].TC[write_ofs_num / 2]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = array_num / 2;
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_gammma_diff_table( UCHAR pipe_no, UCHAR tbl_index, const ULLONG* const src_diff_tbl )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	switch( tbl_index ){
+		case 1:		// R
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMRDF_Tbl_Addr[pipe_no]);
+			break;
+		case 2:		// G
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMGDF_Tbl_Addr[pipe_no]);
+			break;
+		case 3:		// B
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMBDF_Tbl_Addr[pipe_no]);
+			break;
+		case 4:		// Yb
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMYBDF_Tbl_Addr[pipe_no]);
+			break;
+//		case 0:		// RGB common
+		default:
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMRGBDF_Tbl_Addr[pipe_no]);
+			break;
+	}
+
+	rdma_ctrl.transfer_byte = sizeof( U_IM_R2Y_CTRL_RDMA_GMDF_TBL_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_diff_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_gammma_full_table( UCHAR pipe_no, UCHAR tbl_index, const USHORT* const src_full_tbl )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	switch( tbl_index ){
+		case 1:		// R
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMRFL_Tbl_Addr[pipe_no]);
+			break;
+		case 2:		// G
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMGFL_Tbl_Addr[pipe_no]);
+			break;
+		case 3:		// B
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMBFL_Tbl_Addr[pipe_no]);
+			break;
+		case 4:		// Yb
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMYBFL_Tbl_Addr[pipe_no]);
+			break;
+//		case 0:		// RGB common
+		default:
+			rdma_ctrl.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_GMRGBFL_Tbl_Addr[pipe_no]);
+			break;
+	}
+
+	rdma_ctrl.transfer_byte = sizeof( U_IM_R2Y_CTRL_RDMA_GMFL_TBL_VAL );
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_full_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_hedge_scale_table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGHWSCL_Tbl_Addr[pipe_no].EGWSCL[write_ofs_num / 4]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = array_num / 4;
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_hedge_step_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGHWTON_Tbl_Addr[pipe_no].EGWTON[write_ofs_num / 2]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = array_num / 2;
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_medge_scale_table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGMWSCL_Tbl_Addr[pipe_no].EGWSCL[write_ofs_num / 4]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = array_num / 4;
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_medge_step_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGMWTON_Tbl_Addr[pipe_no].EGWTON[write_ofs_num / 2]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = array_num / 2;
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_ledge_scale_table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGLWSCL_Tbl_Addr[pipe_no].EGWSCL[write_ofs_num / 4]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = array_num / 4;
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_ledge_step_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGLWTON_Tbl_Addr[pipe_no].EGWTON[write_ofs_num / 2]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = array_num / 2;
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+static VOID im_r2y_set_rdma_val_map_scale_table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	T_IM_RDMA_CTRL rdma_ctrl = {
+		.reg_addr_tbl_addr = (ULONG)&(gIM_R2Y_EGMPSCL_Tbl_Addr[pipe_no].EGMPSCL[write_ofs_num / 2]),
+		.req_threshold = E_IM_RDMA_PRCH_CNT_NOLIMIT,
+		.pCallBack = NULL,
+	};
+
+	rdma_ctrl.transfer_byte = array_num / 2;
+	rdma_ctrl.reg_data_top_addr = (ULONG)src_tbl;
+	im_r2y_start_rdma( &rdma_ctrl );
+}
+
+#endif	// CO_R2Y_RDMA_ON
+#endif	// CO_DDIM_UTILITY_USE
+
+/*----------------------------------------------------------------------*/
+/* Grobal Function														*/
+/*----------------------------------------------------------------------*/
+//---------------------- driver  section -------------------------------
+
+/* R2Y PCLK change to ON
+ */
+INT32 Im_R2Y_On_Pclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_PCLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_On_Pclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		Dd_Top_Start_Clock( (UCHAR*)&gIM_R2Y_Pclk_Ctrl_Cnt[0], D_IM_R2Y1_PCLK_REG_ADDR, ~D_IM_R2Y1_PCLK_REG_BIT );
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		Dd_Top_Start_Clock( (UCHAR*)&gIM_R2Y_Pclk_Ctrl_Cnt[1], D_IM_R2Y2_PCLK_REG_ADDR, ~D_IM_R2Y2_PCLK_REG_BIT );
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_PCLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y PCLK change to OFF
+ */
+INT32 Im_R2Y_Off_Pclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_PCLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Off_Pclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		if( gIM_R2Y_Pclk_Ctrl_Cnt[0] == 1 ) {
+			if( gIM_R2Y_Pclk_Ctrl_Disable[0] == 0 ) {
+				Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Pclk_Ctrl_Cnt[0], D_IM_R2Y1_PCLK_REG_ADDR, D_IM_R2Y1_PCLK_REG_BIT );
+			}
+		}
+		else {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Pclk_Ctrl_Cnt[0], D_IM_R2Y1_PCLK_REG_ADDR, D_IM_R2Y1_PCLK_REG_BIT );
+		}
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		if( gIM_R2Y_Pclk_Ctrl_Cnt[1] == 1 ) {
+			if( gIM_R2Y_Pclk_Ctrl_Disable[1] == 0 ) {
+				Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Pclk_Ctrl_Cnt[1], D_IM_R2Y2_PCLK_REG_ADDR, D_IM_R2Y2_PCLK_REG_BIT );
+			}
+		}
+		else {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Pclk_Ctrl_Cnt[1], D_IM_R2Y2_PCLK_REG_ADDR, D_IM_R2Y2_PCLK_REG_BIT );
+		}
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_PCLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y PCLK change to OFF force
+ */
+INT32 Im_R2Y_Force_Off_Pclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_PCLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Force_Off_Pclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		gIM_R2Y_Pclk_Ctrl_Cnt[0] = 1;
+		if( gIM_R2Y_Pclk_Ctrl_Disable[0] == 0 ) {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Pclk_Ctrl_Cnt[0], D_IM_R2Y1_PCLK_REG_ADDR, D_IM_R2Y1_PCLK_REG_BIT );
+		}
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		gIM_R2Y_Pclk_Ctrl_Cnt[1] = 1;
+		if( gIM_R2Y_Pclk_Ctrl_Disable[1] == 0 ) {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Pclk_Ctrl_Cnt[1], D_IM_R2Y2_PCLK_REG_ADDR, D_IM_R2Y2_PCLK_REG_BIT );
+		}
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_PCLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y HCLK change to ON
+ */
+INT32 Im_R2Y_On_Hclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_HCLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_On_Hclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		Dd_Top_Start_Clock( (UCHAR*)&gIM_R2Y_Hclk_Ctrl_Cnt[0], D_IM_R2Y1_HCLK_REG_ADDR, ~D_IM_R2Y1_HCLK_REG_BIT );
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		Dd_Top_Start_Clock( (UCHAR*)&gIM_R2Y_Hclk_Ctrl_Cnt[1], D_IM_R2Y2_HCLK_REG_ADDR, ~D_IM_R2Y2_HCLK_REG_BIT );
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_HCLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y HCLK change to OFF
+ */
+INT32 Im_R2Y_Off_Hclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_HCLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Off_Hclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		if( gIM_R2Y_Hclk_Ctrl_Cnt[0] == 1 ) {
+			if( gIM_R2Y_Hclk_Ctrl_Disable[0] == 0 ) {
+				Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Hclk_Ctrl_Cnt[0], D_IM_R2Y1_HCLK_REG_ADDR, D_IM_R2Y1_HCLK_REG_BIT );
+			}
+		}
+		else {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Hclk_Ctrl_Cnt[0], D_IM_R2Y1_HCLK_REG_ADDR, D_IM_R2Y1_HCLK_REG_BIT );
+		}
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		if( gIM_R2Y_Hclk_Ctrl_Cnt[1] == 1 ) {
+			if( gIM_R2Y_Hclk_Ctrl_Disable[1] == 0 ) {
+				Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Hclk_Ctrl_Cnt[1], D_IM_R2Y2_HCLK_REG_ADDR, D_IM_R2Y2_HCLK_REG_BIT );
+			}
+		}
+		else {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Hclk_Ctrl_Cnt[1], D_IM_R2Y2_HCLK_REG_ADDR, D_IM_R2Y2_HCLK_REG_BIT );
+		}
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_HCLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y HCLK change to OFF force
+ */
+INT32 Im_R2Y_Force_Off_Hclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_HCLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Force_Off_Hclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		gIM_R2Y_Hclk_Ctrl_Cnt[0] = 1;
+		if( gIM_R2Y_Hclk_Ctrl_Disable[0] == 0 ) {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Hclk_Ctrl_Cnt[0], D_IM_R2Y1_HCLK_REG_ADDR, D_IM_R2Y1_HCLK_REG_BIT );
+		}
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		gIM_R2Y_Hclk_Ctrl_Cnt[1] = 1;
+		if( gIM_R2Y_Hclk_Ctrl_Disable[1] == 0 ) {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Hclk_Ctrl_Cnt[1], D_IM_R2Y2_HCLK_REG_ADDR, D_IM_R2Y2_HCLK_REG_BIT );
+		}
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_HCLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y ICLK change to ON
+ */
+INT32 Im_R2Y_On_Iclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_ICLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_On_Iclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		Dd_Top_Start_Clock( (UCHAR*)&gIM_R2Y_Iclk_Ctrl_Cnt[0], D_IM_R2Y1_ICLK_REG_ADDR, ~D_IM_R2Y1_ICLK_REG_BIT );
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		Dd_Top_Start_Clock( (UCHAR*)&gIM_R2Y_Iclk_Ctrl_Cnt[1], D_IM_R2Y2_ICLK_REG_ADDR, ~D_IM_R2Y2_ICLK_REG_BIT );
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_ICLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y ICLK change to OFF
+ */
+INT32 Im_R2Y_Off_Iclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_ICLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Off_Iclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		if( gIM_R2Y_Iclk_Ctrl_Cnt[0] == 1 ) {
+			if( gIM_R2Y_Iclk_Ctrl_Disable[0] == 0 ) {
+				Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Iclk_Ctrl_Cnt[0], D_IM_R2Y1_ICLK_REG_ADDR, D_IM_R2Y1_ICLK_REG_BIT );
+			}
+		}
+		else {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Iclk_Ctrl_Cnt[0], D_IM_R2Y1_ICLK_REG_ADDR, D_IM_R2Y1_ICLK_REG_BIT );
+		}
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		if( gIM_R2Y_Iclk_Ctrl_Cnt[1] == 1 ) {
+			if( gIM_R2Y_Iclk_Ctrl_Disable[1] == 0 ) {
+				Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Iclk_Ctrl_Cnt[1], D_IM_R2Y2_ICLK_REG_ADDR, D_IM_R2Y2_ICLK_REG_BIT );
+			}
+		}
+		else {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Iclk_Ctrl_Cnt[1], D_IM_R2Y2_ICLK_REG_ADDR, D_IM_R2Y2_ICLK_REG_BIT );
+		}
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_ICLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y ICLK change to OFF force
+ */
+INT32 Im_R2Y_Force_Off_Iclk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_ICLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Force_Off_Iclk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		gIM_R2Y_Iclk_Ctrl_Cnt[0] = 1;
+		if( gIM_R2Y_Iclk_Ctrl_Disable[0] == 0 ) {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Iclk_Ctrl_Cnt[0], D_IM_R2Y1_ICLK_REG_ADDR, D_IM_R2Y1_ICLK_REG_BIT );
+		}
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		gIM_R2Y_Iclk_Ctrl_Cnt[1] = 1;
+		if( gIM_R2Y_Iclk_Ctrl_Disable[1] == 0 ) {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Iclk_Ctrl_Cnt[1], D_IM_R2Y2_ICLK_REG_ADDR, D_IM_R2Y2_ICLK_REG_BIT );
+		}
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_ICLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2YCLK change to ON
+ */
+INT32 Im_R2Y_On_Clk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_CLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_On_Clk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		Dd_Top_Start_Clock( (UCHAR*)&gIM_R2Y_Clk_Ctrl_Cnt[0], D_IM_R2Y1_CLK_REG_ADDR, ~D_IM_R2Y1_CLK_REG_BIT );
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		Dd_Top_Start_Clock( (UCHAR*)&gIM_R2Y_Clk_Ctrl_Cnt[1], D_IM_R2Y2_CLK_REG_ADDR, ~D_IM_R2Y2_CLK_REG_BIT );
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_CLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2YCLK change to OFF
+ */
+INT32 Im_R2Y_Off_Clk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_CLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Off_Clk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		if( gIM_R2Y_Clk_Ctrl_Cnt[0] == 1 ) {
+			if( gIM_R2Y_Clk_Ctrl_Disable[0] == 0 ) {
+				Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Clk_Ctrl_Cnt[0], D_IM_R2Y1_CLK_REG_ADDR, D_IM_R2Y1_CLK_REG_BIT );
+			}
+		}
+		else {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Clk_Ctrl_Cnt[0], D_IM_R2Y1_CLK_REG_ADDR, D_IM_R2Y1_CLK_REG_BIT );
+		}
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		if( gIM_R2Y_Clk_Ctrl_Cnt[1] == 1 ) {
+			if( gIM_R2Y_Clk_Ctrl_Disable[1] == 0 ) {
+				Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Clk_Ctrl_Cnt[1], D_IM_R2Y2_CLK_REG_ADDR, D_IM_R2Y2_CLK_REG_BIT );
+			}
+		}
+		else {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Clk_Ctrl_Cnt[1], D_IM_R2Y2_CLK_REG_ADDR, D_IM_R2Y2_CLK_REG_BIT );
+		}
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_CLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2YCLK change to OFF force
+ */
+INT32 Im_R2Y_Force_Off_Clk( UCHAR pipe_no )
+{
+#ifdef CO_ACT_R2Y_CLOCK
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Force_Off_Clk error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		gIM_R2Y_Clk_Ctrl_Cnt[0] = 1;
+		if( gIM_R2Y_Clk_Ctrl_Disable[0] == 0 ) {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Clk_Ctrl_Cnt[0], D_IM_R2Y1_CLK_REG_ADDR, D_IM_R2Y1_CLK_REG_BIT );
+		}
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		gIM_R2Y_Clk_Ctrl_Cnt[1] = 1;
+		if( gIM_R2Y_Clk_Ctrl_Disable[1] == 0 ) {
+			Dd_Top_Stop_Clock( (UCHAR*)&gIM_R2Y_Clk_Ctrl_Cnt[1], D_IM_R2Y2_CLK_REG_ADDR, D_IM_R2Y2_CLK_REG_BIT );
+		}
+	}
+
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+#endif	// CO_ACT_R2Y_CLOCK
+
+	return D_DDIM_OK;
+}
+
+/* R2Y Initialize
+ */
+INT32 Im_R2Y_Init( UCHAR pipe_no )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Init error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_reset( pipe_no );
+	Im_R2Y_Dsb();
+
+	// Initalize of Managemnet information & Reset of Internal buffer
+	im_r2y_manager_init( pipe_no );
+
+	im_r2y_calc_ring_pixs( pipe_no );
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].top_offset[D_IM_R2Y_PORT_0] = 0;
+		gIM_R2Y_State[loop_cnt].top_offset[D_IM_R2Y_PORT_1] = 0;
+		gIM_R2Y_State[loop_cnt].top_offset[D_IM_R2Y_PORT_2] = 0;
+		gIM_R2Y_State[loop_cnt].was_started = D_IM_R2Y_FALSE;
+	}
+
+#ifdef CO_DEBUG_ON_PC
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.CNTL.CNTL.bit.TRG = D_IM_R2Y_FR2YTRG_IDLE;
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYR.YYRTRG.bit.YYRTRG   = D_IM_R2Y_YYRTRG_IDLE;
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWTRG.bit.YYWTRG   = D_IM_R2Y_YYWTRG_IDLE;
+	}
+#endif
+
+	return D_DDIM_OK;
+}
+
+/* set AXI bus I/F Control
+ */
+INT32 Im_R2Y_Ctrl_Axi( UCHAR pipe_no, const T_IM_R2Y_CTRL_AXI* const r2y_ctrl_axi )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_axi == NULL ) {
+		// Parameter setting error
+		Ddim_Assertion(("Im_R2Y_Ctrl_Axi error. r2y_ctrl_axi = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Axi error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXCTL.bit.YYRCACHE_0 = r2y_ctrl_axi->yyr[D_IM_R2Y_PORT_0].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXCTL.bit.YYRPROT_0  = r2y_ctrl_axi->yyr[D_IM_R2Y_PORT_0].protect_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXCTL.bit.YYRCACHE_1 = r2y_ctrl_axi->yyr[D_IM_R2Y_PORT_1].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXCTL.bit.YYRPROT_1  = r2y_ctrl_axi->yyr[D_IM_R2Y_PORT_1].protect_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXCTL.bit.YYRCACHE_2 = r2y_ctrl_axi->yyr[D_IM_R2Y_PORT_2].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXCTL.bit.YYRPROT_2  = r2y_ctrl_axi->yyr[D_IM_R2Y_PORT_2].protect_type;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXCTL.bit.YYW0CACHE_0 = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0][D_IM_R2Y_PORT_0].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXCTL.bit.YYW0PROT_0  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0][D_IM_R2Y_PORT_0].protect_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXCTL.bit.YYW0CACHE_1 = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0][D_IM_R2Y_PORT_1].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXCTL.bit.YYW0PROT_1  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0][D_IM_R2Y_PORT_1].protect_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXCTL.bit.YYW0CACHE_2 = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0][D_IM_R2Y_PORT_2].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXCTL.bit.YYW0PROT_2  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0][D_IM_R2Y_PORT_2].protect_type;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXCTL.bit.YYWACACHE_0 = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0A][D_IM_R2Y_PORT_0].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXCTL.bit.YYWAPROT_0  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0A][D_IM_R2Y_PORT_0].protect_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXCTL.bit.YYWACACHE_1 = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0A][D_IM_R2Y_PORT_1].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXCTL.bit.YYWAPROT_1  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_0A][D_IM_R2Y_PORT_1].protect_type;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXCTL.bit.YYW1CACHE_0 = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_1][D_IM_R2Y_PORT_0].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXCTL.bit.YYW1PROT_0  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_1][D_IM_R2Y_PORT_0].protect_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXCTL.bit.YYW1CACHE_1 = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_1][D_IM_R2Y_PORT_1].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXCTL.bit.YYW1PROT_1  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_1][D_IM_R2Y_PORT_1].protect_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXCTL.bit.YYW1CACHE_2 = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_1][D_IM_R2Y_PORT_2].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXCTL.bit.YYW1PROT_2  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_1][D_IM_R2Y_PORT_2].protect_type;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXCTL.bit.YYW2CACHE = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_2][D_IM_R2Y_PORT_0].cache_type;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXCTL.bit.YYW2PROT  = r2y_ctrl_axi->yyw[D_IM_R2Y_YYW_CH_2][D_IM_R2Y_PORT_0].protect_type;
+
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* get AXI bus read channel status
+ */
+INT32 Im_R2Y_Get_AxiReadStat( UCHAR pipe_no, T_IM_R2Y_AXI_YYR_STAT* const r2y_axi_read_stat )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_axi_read_stat == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_AxiReadStat error. r2y_axi_read_stat = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_AxiReadStat error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	r2y_axi_read_stat->yyr_axi_stat[D_IM_R2Y_PORT_0] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXSTS.bit.YYRRESP_0;
+	r2y_axi_read_stat->yyr_axi_stat[D_IM_R2Y_PORT_1] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXSTS.bit.YYRRESP_1;
+	r2y_axi_read_stat->yyr_axi_stat[D_IM_R2Y_PORT_2] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXSTS.bit.YYRRESP_2;
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* get AXI bus write channel status
+ */
+INT32 Im_R2Y_Get_AxiWriteStat( UCHAR pipe_no, T_IM_R2Y_AXI_YYW_STAT* const r2y_axi_write_stat )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_axi_write_stat == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_AxiWriteStat error. r2y_axi_write_stat = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_AxiWriteStat error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	r2y_axi_write_stat->yyw0_axi_stat[D_IM_R2Y_PORT_0] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXSTS.bit.YY0BRESP_0;
+	r2y_axi_write_stat->yyw0_axi_stat[D_IM_R2Y_PORT_1] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXSTS.bit.YY0BRESP_1;
+	r2y_axi_write_stat->yyw0_axi_stat[D_IM_R2Y_PORT_2] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXSTS.bit.YY0BRESP_2;
+
+	r2y_axi_write_stat->yyw0a_axi_stat[D_IM_R2Y_PORT_0] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXSTS.bit.YYABRESP_0;
+	r2y_axi_write_stat->yyw0a_axi_stat[D_IM_R2Y_PORT_1] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXSTS.bit.YYABRESP_1;
+
+	r2y_axi_write_stat->yyw1_axi_stat[D_IM_R2Y_PORT_0] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXSTS.bit.YY1BRESP_0;
+	r2y_axi_write_stat->yyw1_axi_stat[D_IM_R2Y_PORT_1] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXSTS.bit.YY1BRESP_1;
+	r2y_axi_write_stat->yyw1_axi_stat[D_IM_R2Y_PORT_2] = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXSTS.bit.YY1BRESP_2;
+
+	r2y_axi_write_stat->yyw2_axi_stat = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXSTS.bit.YY2BRESP;
+
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* get AXI bus write channel Transfer mode
+ */
+INT32 Im_R2Y_Get_AxiWriteMode( UCHAR pipe_no, UCHAR yyw_no, T_IM_R2Y_AXI_YYW_MODE* const r2y_axi_write_mode )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_axi_write_mode == NULL ){
+		Ddim_Assertion(("Im_R2Y_Get_AxiWriteMode error. r2y_axi_write_mode = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_AxiWriteMode error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_0] = D_IM_R2Y_ENABLE_OFF;
+	r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_1] = D_IM_R2Y_ENABLE_OFF;
+	r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_2] = D_IM_R2Y_ENABLE_OFF;
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	switch( yyw_no ){
+		case D_IM_R2Y_YYW_CH_1:
+			r2y_axi_write_mode->master_if_select = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1MSL;
+			if((gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1DOE & 1) != 0){
+				r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_0] = D_IM_R2Y_ENABLE_ON;
+			}
+			if((gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1DOE & 2) != 0){
+				r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_1] = D_IM_R2Y_ENABLE_ON;
+			}
+			if((gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1DOE & 4) != 0){
+				r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_2] = D_IM_R2Y_ENABLE_ON;
+			}
+			r2y_axi_write_mode->burst_length = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1BL;
+			break;
+		case D_IM_R2Y_YYW_CH_2:
+			r2y_axi_write_mode->master_if_select = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXMD.bit.YYW2MSL;
+			r2y_axi_write_mode->burst_length = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXMD.bit.YYW2BL;
+			break;
+		case D_IM_R2Y_YYW_CH_0A:
+			r2y_axi_write_mode->master_if_select = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWAMSL;
+			if((gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWADOE & 1) != 0){
+				r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_0] = D_IM_R2Y_ENABLE_ON;
+			}
+			if((gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWADOE & 2) != 0){
+				r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_1] = D_IM_R2Y_ENABLE_ON;
+			}
+			r2y_axi_write_mode->burst_length = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWABL;
+			break;
+//		case D_IM_R2Y_YYW_CH_0:
+		default:
+			r2y_axi_write_mode->master_if_select = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0MSL;
+			if((gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0DOE & 1) != 0){
+				r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_0] = D_IM_R2Y_ENABLE_ON;
+			}
+			if((gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0DOE & 2) != 0){
+				r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_1] = D_IM_R2Y_ENABLE_ON;
+			}
+			if((gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0DOE & 4) != 0){
+				r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_2] = D_IM_R2Y_ENABLE_ON;
+			}
+			r2y_axi_write_mode->burst_length = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0BL;
+			break;
+	}
+
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* set AXI bus write channel Transfer mode
+ */
+INT32 Im_R2Y_Set_AxiWriteMode( UCHAR pipe_no, UCHAR yyw_no, const T_IM_R2Y_AXI_YYW_MODE* const r2y_axi_write_mode )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_axi_write_mode == NULL ){
+		Ddim_Assertion(("Im_R2Y_Set_AxiWriteMode error. r2y_axi_write_mode = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_AxiWriteMode error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	switch( yyw_no ){
+		case D_IM_R2Y_YYW_CH_1:
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1MSL = r2y_axi_write_mode->master_if_select;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1DOE = (ULONG)(
+																	 ((r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_0] != D_IM_R2Y_ENABLE_ON) ? (0) : (1)) |
+																	 ((r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_1] != D_IM_R2Y_ENABLE_ON) ? (0) : (2)) |
+																	 ((r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_2] != D_IM_R2Y_ENABLE_ON) ? (0) : (4))
+																	 );
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1BL  = r2y_axi_write_mode->burst_length;
+			break;
+		case D_IM_R2Y_YYW_CH_2:
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXMD.bit.YYW2MSL = r2y_axi_write_mode->master_if_select;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXMD.bit.YYW2BL  = r2y_axi_write_mode->burst_length;
+			break;
+		case D_IM_R2Y_YYW_CH_0A:
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWAMSL = r2y_axi_write_mode->master_if_select;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWADOE = (ULONG)(
+																	 ((r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_0] != D_IM_R2Y_ENABLE_ON) ? (0) : (1)) |
+																	 ((r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_1] != D_IM_R2Y_ENABLE_ON) ? (0) : (2))
+																	 );
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWABL  = r2y_axi_write_mode->burst_length;
+			break;
+//		case D_IM_R2Y_YYW_CH_0:
+		default:
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0MSL = r2y_axi_write_mode->master_if_select;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0DOE = (ULONG)(
+																	 ((r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_0] != D_IM_R2Y_ENABLE_ON) ? (0) : (1)) |
+																	 ((r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_1] != D_IM_R2Y_ENABLE_ON) ? (0) : (2)) |
+																	 ((r2y_axi_write_mode->out_enable[D_IM_R2Y_PORT_2] != D_IM_R2Y_ENABLE_ON) ? (0) : (4))
+																	 );
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0BL  = r2y_axi_write_mode->burst_length;
+			break;
+	}
+
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* R2Y Control (each mode common control)
+ */
+INT32 Im_R2Y_Ctrl( UCHAR pipe_no, const T_IM_R2Y_CTRL* const r2y_ctrl )
+{
+	UCHAR yyw_no;
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl error. r2y_ctrl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_0]          = r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_0];
+		gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_1]          = r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_1];
+		gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_2]          = r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_2];
+		gIM_R2Y_State[loop_cnt].ycf_bypass                             = r2y_ctrl->ycf_bypass;
+		gIM_R2Y_State[loop_cnt].ycf_padding                            = r2y_ctrl->ycf_padding;
+		gIM_R2Y_State[loop_cnt].mcc_select                             = r2y_ctrl->mcc_select;
+		gIM_R2Y_State[loop_cnt].mcc_bit_shift                          = r2y_ctrl->mcc_bit_shift;
+		gIM_R2Y_State[loop_cnt].r2y_user_handler                       = r2y_ctrl->r2y_user_handler;
+		gIM_R2Y_State[loop_cnt].user_param                             = r2y_ctrl->user_param;
+		gIM_R2Y_State[loop_cnt].pix_avg_reduct_mode[D_IM_R2Y_YYW_CH_0] = r2y_ctrl->yyw[D_IM_R2Y_YYW_CH_0].pixel_avg_reduction_mode;
+		gIM_R2Y_State[loop_cnt].pix_avg_reduct_mode[D_IM_R2Y_YYW_CH_1] = r2y_ctrl->yyw[D_IM_R2Y_YYW_CH_1].pixel_avg_reduction_mode;
+		gIM_R2Y_State[loop_cnt].pix_avg_reduct_mode[D_IM_R2Y_YYW_CH_2] = r2y_ctrl->yyw[D_IM_R2Y_YYW_CH_2].pixel_avg_reduction_mode;
+		gIM_R2Y_State[loop_cnt].pix_avg_reduct_en[D_IM_R2Y_YYW_CH_0]   = r2y_ctrl->yyw[D_IM_R2Y_YYW_CH_0].pixel_avg_reduction_enable;
+		gIM_R2Y_State[loop_cnt].pix_avg_reduct_en[D_IM_R2Y_YYW_CH_1]   = r2y_ctrl->yyw[D_IM_R2Y_YYW_CH_1].pixel_avg_reduction_enable;
+		gIM_R2Y_State[loop_cnt].pix_avg_reduct_en[D_IM_R2Y_YYW_CH_2]   = r2y_ctrl->yyw[D_IM_R2Y_YYW_CH_2].pixel_avg_reduction_enable;
+		gIM_R2Y_State[loop_cnt].output_mode_0a                         = r2y_ctrl->output_mode_0a;
+		if( r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_0] == D_IM_R2Y_ENABLE_ON ) {
+			gIM_R2Y_State[loop_cnt].resize_mode[D_IM_R2Y_YYW_CH_0]     = r2y_ctrl->yyw[D_IM_R2Y_YYW_CH_0].resize_mode;
+		}
+		if( r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_1] == D_IM_R2Y_ENABLE_ON ) {
+			gIM_R2Y_State[loop_cnt].resize_mode[D_IM_R2Y_YYW_CH_1]     = r2y_ctrl->yyw[D_IM_R2Y_YYW_CH_1].resize_mode;
+		}
+	}
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	// YYCH
+
+	// R2Y_CMN
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.LINTLV.bit.LINTLV_0 = r2y_ctrl->line_intr[D_IM_R2Y_LINE_INT_0].level;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.LINTLV.bit.LINTLV_1 = r2y_ctrl->line_intr[D_IM_R2Y_LINE_INT_1].level;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.LINTLV.bit.LINTLV_2 = r2y_ctrl->line_intr[D_IM_R2Y_LINE_INT_2].level;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.LINTSEL.bit.LINTS_0 = r2y_ctrl->line_intr[D_IM_R2Y_LINE_INT_0].yyw_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.LINTSEL.bit.LINTS_1 = r2y_ctrl->line_intr[D_IM_R2Y_LINE_INT_1].yyw_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.LINTSEL.bit.LINTS_2 = r2y_ctrl->line_intr[D_IM_R2Y_LINE_INT_2].yyw_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.R2YMODE.bit.YCFBYP  = r2y_ctrl->ycf_bypass;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.R2YMODE.bit.YCFPDD  = r2y_ctrl->ycf_padding;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.R2YMODE.bit.MCCSL   = r2y_ctrl->mcc_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.R2YMODE.bit.MCC1BM  = r2y_ctrl->mcc_bit_shift;
+
+	// YYW
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0LTT.bit.YYW0LTT = r2y_ctrl->line_transfer_cycle;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWCTL.bit.YYWCSE   = r2y_ctrl->yyw_continue_start_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWCTL.bit.YYWHRV   = r2y_ctrl->yyw_horizontal_flip;
+
+	// setting YYW0/1/2 indivisually
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWCTL.bit.YYWMODE = (ULONG)(
+														  ((r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_0] != D_IM_R2Y_ENABLE_OFF)?(1):(0)) |
+														  ((r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_1] != D_IM_R2Y_ENABLE_OFF)?(2):(0)) |
+														  ((r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_2] != D_IM_R2Y_ENABLE_OFF)?(4):(0))
+														  );
+
+	// YYW0/0A
+	if( r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_0] == D_IM_R2Y_ENABLE_ON ) {
+		yyw_no = D_IM_R2Y_YYW_CH_0;
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0MSL        = r2y_ctrl->yyw[ yyw_no ].axi_write_mode.master_if_select;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0DOE        = (ULONG)(
+																		((r2y_ctrl->yyw[yyw_no].axi_write_mode.out_enable[D_IM_R2Y_PORT_0] != D_IM_R2Y_ENABLE_ON)?(0):(1)) |
+																		((r2y_ctrl->yyw[yyw_no].axi_write_mode.out_enable[D_IM_R2Y_PORT_1] != D_IM_R2Y_ENABLE_ON)?(0):(2)) |
+																		((r2y_ctrl->yyw[yyw_no].axi_write_mode.out_enable[D_IM_R2Y_PORT_2] != D_IM_R2Y_ENABLE_ON)?(0):(4))
+																		);
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0AXMD.bit.YYW0BL         = r2y_ctrl->yyw[ yyw_no ].axi_write_mode.burst_length;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0REQMSK.bit.YYW0REQMSK_0 = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_0];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0REQMSK.bit.YYW0REQMSK_1 = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_1];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW0REQMSK.bit.YYW0REQMSK_2 = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_2];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RSZ0MD            = r2y_ctrl->yyw[ yyw_no ].resize_mode;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RDC0MD            = r2y_ctrl->yyw[ yyw_no ].pixel_avg_reduction_mode;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.RDC0EN            = r2y_ctrl->yyw[ yyw_no ].pixel_avg_reduction_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.CSS0SL            = r2y_ctrl->yyw[ yyw_no ].ycc_cc_thin_select;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.TRM0EN            = r2y_ctrl->yyw[ yyw_no ].trim_out_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.SPL0EN            = r2y_ctrl->yyw[ yyw_no ].planar_interleaved_mode;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.CH0VFM            = r2y_ctrl->video_format_out_select_0;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.EXTBEN            = r2y_ctrl->ipu_macro_output_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.TRMBEN            = r2y_ctrl->ipu_macro_trimming_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.EXTCEN            = r2y_ctrl->cnr_macro_output_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.TRMCEN            = r2y_ctrl->cnr_macro_trimming_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.CH0AMD            = r2y_ctrl->output_mode_0a;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.CHAVFM            = r2y_ctrl->video_format_out_select_0a;
+
+		yyw_no = D_IM_R2Y_YYW_CH_0A;
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWAMSL        = r2y_ctrl->yyw[ yyw_no ].axi_write_mode.master_if_select;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWADOE        = (ULONG)(
+																		((r2y_ctrl->yyw[yyw_no].axi_write_mode.out_enable[D_IM_R2Y_PORT_0] != D_IM_R2Y_ENABLE_ON)?(0):(1)) |
+																		((r2y_ctrl->yyw[yyw_no].axi_write_mode.out_enable[D_IM_R2Y_PORT_1] != D_IM_R2Y_ENABLE_ON)?(0):(2))
+																		);
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAAXMD.bit.YYWABL         = r2y_ctrl->yyw[ yyw_no ].axi_write_mode.burst_length;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAREQMSK.bit.YYWAREQMSK_0 = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_0];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYWAREQMSK.bit.YYWAREQMSK_1 = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_1];
+	}
+
+	// YYW1
+	if( r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_1] == D_IM_R2Y_ENABLE_ON ) {
+		yyw_no = D_IM_R2Y_YYW_CH_1;
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1MSL        = r2y_ctrl->yyw[ yyw_no ].axi_write_mode.master_if_select;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1DOE        = (ULONG)(
+																		((r2y_ctrl->yyw[yyw_no].axi_write_mode.out_enable[D_IM_R2Y_PORT_0] != D_IM_R2Y_ENABLE_ON)?(0):(1)) |
+																		((r2y_ctrl->yyw[yyw_no].axi_write_mode.out_enable[D_IM_R2Y_PORT_1] != D_IM_R2Y_ENABLE_ON)?(0):(2)) |
+																		((r2y_ctrl->yyw[yyw_no].axi_write_mode.out_enable[D_IM_R2Y_PORT_2] != D_IM_R2Y_ENABLE_ON)?(0):(4))
+																		);
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1AXMD.bit.YYW1BL         = r2y_ctrl->yyw[ yyw_no ].axi_write_mode.burst_length;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1REQMSK.bit.YYW1REQMSK_0 = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_0];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1REQMSK.bit.YYW1REQMSK_1 = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_1];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW1REQMSK.bit.YYW1REQMSK_2 = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_2];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RSZ1MD            = r2y_ctrl->yyw[ yyw_no ].resize_mode;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RDC1MD            = r2y_ctrl->yyw[ yyw_no ].pixel_avg_reduction_mode;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.RDC1EN            = r2y_ctrl->yyw[ yyw_no ].pixel_avg_reduction_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.CSS1SL            = r2y_ctrl->yyw[ yyw_no ].ycc_cc_thin_select;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.TRM1EN            = r2y_ctrl->yyw[ yyw_no ].trim_out_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.SPL1EN            = r2y_ctrl->yyw[ yyw_no ].planar_interleaved_mode;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.DFM1SL            = r2y_ctrl->output_format_sel1;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.DTY1SL            = r2y_ctrl->output_type_sel1;
+	}
+
+	// YYW2
+	if( r2y_ctrl->yyw_enable[D_IM_R2Y_YYW_CH_2] == D_IM_R2Y_ENABLE_ON ) {
+		yyw_no = D_IM_R2Y_YYW_CH_2;
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXMD.bit.YYW2MSL      = r2y_ctrl->yyw[ yyw_no ].axi_write_mode.master_if_select;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2AXMD.bit.YYW2BL       = r2y_ctrl->yyw[ yyw_no ].axi_write_mode.burst_length;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYW2REQMSK.bit.YYW2REQMSK = r2y_ctrl->yyw[ yyw_no ].write_request_mask[D_IM_R2Y_PORT_0];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.RDC2MD          = r2y_ctrl->yyw[ yyw_no ].pixel_avg_reduction_mode;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.RDC2EN          = r2y_ctrl->yyw[ yyw_no ].pixel_avg_reduction_enable;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.TRM2EN          = r2y_ctrl->yyw[ yyw_no ].trim_out_enable;
+	}
+
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	im_r2y_calc_ring_pixs( pipe_no );
+
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* R2Y Control (SDRAM input mode control)
+ */
+INT32 Im_R2Y_Ctrl_ModeSDRAMInput( UCHAR pipe_no, const T_IM_R2Y_CTRL_SDRAM_INPUT* const r2y_ctrl_sdram_input )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_sdram_input == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_ModeSDRAMInput error. r2y_ctrl_sdram_input = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_ModeSDRAMInput error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		if(im_r2y_yyr_is_activated( loop_cnt )){
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+			Ddim_Print(( "Im_R2Y_Ctrl_ModeSDRAMInput error. YYR busy\n" ));
+#endif
+			Im_R2Y_Off_Pclk( pipe_no );
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].input_dtype                 = r2y_ctrl_sdram_input->input_dtype;
+		gIM_R2Y_State[loop_cnt].top_offset[D_IM_R2Y_PORT_0] = r2y_ctrl_sdram_input->top_offset[D_IM_R2Y_PORT_0];
+		gIM_R2Y_State[loop_cnt].top_offset[D_IM_R2Y_PORT_1] = r2y_ctrl_sdram_input->top_offset[D_IM_R2Y_PORT_1];
+		gIM_R2Y_State[loop_cnt].top_offset[D_IM_R2Y_PORT_2] = r2y_ctrl_sdram_input->top_offset[D_IM_R2Y_PORT_2];
+		gIM_R2Y_State[loop_cnt].input_global                = r2y_ctrl_sdram_input->input_global;
+		gIM_R2Y_State[loop_cnt].video_photo_mode            = D_IM_R2Y_MODE_SDRAM_INPUT;
+	}
+
+	// YYCH
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRAXMD.bit.YYRBL         = r2y_ctrl_sdram_input->burst_length;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRREQMSK.bit.YYRREQMSK_0 = r2y_ctrl_sdram_input->read_request_mask[D_IM_R2Y_PORT_0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRREQMSK.bit.YYRREQMSK_1 = r2y_ctrl_sdram_input->read_request_mask[D_IM_R2Y_PORT_1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYCH.YYRREQMSK.bit.YYRREQMSK_2 = r2y_ctrl_sdram_input->read_request_mask[D_IM_R2Y_PORT_2];
+
+	// YYR
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.DINCTL.bit.B2RDIN  = D_IM_R2Y_MODE_SDRAM_INPUT;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRCTL.bit.YYRDTYP = r2y_ctrl_sdram_input->input_dtype;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRCTL.bit.MONOEN  = r2y_ctrl_sdram_input->mono_ebable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRCTL.bit.DKNEN   = r2y_ctrl_sdram_input->rgb_deknee_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRCTL.bit.RGBLSFT = r2y_ctrl_sdram_input->rgb_left_shift;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRCTL.bit.RGBLSM  = r2y_ctrl_sdram_input->rgb_saturation_mode;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRDEF.bit.YYRDEF  = r2y_ctrl_sdram_input->input_global;
+
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* Set Managed Input Address information
+ */
+INT32 Im_R2Y_Set_InAddr_Info( UCHAR pipe_no, const T_IM_R2Y_INADDR_INFO* const in_addr )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( in_addr == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Set_InAddr_Info error. in_addr = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_InAddr_Info error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].in_addr[D_IM_R2Y_PORT_R] = (ULONG)in_addr->rgb.addr_R;
+		gIM_R2Y_State[loop_cnt].in_addr[D_IM_R2Y_PORT_G] = (ULONG)in_addr->rgb.addr_G;
+		gIM_R2Y_State[loop_cnt].in_addr[D_IM_R2Y_PORT_B] = (ULONG)in_addr->rgb.addr_B;
+		im_r2y_set_yyr_address_sdram_input( loop_cnt );
+	}
+
+	return D_DDIM_OK;
+}
+
+/* Set Managed bank information
+ */
+INT32 Im_R2Y_Set_OutBankInfo( UCHAR pipe_no, UCHAR yyw_no, const T_IM_R2Y_OUTBANK_INFO* const r2y_bank )
+{
+	INT32 ercd;
+	UCHAR loop_cnt, loop_sta, loop_end;
+	UCHAR index;
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_bank == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Set_OutBankInfo error. r2y_bank = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( yyw_no >= D_IM_R2Y_YYW_CH_MAX ) {
+		Ddim_Assertion(("Im_R2Y_Set_OutBankInfo error. yyw_no >= MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_OutBankInfo error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_Out_Mng[loop_cnt][yyw_no].bank_info = *r2y_bank;
+	}
+
+	if( pipe_no == D_IM_R2Y_PIPE12 ){
+		index = 0;
+	}
+	else{
+		index = pipe_no;
+	}
+
+	Im_R2Y_On_Pclk( pipe_no );
+	// YYW0A
+	if( yyw_no == D_IM_R2Y_YYW_CH_0 ) {
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWCTL.bit.USEBANK0 = gIM_R2Y_Out_Mng[index][yyw_no].bank_info.use_bank_num;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_0_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_1_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_2_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Cr;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_0_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_1_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_2_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Cr;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_0_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_1_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_2_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Cr;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_0_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_1_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0A.bit.YYW0A_2_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Cr;
+	}
+	// YYW1A
+	else if( yyw_no == D_IM_R2Y_YYW_CH_1 ){
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWCTL.bit.USEBANK1 = gIM_R2Y_Out_Mng[index][yyw_no].bank_info.use_bank_num;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_0_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_1_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_2_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Cr;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_0_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_1_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_2_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Cr;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_0_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_1_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_2_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Cr;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_0_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_1_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1A.bit.YYW1A_2_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Cr;
+	}
+	// YYW2A
+	else if( yyw_no == D_IM_R2Y_YYW_CH_2 ){
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWCTL.bit.USEBANK2 = gIM_R2Y_Out_Mng[index][yyw_no].bank_info.use_bank_num;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2A.bit.YYW2A_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2A.bit.YYW2A_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2A.bit.YYW2A_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2A.bit.YYW2A_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Y;
+	}
+	// YYWAA
+	else{
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWCTL.bit.USEBANKA = gIM_R2Y_Out_Mng[index][yyw_no].bank_info.use_bank_num;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAA.bit.YYWAA_0_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAA.bit.YYWAA_1_0 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_0].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAA.bit.YYWAA_0_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAA.bit.YYWAA_1_1 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_1].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAA.bit.YYWAA_0_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAA.bit.YYWAA_1_2 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_2].ycc.addr_Cb;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAA.bit.YYWAA_0_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Y;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAA.bit.YYWAA_1_3 = (ULONG)gIM_R2Y_Out_Mng[index][yyw_no].bank_info.output_addr[D_IM_R2Y_YYW_BANK_3].ycc.addr_Cb;
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	// Set bank index & top address information
+	ercd = Im_R2Y_Set_OutBankIndex( pipe_no, yyw_no, gIM_R2Y_Out_Mng[index][yyw_no].bank_info.bank_initial_position );
+	if( ercd != D_DDIM_OK ) {
+		return ercd;
+	}
+
+	return D_DDIM_OK;
+}
+
+/* Get bank index value
+ */
+INT32 Im_R2Y_Get_OutBankIndex( UCHAR pipe_no, UCHAR yyw_no, UCHAR* const bank_index )
+{
+#ifdef CO_PARAM_CHECK
+	if( bank_index == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_OutBankIndex error. bank_index = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( yyw_no >= D_IM_R2Y_YYW_CH_MAX ) {
+		Ddim_Assertion(("Im_R2Y_Get_OutBankIndex error. yyw_no >= MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_OutBankIndex error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	*bank_index = gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_idx;
+
+	return D_DDIM_OK;
+}
+
+/* Set bank index value
+ */
+INT32 Im_R2Y_Set_OutBankIndex( UCHAR pipe_no, UCHAR yyw_no, UCHAR bank_index )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( yyw_no >= D_IM_R2Y_YYW_CH_MAX ) {
+		Ddim_Assertion(("Im_R2Y_Set_OutBankIndex error. yyw_no >= MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( bank_index >= D_IM_R2Y_YYW_BANK_MAX ) {
+		Ddim_Assertion(("Im_R2Y_Set_OutBankIndex error. bank_index > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_OutBankIndex error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		if( yyw_no == D_IM_R2Y_YYW_CH_0 ) {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0PS = bank_index;
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST == 0 ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK1 + 1 );
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK2 + 1 );
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKAPS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKASTS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANKA + 1 );
+			}
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST = 1;
+		}
+		else if( yyw_no == D_IM_R2Y_YYW_CH_1 ) {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1PS = bank_index;
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST == 0 ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK0 + 1 );
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK2 + 1 );
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKAPS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKASTS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANKA + 1 );
+			}
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST = 1;
+		}
+		else if( yyw_no == D_IM_R2Y_YYW_CH_2 ) {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2PS = bank_index;
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST == 0 ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK0 + 1 );
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK1 + 1 );
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKAPS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKASTS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANKA + 1 );
+			}
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST = 1;
+		}
+		else {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKAPS = bank_index;
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST == 0 ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK0 + 1 );
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK1 + 1 );
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK2 + 1 );
+			}
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST = 1;
+		}
+	}
+
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* Increment bank index value
+ */
+INT32 Im_R2Y_Inc_OutBankIndex( UCHAR pipe_no, UCHAR yyw_no )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( yyw_no >= D_IM_R2Y_YYW_CH_MAX ) {
+		Ddim_Assertion(("Im_R2Y_Inc_OutBankIndex error. yyw_no >= MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Inc_OutBankIndex error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	Im_R2Y_On_Pclk( pipe_no );
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		if( yyw_no == D_IM_R2Y_YYW_CH_0 ) {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK0 + 1 );
+		}
+		else if( yyw_no == D_IM_R2Y_YYW_CH_1 ) {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK1 +1 );
+		}
+		else if( yyw_no == D_IM_R2Y_YYW_CH_2 ) {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2PS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK2 +1 );
+		}
+		else {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKAPS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKASTS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANKA +1 );
+		}
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST = 1;
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* Set YYW parameter hold
+ */
+INT32 Im_R2Y_Set_YywParamHold( UCHAR pipe_no, UCHAR hold_enable )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_YywParamHold error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	Im_R2Y_On_Pclk( pipe_no );
+	Dd_ARM_Critical_Section_Start(gOsUsr_Spin_Lock);
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		if( hold_enable == 0 ) {
+			if( gim_r2y_yyw_param_hold_ctrl_cnt[loop_cnt] != 0 ) {
+				gim_r2y_yyw_param_hold_ctrl_cnt[loop_cnt]--;
+				if( gim_r2y_yyw_param_hold_ctrl_cnt[loop_cnt] == 0 ) {
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWKPP.bit.YYWKPP = 0;
+				}
+			}
+		}
+		else {
+			if( gim_r2y_yyw_param_hold_ctrl_cnt[loop_cnt] == 0 ) {
+				gim_r2y_yyw_param_hold_ctrl_cnt[loop_cnt]++;
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWKPP.bit.YYWKPP = 1;
+			}
+			else if((0 < gim_r2y_yyw_param_hold_ctrl_cnt[loop_cnt]) && (gim_r2y_yyw_param_hold_ctrl_cnt[loop_cnt] < 255)) {
+				gim_r2y_yyw_param_hold_ctrl_cnt[loop_cnt]++;
+			}
+		}
+	}
+	Dd_ARM_Critical_Section_End(gOsUsr_Spin_Lock);
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* R2Y Control (B2R/LTM direct connection mode control)
+ */
+INT32 Im_R2Y_Ctrl_ModeDirect( UCHAR pipe_no, const T_IM_R2Y_CTRL_DIRECT* const r2y_ctrl_direct )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_direct == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_ModeDirect error. r2y_ctrl_direct = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_ModeDirect error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		if(im_r2y_yyr_is_activated( loop_cnt )){
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+			Ddim_Print(( "Im_R2Y_Ctrl_ModeDirect error. YYR busy\n" ));
+#endif
+			Im_R2Y_Off_Pclk( pipe_no );
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.DINCTL.bit.FRMSTP = r2y_ctrl_direct->frame_stop;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.DINCTL.bit.B2RDIN = D_IM_R2Y_MODE_DIRECT;
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].video_photo_mode = D_IM_R2Y_MODE_DIRECT;
+	}
+
+	return D_DDIM_OK;
+}
+
+/* R2Y resize rectangle Control
+ */
+INT32 Im_R2Y_Set_Resize_Rect( UCHAR pipe_no, const T_IM_R2Y_RESIZE_RECT* const r2y_resize_param )
+{
+	UINT32 yyw_no;
+	UCHAR loop_cnt, loop_sta, loop_end;
+	UCHAR div_0a;
+
+#ifdef CO_PARAM_CHECK
+	if(r2y_resize_param == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_Resize_Rect error. r2y_resize_param = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_Resize_Rect error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].input_size = r2y_resize_param->input_size;
+		gIM_R2Y_State[loop_cnt].input_size.img_width = im_r2y_rounddown_2(gIM_R2Y_State[loop_cnt].input_size.img_width);
+		gIM_R2Y_Resize_Param[pipe_no].r2y_resize_pitch.input_size = gIM_R2Y_State[loop_cnt].input_size;	/* pgr0869 */
+
+		for( yyw_no = D_IM_R2Y_YYW_CH_0; yyw_no < D_IM_R2Y_YYW_CH_MAX-1; yyw_no++ ) {
+			gIM_R2Y_State[loop_cnt].yyw_width[yyw_no] = r2y_resize_param->output_size[yyw_no].yyw_width;
+			gIM_R2Y_State[loop_cnt].yyw_lines[yyw_no] = r2y_resize_param->output_size[yyw_no].yyw_lines;
+		}
+
+		gIM_R2Y_State[loop_cnt].yyw_rect_valid = D_IM_R2Y_ENABLE_ON;
+
+		if( gIM_R2Y_State[loop_cnt].video_photo_mode == D_IM_R2Y_MODE_SDRAM_INPUT ) {
+			im_r2y_calc_yyr_address_sdram_input( loop_cnt );
+			im_r2y_calc_in_rect_sdram_input( loop_cnt );
+			im_r2y_calc_top_msb_offset_sdram_input( loop_cnt );
+		}
+		im_r2y_calc_out_pitch( loop_cnt );
+	}
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		for( yyw_no = D_IM_R2Y_YYW_CH_0; yyw_no < D_IM_R2Y_YYW_CH_MAX; yyw_no++ ) {
+			if( yyw_no < D_IM_R2Y_YYW_CH_MAX - 1 ){
+				if( gIM_R2Y_State[loop_cnt].yyw_enable[yyw_no] == D_IM_R2Y_ENABLE_ON ) {	/* pgr0013 pgr0862 */
+					if( gIM_R2Y_State[loop_cnt].pix_avg_reduct_en[yyw_no] == D_IM_R2Y_ENABLE_ON ) {	/* pgr0013 pgr0862 */
+						gIM_R2Y_State[loop_cnt].yyw_width[yyw_no] = (r2y_resize_param->output_size[yyw_no].yyw_width / 2^(gIM_R2Y_State[loop_cnt].pix_avg_reduct_mode[yyw_no] + 1)) & 0x1FFE;	/* pgr0013 pgr0862 */
+						gIM_R2Y_State[loop_cnt].yyw_lines[yyw_no] = (r2y_resize_param->output_size[yyw_no].yyw_lines / 2^(gIM_R2Y_State[loop_cnt].pix_avg_reduct_mode[yyw_no] + 1)) & 0x1FFE;	/* pgr0013 pgr0862 */
+					}
+				}
+			}
+			gIM_R2Y_Resize_Param[loop_cnt].r2y_resize_pitch.output_pitch[yyw_no].output_global_w[D_IM_R2Y_PORT_0]	= r2y_resize_param->output_size[yyw_no].output_global_w[D_IM_R2Y_PORT_0];
+			gIM_R2Y_Resize_Param[loop_cnt].r2y_resize_pitch.output_pitch[yyw_no].output_global_w[D_IM_R2Y_PORT_1]	= r2y_resize_param->output_size[yyw_no].output_global_w[D_IM_R2Y_PORT_1];
+			gIM_R2Y_Resize_Param[loop_cnt].r2y_resize_pitch.output_pitch[yyw_no].output_global_w[D_IM_R2Y_PORT_2]	= r2y_resize_param->output_size[yyw_no].output_global_w[D_IM_R2Y_PORT_2];
+		}
+
+		if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_0] == D_IM_R2Y_ENABLE_ON && gIM_R2Y_State[loop_cnt].output_mode_0a != D_IM_R2Y_YYW0A_OUTPUT_MODE_STOP ) {
+			switch( gIM_R2Y_State[loop_cnt].output_mode_0a ){
+				case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_4_Y:
+					div_0a = 4;
+					break;
+				case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_8_Y:
+					div_0a = 8;
+					break;
+				case D_IM_R2Y_YYW0A_OUTPUT_MODE_DIV_32_SP:
+					div_0a = 32;
+					break;
+//				case D_IM_R2Y_YYW0A_OUTPUT_MODE_STOP:
+				default:
+					div_0a = 1;
+					break;
+			}
+
+			if( gIM_R2Y_State[loop_cnt].yyw_width[D_IM_R2Y_YYW_CH_0] % div_0a ){
+				gIM_R2Y_State[loop_cnt].yyw_width[D_IM_R2Y_YYW_CH_0A] = gIM_R2Y_State[loop_cnt].yyw_width[D_IM_R2Y_YYW_CH_0] / div_0a + 1;
+			}
+			else{
+				gIM_R2Y_State[loop_cnt].yyw_width[D_IM_R2Y_YYW_CH_0A] = gIM_R2Y_State[loop_cnt].yyw_width[D_IM_R2Y_YYW_CH_0] / div_0a;
+			}
+			if( gIM_R2Y_State[loop_cnt].yyw_lines[D_IM_R2Y_YYW_CH_0] % div_0a ){
+				gIM_R2Y_State[loop_cnt].yyw_lines[D_IM_R2Y_YYW_CH_0A] = gIM_R2Y_State[loop_cnt].yyw_lines[D_IM_R2Y_YYW_CH_0] / div_0a + 1;
+			}
+			else{
+				gIM_R2Y_State[loop_cnt].yyw_lines[D_IM_R2Y_YYW_CH_0A] = gIM_R2Y_State[loop_cnt].yyw_lines[D_IM_R2Y_YYW_CH_0] / div_0a;
+			}
+			gIM_R2Y_State[loop_cnt].yyw_width[D_IM_R2Y_YYW_CH_0A] = ( gIM_R2Y_State[loop_cnt].yyw_width[D_IM_R2Y_YYW_CH_0A] + 1 ) & 0x1FFE;
+			gIM_R2Y_State[loop_cnt].yyw_lines[D_IM_R2Y_YYW_CH_0A] = ( gIM_R2Y_State[loop_cnt].yyw_lines[D_IM_R2Y_YYW_CH_0A] + 1 ) & 0x1FFE;
+		}
+
+		gIM_R2Y_Resize_Param[loop_cnt].resize_select = 0;
+		gIM_R2Y_Resize_Param[loop_cnt].r2y_resize_rect = *r2y_resize_param;
+		gIM_R2Y_Resize_Param[loop_cnt].resize_select = 1;
+	}
+
+	// It sets it to the register at once.
+	Im_R2Y_On_Pclk( pipe_no );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0DEF, union io_r2y_yyw0def, YYW0DEF_0, r2y_resize_param->output_size[D_IM_R2Y_YYW_CH_0].output_global_w[D_IM_R2Y_PORT_0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0DEF, union io_r2y_yyw0def, YYW0DEF_1, r2y_resize_param->output_size[D_IM_R2Y_YYW_CH_0].output_global_w[D_IM_R2Y_PORT_1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1DEF, union io_r2y_yyw1def, YYW1DEF_0, r2y_resize_param->output_size[D_IM_R2Y_YYW_CH_1].output_global_w[D_IM_R2Y_PORT_0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1DEF, union io_r2y_yyw1def, YYW1DEF_1, r2y_resize_param->output_size[D_IM_R2Y_YYW_CH_1].output_global_w[D_IM_R2Y_PORT_1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2DEF, union io_r2y_yyw2def, YYW2DEF, r2y_resize_param->output_size[D_IM_R2Y_YYW_CH_2].output_global_w[D_IM_R2Y_PORT_0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWADEF, union io_r2y_yywadef, YYWADEF, r2y_resize_param->output_size[D_IM_R2Y_YYW_CH_0A].output_global_w[D_IM_R2Y_PORT_0] );
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* R2Y resize pitch Control
+ */
+INT32 Im_R2Y_Set_Resize_Pitch( UCHAR pipe_no, const T_IM_R2Y_RESIZE_PITCH* const r2y_resize_pitch )
+{
+	UINT32 yyw_no;
+	T_IM_R2Y_OUT_PITCH r2y_out_pitch[D_IM_R2Y_YYW_CH_MAX];
+	UINT32 output_x_pitch;
+	UINT32 output_y_pitch;
+	INT32 ercd = D_DDIM_OK;
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if(r2y_resize_pitch == NULL) {
+		// Parameter setting error
+		Ddim_Assertion(("Im_R2Y_Set_Resize_Pitch error. r2y_resize_pitch = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_Resize_Pitch error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		// set new rectangle to gIM_R2Y_State
+		gIM_R2Y_State[loop_cnt].input_size = r2y_resize_pitch->input_size;
+
+		gIM_R2Y_State[loop_cnt].yyw_rect_valid = D_IM_R2Y_ENABLE_OFF;
+
+		if( gIM_R2Y_State[loop_cnt].video_photo_mode == D_IM_R2Y_MODE_DIRECT ) {
+		}
+		else {
+			im_r2y_calc_yyr_address_sdram_input( loop_cnt );
+			im_r2y_calc_in_rect_sdram_input( loop_cnt );
+			im_r2y_calc_top_msb_offset_sdram_input( loop_cnt );
+		}
+
+		for( yyw_no = D_IM_R2Y_YYW_CH_0; yyw_no < D_IM_R2Y_YYW_CH_MAX-1; yyw_no++ ) {
+			output_x_pitch = r2y_resize_pitch->output_pitch[yyw_no].output_x_pitch;
+			output_y_pitch = r2y_resize_pitch->output_pitch[yyw_no].output_y_pitch;
+			if( yyw_no == D_IM_R2Y_YYW_CH_2 ) {
+				if( output_x_pitch < D_IM_R2Y_STA_PIT_1_0 ) {
+					Ddim_Print(( "YYW2 width overflow. %x\n", output_x_pitch ));
+					output_x_pitch = D_IM_R2Y_STA_PIT_1_0;
+					ercd = D_IM_R2Y_PARAM_ERROR;
+				}
+				if( output_y_pitch < D_IM_R2Y_STA_PIT_1_0 ) {
+					Ddim_Print(( "YYW2 lines overflow. %x\n", output_y_pitch ));
+					output_y_pitch = D_IM_R2Y_STA_PIT_1_0;
+					ercd = D_IM_R2Y_PARAM_ERROR;
+				}
+			}
+
+			r2y_out_pitch[yyw_no].x_start_pos = r2y_resize_pitch->output_pitch[yyw_no].output_x_start_pos;
+			r2y_out_pitch[yyw_no].y_start_pos = r2y_resize_pitch->output_pitch[yyw_no].output_y_start_pos;
+			r2y_out_pitch[yyw_no].x_pitch = output_x_pitch;
+			r2y_out_pitch[yyw_no].y_pitch = output_y_pitch;
+#ifdef IM_R2Y_DEBUG_PRINT
+			Ddim_Print(( "Im_R2Y_Set_Resize_Pitch(): yyw_no=%u, hsta=%lx, hpit=%lx, vsta=%lx, vpit=%lx\n",
+						 yyw_no,
+						 r2y_out_pitch[yyw_no].x_start_pos,
+						 r2y_out_pitch[yyw_no].x_pitch,
+						 r2y_out_pitch[yyw_no].y_start_pos,
+						 r2y_out_pitch[yyw_no].y_pitch
+						 ));
+#endif
+		}
+		im_r2y_set_out_pitch( loop_cnt, r2y_out_pitch );
+
+		gIM_R2Y_Resize_Param[loop_cnt].resize_select = 0;
+		gIM_R2Y_Resize_Param[loop_cnt].r2y_resize_pitch = *r2y_resize_pitch;
+		gIM_R2Y_Resize_Param[loop_cnt].resize_select = 2;
+	}
+
+	// It sets it to the register at once.
+	Im_R2Y_On_Pclk( pipe_no );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0DEF, union io_r2y_yyw0def, YYW0DEF_0, r2y_resize_pitch->output_pitch[D_IM_R2Y_YYW_CH_0].output_global_w[D_IM_R2Y_PORT_0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0DEF, union io_r2y_yyw0def, YYW0DEF_1, r2y_resize_pitch->output_pitch[D_IM_R2Y_YYW_CH_0].output_global_w[D_IM_R2Y_PORT_1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1DEF, union io_r2y_yyw1def, YYW1DEF_0, r2y_resize_pitch->output_pitch[D_IM_R2Y_YYW_CH_1].output_global_w[D_IM_R2Y_PORT_0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1DEF, union io_r2y_yyw1def, YYW1DEF_1, r2y_resize_pitch->output_pitch[D_IM_R2Y_YYW_CH_1].output_global_w[D_IM_R2Y_PORT_1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2DEF, union io_r2y_yyw2def, YYW2DEF, r2y_resize_pitch->output_pitch[D_IM_R2Y_YYW_CH_2].output_global_w[D_IM_R2Y_PORT_0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWADEF, union io_r2y_yywadef, YYWADEF, r2y_resize_pitch->output_pitch[D_IM_R2Y_YYW_CH_0A].output_global_w[D_IM_R2Y_PORT_0] );
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return ercd;
+}
+
+/* R2Y get resize rectangle Control information.
+ */
+INT32 Im_R2Y_Get_Resize_Param( UCHAR pipe_no, T_IM_R2Y_RESIZE_PARAM* const r2y_resize_param )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_resize_param == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_Resize_Param error. r2y_resize_param = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_Resize_Param error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*r2y_resize_param = gIM_R2Y_Resize_Param[pipe_no];
+
+	return D_DDIM_OK;
+}
+
+/* Set Right side offset(for video format)
+ */
+INT32 Im_R2Y_Set_RightSide_Offset( UCHAR pipe_no, UCHAR yyw_no, T_IM_R2Y_RIGHTSIDE_OFFSET* offset_byte )
+{
+#ifdef CO_PARAM_CHECK
+	if( offset_byte == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Set_RightSide_Offset error. offset_byte = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( !(yyw_no == D_IM_R2Y_YYW_CH_0 || yyw_no == D_IM_R2Y_YYW_CH_0A) ) {
+		Ddim_Assertion(("Im_R2Y_Set_RightSide_Offset error. yyw_no != (0 or 0A)\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_RightSide_Offset error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	if( yyw_no == D_IM_R2Y_YYW_CH_0 ){
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0OFSX.bit.YYW0OFSX_0 = offset_byte->offset_byte[D_IM_R2Y_YYW_BANK_0];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0OFSX.bit.YYW0OFSX_1 = offset_byte->offset_byte[D_IM_R2Y_YYW_BANK_1];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0OFSX.bit.YYW0OFSX_2 = offset_byte->offset_byte[D_IM_R2Y_YYW_BANK_2];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0OFSX.bit.YYW0OFSX_3 = offset_byte->offset_byte[D_IM_R2Y_YYW_BANK_3];
+	}
+	else if( yyw_no == D_IM_R2Y_YYW_CH_0A ){
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAOFSX.bit.YYWAOFSX_0 = offset_byte->offset_byte[D_IM_R2Y_YYW_BANK_0];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAOFSX.bit.YYWAOFSX_1 = offset_byte->offset_byte[D_IM_R2Y_YYW_BANK_1];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAOFSX.bit.YYWAOFSX_2 = offset_byte->offset_byte[D_IM_R2Y_YYW_BANK_2];
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWAOFSX.bit.YYWAOFSX_3 = offset_byte->offset_byte[D_IM_R2Y_YYW_BANK_3];
+	}
+	else{
+		// nothing to do.
+	}
+
+	return D_DDIM_OK;
+}
+
+/* Get Next Address information
+ */
+INT32 Im_R2Y_Get_Next_OutAddr( UCHAR pipe_no, const UINT32 yyw_no, T_IM_R2Y_OUTADDR_INFO* const r2y_addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_addr == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_Next_OutAddr error. r2y_addr = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( yyw_no >= D_IM_R2Y_YYW_CH_MAX ) {
+		Ddim_Assertion(("Im_R2Y_Get_Next_OutAddr error. yyw_no >= MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_Next_OutAddr error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	*r2y_addr = gIM_R2Y_Out_Mng[pipe_no][yyw_no].bank_info.output_addr[ (gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_idx + 2) % (gIM_R2Y_Out_Mng[pipe_no][yyw_no].bank_info.use_bank_num + 1)];
+
+	return D_DDIM_OK;
+}
+
+/* Get Latest Address information
+ */
+INT32 Im_R2Y_Get_Latest_OutAddr( UCHAR pipe_no, UINT32 yyw_no, UCHAR* const latest_bank_idx, T_IM_R2Y_OUTADDR_INFO* const latest_addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( latest_addr == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_Latest_OutAddr error. latest_addr = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( yyw_no >= D_IM_R2Y_YYW_CH_MAX ) {
+		Ddim_Assertion(("Im_R2Y_Get_Latest_OutAddr error. yyw_no >= MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_Latest_OutAddr error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	*latest_bank_idx = gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_idx;
+	*latest_addr     = gIM_R2Y_Out_Mng[pipe_no][yyw_no].latest_addr;
+
+	return D_DDIM_OK;
+}
+
+/* Set YYW0 External I/F output.
+ */
+INT32 Im_R2Y_Set_ExternalIfOutput( UCHAR pipe_no, UCHAR output_onoff_ipu, UCHAR output_onoff_cnr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_ExternalIfOutput error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.EXTBEN = output_onoff_ipu;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.EXTCEN = output_onoff_cnr;
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* Get YYW0 External I/F output status.
+ */
+INT32 Im_R2Y_Get_ExternalIfOutput( UCHAR pipe_no, UCHAR* const output_onoff_ipu, UCHAR* const output_onoff_cnr )
+{
+#ifdef CO_PARAM_CHECK
+	if( output_onoff_ipu == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_ExternalIfOutput error. output_onoff_ipu = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( output_onoff_cnr == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_ExternalIfOutput error. output_onoff_cnr = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_ExternalIfOutput error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	*output_onoff_ipu = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.EXTBEN;
+	*output_onoff_cnr = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.EXTCEN;
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Set Frame stop
+ */
+INT32 Im_R2Y_Set_FrameStop( UCHAR pipe_no, UCHAR onoff )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_FrameStop error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.DINCTL.bit.FRMSTP = onoff;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRTRG.bit.YYRTRG = D_IM_R2Y_YYRTRG_ON;
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* Get YYRch busy status.
+ */
+INT32 Im_R2Y_Get_YyrBusy( UCHAR pipe_no, BOOL* const busy_status )
+{
+	ULONG yyrtrg;
+
+#ifdef CO_PARAM_CHECK
+	if( busy_status == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_YyrBusy error. busy_status = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_YyrBusy error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	yyrtrg = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRTRG.bit.YYRTRG;
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	if( yyrtrg == D_IM_R2Y_YYRTRG_BUSY ) {
+		*busy_status = TRUE;
+	}
+	else {
+		*busy_status = FALSE;
+	}
+
+	return D_DDIM_OK;
+}
+
+/* Get Horizontal ring pixel padding number
+ */
+INT32 Im_R2Y_Get_HRingPixs( UCHAR pipe_no, USHORT* const ring_pixs )
+{
+#ifdef CO_PARAM_CHECK
+	if( ring_pixs == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_HRingPixs error. ring_pixs = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_HRingPixs error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	*ring_pixs = gIM_R2Y_State[pipe_no].ring_pixs_info.ring_pixs;
+
+	return D_DDIM_OK;
+}
+
+/* Restart R2Y process when yyw_continue_start_enable equal D_IM_R2Y_ENABLE_OFF.
+ */
+INT32 Im_R2Y_ContStart( UCHAR pipe_no )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_ContStart error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_ContStart on pclk\n" ));
+#endif
+	Im_R2Y_On_Pclk( pipe_no );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		if( gIM_R2Y_State[loop_cnt].was_started == D_IM_R2Y_FALSE ) {
+			continue;
+		}
+		// P-clock control
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWTRG.bit.YYWTRG = D_IM_R2Y_YYWTRG_ON;
+
+	}
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_ContStart off pclk\n" ));
+#endif
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* Start R2Y process.
+ */
+INT32 Im_R2Y_Start( UCHAR pipe_no )
+{
+	DDIM_USER_ER		ercd;
+	INT32				retcd;
+	DDIM_USER_FLGPTN	flgptn = 0;
+	UCHAR loop_cnt, loop_sta, loop_end;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Start error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Start begin\n" ));
+#endif
+
+	// P-clock control
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Start on pclk\n" ));
+#endif
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		if( im_r2y_yyr_is_activated(loop_cnt) ){
+			Ddim_Print(( "Im_R2Y_Start error. YYR busy\n" ));
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+		if( im_r2y_yyw_is_activated(loop_cnt) ){
+			Ddim_Print(( "Im_R2Y_Start error. YYW busy\n" ));
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+		if( im_r2y_is_act_fr2y(loop_cnt) != D_IM_R2Y_ENABLE_OFF ){
+			Ddim_Print(( "Im_R2Y_Start error. F_R2Y busy\n" ));
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	while( 1 ) {	// Pclk enable section
+		// Clear of All Interrupt enable & Interrupt status
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start begin initialize\n" ));
+#endif
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start initialize interrupt\n" ));
+#endif
+		// Initialized Interrupt
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.YYINTE.word = D_IM_R2Y_YYINTE_DISABLE;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.YYINTF.word = D_IM_R2Y_YYINTF_ALL_CLR;
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTE.word = D_IM_R2Y_R2YINTE_DISABLE;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTF.word = D_IM_R2Y_R2YINTF_ALL_CLR;
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start enable interrupt\n" ));
+#endif
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			gIM_R2Y_State[loop_cnt].int_status = 0;
+
+			// Set of All Interrupt enable
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_0] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTE.word |= D_IM_R2Y_YYINTE_YYW0_ENABLE;
+			}
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_1] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTE.word |= D_IM_R2Y_YYINTE_YYW1_ENABLE;
+			}
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_2] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTE.word |= D_IM_R2Y_YYINTE_YYW2_ENABLE;
+			}
+		}
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTE.word = D_IM_R2Y_R2YINTE_ALL_ENABLE;
+
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start on clk\n" ));
+#endif
+		Im_R2Y_On_Iclk( pipe_no );
+		Im_R2Y_On_Clk( pipe_no );
+
+		// Set access enable
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			// RGB Deknee
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYR.YYRCTL.bit.DKNEN != 0 ) {
+				Im_R2Y_Set_RGBDekneeAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+			}
+
+			// Tone control
+			if(( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.TC.TCCTL.bit.TCEN != 0 )
+			|| ( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.TC.TCCTL.bit.TCYBEN != 0 )) {
+				Im_R2Y_Set_ToneControlTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+			}
+
+			// BTC Luminance evaluation
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.BTC.TCTCTL.bit.TCTEN != 0 ) {
+				Im_R2Y_Set_LuminanceEvaluationTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+			}
+
+			// BTC histogram
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.BTC.TCHSCTL.bit.TCHSEN != 0 ) {
+				Im_R2Y_Set_BTC_HistogramTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+			}
+
+			// Gamma
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.GAM.GMCTL.bit.GMEN != 0 ) {
+				Im_R2Y_Set_GammaTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+				Im_R2Y_Set_GammaYbTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+			}
+
+			// High frequency EdgeEnhance
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGHW.EGHWCTL.bit.EGHWEN != 0 ) {
+				Im_R2Y_Set_HighEdgeSclTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+				if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGHW.EGHWCTL.bit.EGHWTC != 0 ) {
+					Im_R2Y_Set_HighEdgeStepTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+				}
+			}
+
+			// Medium frequency EdgeEnhance
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGMW.EGMWCTL.bit.EGMWEN != 0 ) {
+				Im_R2Y_Set_MediumEdgeSclTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+				if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGMW.EGMWCTL.bit.EGMWTC != 0 ) {
+					Im_R2Y_Set_MediumEdgeStepTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+				}
+			}
+
+			// Low frequency EdgeEnhance
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGLW.EGLWCTL.bit.EGLWEN != 0 ) {
+				Im_R2Y_Set_LowEdgeSclTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+				if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGLW.EGLWCTL.bit.EGLWTC != 0 ) {
+					Im_R2Y_Set_LowEdgeStepTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+				}
+			}
+
+			// Map scale
+			if((( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGHW.EGHWCTL.bit.EGHWEN != 0 )
+			 && ( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGHW.EGHWCTL.bit.EGHWMP != 0 ))
+			|| (( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGMW.EGMWCTL.bit.EGMWEN != 0 )
+			 && ( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGMW.EGMWCTL.bit.EGMWMP != 0 ))
+			|| (( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGLW.EGLWCTL.bit.EGLWEN != 0 )
+			 && ( gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.EGLW.EGLWCTL.bit.EGLWMP != 0 ))) {
+				Im_R2Y_Set_MapSclTblAccessEnable( loop_cnt, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+			}
+		}
+
+		// YYR Histogram
+		Im_R2Y_Set_HistogramAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YYRAEN_YYR = 1;
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_0] != 0 ){
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0 = 1;
+				if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYW0MD.bit.RSZ0MD == D_IM_R2Y_RSZ_BICUBIC ){
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0_BICUBIC = 1;
+				}
+				if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.EE0CTL.bit.EE0EN != 0 ){
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0_EDGE = 1;
+				}
+				if( gIM_R2Y_State[loop_cnt].output_mode_0a != D_IM_R2Y_YYW0A_OUTPUT_MODE_STOP ){
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0A = 1;
+				}
+			}
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_1] != 0 ){
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1 = 1;
+				if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYW1MD.bit.RSZ1MD == D_IM_R2Y_RSZ_BICUBIC ){
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1_BICUBIC = 1;
+				}
+				if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.EE1CTL.bit.EE1EN != 0 ){
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1_EDGE = 1;
+				}
+			}
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.YW2AEN = (gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_2] != 0)?(1):(0);
+		}
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.FLTAEN.bit.YCFAEN = 1;
+
+		im_r2y_wait_usec( D_IM_R2Y_SRAM_WAIT_USEC );
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start clear event flag\n" ));
+#endif
+
+		if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+			flgptn |= D_IM_R2Y1_INT_FLG_ALL;
+		}
+		if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+			flgptn |= D_IM_R2Y2_INT_FLG_ALL;
+		}
+
+		// Clear of Event Flag
+		ercd = DDIM_User_Clr_Flg( FID_IM_R2Y, ~flgptn );
+		if( ercd != D_DDIM_USER_E_OK ) {
+			Ddim_Print(( "Im_R2Y_Start: invalid FID\n" ));
+			retcd = D_IM_R2Y_SYSTEM_ERROR;
+			break;
+		}
+
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			gIM_R2Y_State[loop_cnt].was_started = D_IM_R2Y_TRUE;
+		}
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start check macro busy state\n" ));
+#endif
+#ifndef D_IM_R2Y_DEBUG_ON_PC
+		Im_R2Y_Dsb();
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			while( im_r2y_yyr_is_activated(loop_cnt) ) {
+				;	// DO NOTHING
+			}
+
+			while( im_r2y_yyw_is_activated(loop_cnt) ) {
+				;	// DO NOTHING
+			}
+		}
+#endif
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start enable YYW\n" ));
+#endif
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_0] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_R2Y_State[loop_cnt].busy_state |= D_IM_R2Y_STATE_BUSY_YYW0;
+			}
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_1] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_R2Y_State[loop_cnt].busy_state |= D_IM_R2Y_STATE_BUSY_YYW1;
+			}
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_2] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_R2Y_State[loop_cnt].busy_state |= D_IM_R2Y_STATE_BUSY_YYW2;
+			}
+		}
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWTRG.bit.YYWTRG = D_IM_R2Y_YYWTRG_ON;
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start enable F_R2Y\n" ));
+#endif
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			gIM_R2Y_State[loop_cnt].busy_state |= D_IM_R2Y_STATE_BUSY_F_R2Y;
+		}
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.CNTL.bit.TRG = D_IM_R2Y_FR2YTRG_ON;
+#ifdef CO_DEBUG_ON_PC
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.CNTL.bit.TRG = D_IM_R2Y_FR2YTRG_BUSY;
+		}
+#endif
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_Start enable YYR\n" ));
+#endif
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			gIM_R2Y_State[loop_cnt].busy_state |= D_IM_R2Y_STATE_BUSY_YYR;
+		}
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRTRG.bit.YYRTRG = D_IM_R2Y_YYRTRG_ON;
+
+		retcd = D_DDIM_OK;
+		break;
+	}
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Start off pclk\n" ));
+#endif
+	Im_R2Y_Off_Pclk( pipe_no );
+
+#ifdef D_IM_R2Y_DEBUG_ON_PC
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		if( gIM_R2Y_macro_fake_finish[loop_cnt] != 0 ) {
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.word = 0;
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.CNTL.R2YINTF.word = 0;
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__YYREF = 1;
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_0] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__YYW0EF = 1;
+				if( gIM_R2Y_State[loop_cnt].output_mode_0a != D_IM_R2Y_YYW0A_OUTPUT_MODE_STOP ){
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__YYWAEF = 1;
+				}
+				if( (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTLV.bit.LINTLV_0 != 0)
+				 && (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTSEL.bit.LINTS_0 == 0) ) {
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__LINT0F = 1;
+				}
+				if( (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTLV.bit.LINTLV_1 != 0)
+				 && (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTSEL.bit.LINTS_1 == 0) ) {
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__LINT1F = 1;
+				}
+				if( (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTLV.bit.LINTLV_2 != 0)
+				 && (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTSEL.bit.LINTS_2 == 0) ) {
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__LINT2F = 1;
+				}
+			}
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_1] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__YYW1EF = 1;
+				if( (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTLV.bit.LINTLV_0 != 0)
+				 && (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTSEL.bit.LINTS_0 == 1) ) {
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__LINT0F = 1;
+				}
+				if( (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTLV.bit.LINTLV_1 != 0)
+				 && (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTSEL.bit.LINTS_1 == 1) ) {
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__LINT1F = 1;
+				}
+				if( (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTLV.bit.LINTLV_2 != 0)
+				 && (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.LINTSEL.bit.LINTS_2 == 1) ) {
+					gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__LINT2F = 1;
+				}
+			}
+			if( gIM_R2Y_State[loop_cnt].yyw_enable[D_IM_R2Y_YYW_CH_2] == D_IM_R2Y_ENABLE_ON ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__YYW2EF = 1;
+			}
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.bit.__YYWEF = 1;
+			if( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST != 0 ) {
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKST = 0;
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0STS = gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0PS;
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKASTS = gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKAPS;
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1STS = gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1PS;
+				gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2STS = gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2PS;
+			}
+			Im_R2Y_Int_Handler( loop_cnt );
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.YYINTF.word = 0;
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0STS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK0STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK0 + 1 );
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKASTS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANKASTS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANKA + 1 );
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1STS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK1STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK1 + 1 );
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2STS = im_r2y_inc_bank_index( gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWBANK.bit.BANK2STS, gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWCTL.bit.USEBANK2 + 1 );
+		}
+	}
+#endif
+
+	Im_R2Y_Dsb();
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Start end\n" ));
+#endif
+
+	return retcd;
+}
+
+/* Stop R2Y process
+ */
+INT32 Im_R2Y_Stop( UCHAR pipe_no )
+{
+	UCHAR loop_cnt, loop_sta, loop_end;
+	UCHAR byp_bak[2], pad_bak[2], ext_b_bak[2], ext_c_bak[2];
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Stop error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].was_started = D_IM_R2Y_FALSE;
+	}
+
+	Im_R2Y_On_Pclk( pipe_no );
+	Im_R2Y_On_Iclk( pipe_no );
+	Im_R2Y_On_Clk( pipe_no );	// D_IM_R2Y_FR2YTRG_OFF control accompanies the R2Y reset.
+
+	for( loop_cnt = 0; loop_cnt <= 1; loop_cnt++ ){
+		byp_bak[loop_cnt] = gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.R2YMODE.bit.YCFBYP;
+		pad_bak[loop_cnt] = gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.R2YMODE.bit.YCFPDD;
+		ext_b_bak[loop_cnt] = gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYW0MD.bit.EXTBEN;
+		ext_c_bak[loop_cnt] = gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYW0MD.bit.EXTCEN;
+	}
+
+	//
+	// Stop YYW
+	//
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].busy_state &= ~(D_IM_R2Y_STATE_BUSY_YYW0 | D_IM_R2Y_STATE_BUSY_YYW1 | D_IM_R2Y_STATE_BUSY_YYW2);
+	}
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWTRG.bit.YYWTRG = D_IM_R2Y_YYWTRG_OFF;
+
+	Im_R2Y_Dsb();
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		while( im_r2y_yyw_is_activated(loop_cnt) ){
+#ifdef CO_DEBUG_ON_PC
+//			Ddim_Print(( "Im_R2Y_Stop YYW wait loop. %u\n", gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWTRG.bit.YYWTRG ));
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYWTRG.bit.YYWTRG = D_IM_R2Y_YYWTRG_IDLE;
+#endif
+			;	// DO NOTHING
+		}
+	}
+
+	//
+	// Stop F_R2Y
+	//
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].busy_state &= ~(D_IM_R2Y_STATE_BUSY_F_R2Y);
+	}
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.CNTL.bit.TRG = D_IM_R2Y_FR2YTRG_OFF;
+#ifdef CO_DEBUG_ON_PC
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->F_R2Y.CNTL.CNTL.bit.TRG = D_IM_R2Y_FR2YTRG_IDLE;
+	}
+#endif
+
+	//
+	// Stop YYR
+	//
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_R2Y_State[loop_cnt].busy_state &= ~(D_IM_R2Y_STATE_BUSY_YYR);
+	}
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRTRG.bit.YYRTRG = D_IM_R2Y_YYRTRG_OFF;
+
+	Im_R2Y_Dsb();
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		while( im_r2y_yyr_is_activated(loop_cnt) ) {
+#ifdef CO_DEBUG_ON_PC
+//			Ddim_Print(( "Im_R2Y_Stop YYR wait loop. %u\n", gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYR.YYRTRG.bit.YYRTRG ));
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYR.YYRTRG.bit.YYRTRG = D_IM_R2Y_YYRTRG_IDLE;
+#endif
+			;	// DO NOTHING
+		}
+	}
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.R2YMODE.bit.YCFBYP  = D_IM_R2Y_ENABLE_OFF;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.R2YMODE.bit.YCFPDD  = D_IM_R2Y_ENABLE_OFF;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.EXTBEN = D_IM_R2Y_ENABLE_OFF;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.EXTCEN = D_IM_R2Y_ENABLE_OFF;
+
+	im_r2y_wait_usec( 10 );
+	Im_R2Y_Dsb();
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRTRG.bit.YYRTRG = D_IM_R2Y_YYRTRG_ON;
+
+	im_r2y_wait_usec( 10 );
+	Im_R2Y_Dsb();
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYR.YYRTRG.bit.YYRTRG = D_IM_R2Y_YYRTRG_OFF;
+
+	Im_R2Y_Dsb();
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		while( im_r2y_yyr_is_activated(loop_cnt) ) {
+#ifdef CO_DEBUG_ON_PC
+//			Ddim_Print(( "Im_R2Y_Stop YYR wait loop. %u\n", gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYR.YYRTRG.bit.YYRTRG ));
+			gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYR.YYRTRG.bit.YYRTRG = D_IM_R2Y_YYRTRG_IDLE;
+#endif
+			;	// DO NOTHING
+		}
+	}
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.R2YMODE.bit.YCFBYP = byp_bak[loop_cnt];
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.R2YMODE.bit.YCFPDD = pad_bak[loop_cnt];
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYW0MD.bit.EXTBEN = ext_b_bak[loop_cnt];
+		gIM_Io_R2y_Reg_Ptr[loop_cnt]->YYW.YYW0MD.bit.EXTCEN = ext_c_bak[loop_cnt];
+	}
+
+	// Clear of All Interrupt disable
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.YYINTE.word = D_IM_R2Y_YYINTE_DISABLE;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.YYINTF.word = D_IM_R2Y_YYINTF_ALL_CLR;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTE.word = D_IM_R2Y_R2YINTE_DISABLE;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTF.word = D_IM_R2Y_R2YINTF_ALL_CLR;
+
+	// RGB Deknee
+	Im_R2Y_Set_RGBDekneeAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// Tone control
+	Im_R2Y_Set_ToneControlTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// BTC Luminance evaluation
+	Im_R2Y_Set_LuminanceEvaluationTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// BTC histogram
+	Im_R2Y_Set_BTC_HistogramTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// Gamma
+	Im_R2Y_Set_GammaTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+	Im_R2Y_Set_GammaYbTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// High frequency EdgeEnhance
+	Im_R2Y_Set_HighEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+	Im_R2Y_Set_HighEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// Medium frequency EdgeEnhance
+	Im_R2Y_Set_MediumEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+	Im_R2Y_Set_MediumEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// Low frequency EdgeEnhance
+	Im_R2Y_Set_LowEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+	Im_R2Y_Set_LowEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// Map scale
+	Im_R2Y_Set_MapSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	// YYR Histogram
+	Im_R2Y_Set_HistogramAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YYRAEN_YYR          = 0;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0         = 0;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0_BICUBIC = 0;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0_EDGE    = 0;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0A        = 0;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1         = 0;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1_BICUBIC = 0;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1_EDGE    = 0;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.RAMAEN.bit.YW2AEN              = 0;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.FLTAEN.bit.YCFAEN = 0;
+
+	Im_R2Y_Force_Off_Clk( pipe_no );
+	Im_R2Y_Force_Off_Iclk( pipe_no );
+	Im_R2Y_Force_Off_Pclk( pipe_no );
+
+	Im_R2Y_Dsb();
+
+	return D_DDIM_OK;
+}
+
+/* Wait end of R2Y macro.
+ */
+INT32 Im_R2Y_WaitEnd( DDIM_USER_FLGPTN* const p_flgptn, DDIM_USER_FLGPTN waiptn, DDIM_USER_TMO tmout )
+{
+	DDIM_USER_FLGPTN	flgptn;
+	DDIM_USER_ER		ercd;
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_WaitEnd begin\n" ));
+#endif
+
+#ifdef CO_PARAM_CHECK
+	if( (waiptn & D_IM_R2Y_INT_FLG_ALL) != waiptn ) {
+		Ddim_Assertion(("Im_R2Y_WaitEnd error. waiptn\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+	Im_R2Y_Dsb();
+
+	switch( DDIM_User_Twai_Flg( FID_IM_R2Y, waiptn, D_DDIM_USER_TWF_ORW, &flgptn, tmout ) ) {
+		case D_DDIM_USER_E_OK:
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_WaitEnd twai_flg OK return\n" ));
+#endif
+			flgptn = waiptn & flgptn;
+			ercd = DDIM_User_Clr_Flg( FID_IM_R2Y, ~flgptn );
+			if( ercd != D_DDIM_USER_E_OK ) {
+				Ddim_Print(( "Im_R2Y_Start: invalid FID.\n" ));
+				return D_IM_R2Y_SYSTEM_ERROR;
+			}
+			if( p_flgptn != NULL ) {
+				*p_flgptn = flgptn;
+			}
+			return D_DDIM_OK;
+		case D_DDIM_USER_E_TMOUT:
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_WaitEnd twai_flg TimeOut return\n" ));
+#endif
+			return D_IM_R2Y_TIMEOUT;
+		default:
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+		Ddim_Print(( "Im_R2Y_WaitEnd twai_flg NG return\n" ));
+#endif
+			return D_IM_R2Y_PARAM_ERROR;
+	}
+}
+
+/* R2Y Interrupt Handler
+ */
+VOID Im_R2Y_Int_Handler( UCHAR pipe_no )
+{
+	UINT32			loopcnt;
+	DDIM_USER_ER	ercd;
+	ULONG			r2y_inte;
+	ULONG			r2y_intf;
+	ULONG			r2y_intf_clr;
+	ULONG			f_r2y_inte;
+	ULONG			f_r2y_intf;
+	ULONG			f_r2y_intf_clr;
+
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Int_Handler error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Int_Handler begin\n" ));
+#endif
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Int_Handler on pclk\n" ));
+#endif
+	Im_R2Y_On_Pclk( pipe_no );
+
+
+	if( gIM_R2Y_State[pipe_no].video_photo_mode == D_IM_R2Y_MODE_SDRAM_INPUT ) {
+		if( !(im_r2y_yyr_is_activated(pipe_no) || im_r2y_yyw_is_activated(pipe_no) || (gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYWCTL.bit.YYWCSE != 0)) ) {
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+			Ddim_Print(( "Im_R2Y_Int_Handler off clk\n" ));
+#endif
+			Im_R2Y_Off_Clk( pipe_no );
+			Im_R2Y_Off_Iclk( pipe_no );
+		}
+	}
+	Im_R2Y_Dsb();
+
+	r2y_inte = gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.YYINTE.word;
+	r2y_intf = gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.YYINTF.word;
+	r2y_intf_clr = 0;
+	f_r2y_inte = gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTE.word;
+	f_r2y_intf = gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTF.word;
+	f_r2y_intf_clr = 0;
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Int_Handler inte=0x%lx, intf=0x%lx f_inte=0x%lx f_intf=0x%lx\n", r2y_inte, r2y_intf, f_r2y_inte, f_r2y_intf ));
+#endif
+
+	// Call of Callback API for interrupt status
+
+	for( loopcnt = 0; loopcnt < (sizeof(gim_r2y_inttbl_jdsr2y[0]) / sizeof(gim_r2y_inttbl_jdsr2y[0][0])); loopcnt++ ) {
+		if( ((r2y_intf & gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].flg_bitmask) != 0)
+		 && ((r2y_inte & gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].ena_bitmask) != 0) ) {
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+			Ddim_Print(( "Im_R2Y_Int_Handler begin JDSR2Y 0x%x\n", gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].flg_bitmask ));
+#endif
+
+			if(( gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status == D_IM_R2Y1_INT_STATE_YYW0_END )
+			|| ( gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status == D_IM_R2Y2_INT_STATE_YYW0_END )) {
+				im_r2y_latest_addr_update( pipe_no, D_IM_R2Y_YYW_CH_0 );
+			}
+			else
+			if(( gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status == D_IM_R2Y1_INT_STATE_YYW1_END )
+			|| ( gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status == D_IM_R2Y2_INT_STATE_YYW1_END )) {
+				im_r2y_latest_addr_update( pipe_no, D_IM_R2Y_YYW_CH_1 );
+			}
+			else
+			if(( gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status == D_IM_R2Y1_INT_STATE_YYW2_END )
+			|| ( gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status == D_IM_R2Y2_INT_STATE_YYW2_END )) {
+				im_r2y_latest_addr_update( pipe_no, D_IM_R2Y_YYW_CH_2 );
+			}
+			else
+			if(( gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status == D_IM_R2Y1_INT_STATE_YYW0A_END )
+			|| ( gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status == D_IM_R2Y2_INT_STATE_YYW0A_END )) {
+				im_r2y_latest_addr_update( pipe_no, D_IM_R2Y_YYW_CH_0A );
+			}
+
+			gIM_R2Y_State[pipe_no].int_status = gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].int_status;
+			gIM_R2Y_State[pipe_no].busy_state &= ~(gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].busy_state);
+
+			r2y_intf_clr |= gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].flg_bitmask;
+
+			ercd = DDIM_User_Set_Flg( FID_IM_R2Y, gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].waitflg );
+			if( ercd != D_DDIM_USER_E_OK ) {
+				Ddim_Print(( "Im_R2Y_Int_Handler: invalid FID. 0x%lx\n", gim_r2y_inttbl_jdsr2y[pipe_no][loopcnt].waitflg ));
+			}
+
+			if (gIM_R2Y_State[pipe_no].r2y_user_handler) {
+				gIM_R2Y_State[pipe_no].r2y_user_handler( (UINT32*)&gIM_R2Y_State[pipe_no].int_status, gIM_R2Y_State[pipe_no].user_param );
+			}
+		}
+	}
+
+	for( loopcnt = 0; loopcnt < (sizeof(gim_r2y_inttbl_fr2y[0]) / sizeof(gim_r2y_inttbl_fr2y[0][0])); loopcnt++ ) {
+		if( ((f_r2y_intf & gim_r2y_inttbl_fr2y[pipe_no][loopcnt].flg_bitmask) != 0)
+		 && ((f_r2y_inte & gim_r2y_inttbl_fr2y[pipe_no][loopcnt].ena_bitmask) != 0) ) {
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+			Ddim_Print(( "Im_R2Y_Int_Handler begin FR2Y 0x%x\n", gim_r2y_inttbl_fr2y[pipe_no][loopcnt].flg_bitmask ));
+#endif
+
+			gIM_R2Y_State[pipe_no].int_status = gim_r2y_inttbl_fr2y[pipe_no][loopcnt].int_status;
+			gIM_R2Y_State[pipe_no].busy_state &= ~(gim_r2y_inttbl_fr2y[pipe_no][loopcnt].busy_state);
+
+			f_r2y_intf_clr |= gim_r2y_inttbl_fr2y[pipe_no][loopcnt].flg_bitmask;
+
+			ercd = DDIM_User_Set_Flg( FID_IM_R2Y, gim_r2y_inttbl_fr2y[pipe_no][loopcnt].waitflg );
+			if( ercd != D_DDIM_USER_E_OK ) {
+				Ddim_Print(( "Im_R2Y_Int_Handler: invalid FID. 0x%lx\n", gim_r2y_inttbl_fr2y[pipe_no][loopcnt].waitflg ));
+			}
+
+			if (gIM_R2Y_State[pipe_no].r2y_user_handler) {
+				gIM_R2Y_State[pipe_no].r2y_user_handler( (UINT32*)&gIM_R2Y_State[pipe_no].int_status, gIM_R2Y_State[pipe_no].user_param );
+			}
+		}
+	}
+
+	// Clear interrupt
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.YYINTF.word = r2y_intf_clr;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTF.word = f_r2y_intf_clr;
+
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Int_Handler intf=0x%lx, %0xlx\n", gIM_Io_R2y_Reg_Ptr[pipe_no]->R2Y_CMN.YYINTF.word, gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YINTF.word ));
+#endif
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Int_Handler off pclk\n" ));
+#endif
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+#ifdef CO_DEBUG_PRINT_IM_R2Y
+	Ddim_Print(( "Im_R2Y_Int_Handler end\n" ));
+#endif
+}
+
+/* Trimming control
+ */
+INT32 Im_R2Y_Ctrl_Trimming( UCHAR pipe_no, UCHAR yyw_no, const T_IM_R2Y_CTRL_TRIMMING* const r2y_ctrl_trimming )
+{
+	USHORT img_top;
+	USHORT img_left;
+	USHORT img_width;
+	USHORT img_lines;
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_trimming == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Trimming error. r2y_ctrl_trimming = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( yyw_no > D_IM_R2Y_YYW_CH_2 ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Trimming error. yyw_no > D_IM_R2Y_YYW_CH_2\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Trimming error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		gIM_R2Y_State[D_IM_R2Y_PIPE1].trim[yyw_no] = *r2y_ctrl_trimming;
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		gIM_R2Y_State[D_IM_R2Y_PIPE2].trim[yyw_no] = *r2y_ctrl_trimming;
+	}
+
+	// TRMxHSTA
+	img_left = r2y_ctrl_trimming->trim_window.img_left;
+	img_left = im_r2y_min( img_left, (USHORT)D_IM_R2Y_TRMHSTA_MAX );
+	img_left = im_r2y_max( img_left, (USHORT)D_IM_R2Y_TRMHSTA_MIN );
+
+	// TRMxVSTA
+	img_top = r2y_ctrl_trimming->trim_window.img_top;
+	img_top = im_r2y_min( img_top, (USHORT)D_IM_R2Y_TRMVSTA_MAX );
+	img_top = im_r2y_max( img_top, (USHORT)D_IM_R2Y_TRMVSTA_MIN );
+
+	// TRMxHSIZ
+	img_width = r2y_ctrl_trimming->trim_window.img_width;
+	img_width = im_r2y_min( img_width, (USHORT)D_IM_R2Y_TRMHSIZ_MAX );
+	img_width = im_r2y_max( img_width, (USHORT)D_IM_R2Y_TRMHSIZ_MIN );
+
+	// TRMxVSIZ
+	img_lines = r2y_ctrl_trimming->trim_window.img_lines;
+	img_lines = im_r2y_min( img_lines, (USHORT)D_IM_R2Y_TRMVSIZ_MAX );
+	img_lines = im_r2y_max( img_lines, (USHORT)D_IM_R2Y_TRMVSIZ_MIN );
+
+	Im_R2Y_On_Pclk( pipe_no );
+	switch( yyw_no ) {
+		case D_IM_R2Y_YYW_CH_0:
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.TRM0EN  = r2y_ctrl_trimming->trimming_enable;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM0H.bit.TRM0HSTA = img_left;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM0H.bit.TRM0HSIZ = img_width;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM0V.bit.TRM0VSTA = img_top;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM0V.bit.TRM0VSIZ = img_lines;
+			break;
+		case D_IM_R2Y_YYW_CH_1:
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW1MD.bit.TRM1EN  = r2y_ctrl_trimming->trimming_enable;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM1H.bit.TRM1HSTA = img_left;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM1H.bit.TRM1HSIZ = img_width;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM1V.bit.TRM1VSTA = img_top;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM1V.bit.TRM1VSIZ = img_lines;
+			break;
+//		case D_IM_R2Y_YYW_CH_2:
+		default:
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW2MD.bit.TRM2EN  = r2y_ctrl_trimming->trimming_enable;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM2H.bit.TRM2HSTA = img_left;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM2H.bit.TRM2HSIZ = img_width;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM2V.bit.TRM2VSTA = img_top;
+			gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRM2V.bit.TRM2VSIZ = img_lines;
+			break;
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Trimming control(for external I/F)
+ */
+INT32 Im_R2Y_Ctrl_Trimming_External( UCHAR pipe_no, const T_IM_R2Y_CTRL_TRIMMING_EXT* const r2y_ctrl_trimming )
+{
+	USHORT img_top_b;
+	USHORT img_left_b;
+	USHORT img_width_b;
+	USHORT img_lines_b;
+	USHORT img_top_c;
+	USHORT img_left_c;
+	USHORT img_width_c;
+	USHORT img_lines_c;
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_trimming == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Trimming_External error. r2y_ctrl_trimming = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Trimming_External error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	if( im_r2y_check_target_pipe_no_1( pipe_no ) ){
+		gIM_R2Y_State[D_IM_R2Y_PIPE1].trim_ext = *r2y_ctrl_trimming;
+	}
+	if( im_r2y_check_target_pipe_no_2( pipe_no ) ){
+		gIM_R2Y_State[D_IM_R2Y_PIPE2].trim_ext = *r2y_ctrl_trimming;
+	}
+
+	// TRMBHSTA
+	img_left_b = r2y_ctrl_trimming->trim_window_b.img_left;
+	img_left_b = im_r2y_min( img_left_b, (USHORT)D_IM_R2Y_TRMHSTA_MAX );
+	img_left_b = im_r2y_max( img_left_b, (USHORT)D_IM_R2Y_TRMHSTA_MIN );
+
+	// TRMBVSTA
+	img_top_b = r2y_ctrl_trimming->trim_window_b.img_top;
+	img_top_b = im_r2y_min( img_top_b, (USHORT)D_IM_R2Y_TRMVSTA_MAX );
+	img_top_b = im_r2y_max( img_top_b, (USHORT)D_IM_R2Y_TRMVSTA_MIN );
+
+	// TRMBHSIZ
+	img_width_b = r2y_ctrl_trimming->trim_window_b.img_width;
+	img_width_b = im_r2y_min( img_width_b, (USHORT)D_IM_R2Y_TRMHSIZ_MAX );
+	img_width_b = im_r2y_max( img_width_b, (USHORT)D_IM_R2Y_TRMHSIZ_MIN );
+
+	// TRMBVSIZ
+	img_lines_b = r2y_ctrl_trimming->trim_window_b.img_lines;
+	img_lines_b = im_r2y_min( img_lines_b, (USHORT)D_IM_R2Y_TRMVSIZ_MAX );
+	img_lines_b = im_r2y_max( img_lines_b, (USHORT)D_IM_R2Y_TRMVSIZ_MIN );
+
+	// TRMCHSTA
+	img_left_c = r2y_ctrl_trimming->trim_window_c.img_left;
+	img_left_c = im_r2y_min( img_left_c, (USHORT)D_IM_R2Y_TRMHSTA_MAX );
+	img_left_c = im_r2y_max( img_left_c, (USHORT)D_IM_R2Y_TRMHSTA_MIN );
+
+	// TRMCVSTA
+	img_top_c = r2y_ctrl_trimming->trim_window_c.img_top;
+	img_top_c = im_r2y_min( img_top_c, (USHORT)D_IM_R2Y_TRMVSTA_MAX );
+	img_top_c = im_r2y_max( img_top_c, (USHORT)D_IM_R2Y_TRMVSTA_MIN );
+
+	// TRMCHSIZ
+	img_width_c = r2y_ctrl_trimming->trim_window_c.img_width;
+	img_width_c = im_r2y_min( img_width_c, (USHORT)D_IM_R2Y_TRMHSIZ_MAX );
+	img_width_c = im_r2y_max( img_width_c, (USHORT)D_IM_R2Y_TRMHSIZ_MIN );
+
+	// TRMCVSIZ
+	img_lines_c = r2y_ctrl_trimming->trim_window_c.img_lines;
+	img_lines_c = im_r2y_min( img_lines_c, (USHORT)D_IM_R2Y_TRMVSIZ_MAX );
+	img_lines_c = im_r2y_max( img_lines_c, (USHORT)D_IM_R2Y_TRMVSIZ_MIN );
+
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.TRMBEN  = r2y_ctrl_trimming->trimming_enable_b;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRMBH.bit.TRMBHSTA = img_left_b;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRMBH.bit.TRMBHSIZ = img_width_b;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRMBV.bit.TRMBVSTA = img_top_b;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRMBV.bit.TRMBVSIZ = img_lines_b;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.YYW0MD.bit.TRMCEN  = r2y_ctrl_trimming->trimming_enable_c;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRMCH.bit.TRMCHSTA = img_left_c;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRMCH.bit.TRMCHSIZ = img_width_c;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRMCV.bit.TRMCVSTA = img_top_c;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.TRMCV.bit.TRMCVSIZ = img_lines_c;
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Set Histogram control register
+ */
+INT32 Im_R2Y_Ctrl_Histogram( UCHAR pipe_no, const T_IM_R2Y_CTRL_HISTOGRAM* const r2y_ctrl_hist )
+{
+	INT32 retcd = D_DDIM_OK;
+	UCHAR loop_cnt, loop_sta, loop_end;
+	USHORT img_top;
+	USHORT img_left;
+	USHORT img_width;
+	USHORT img_lines;
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_hist == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Histogram error. r2y_ctrl_hist = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Histogram error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	Im_R2Y_On_Pclk( pipe_no );
+	while( 1 ) {
+
+		for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+			if( im_r2y_yyw_is_activated(loop_cnt) && (gIM_Io_R2y_Reg_Ptr[loop_cnt]->R2Y_CMN.RAMAEN.bit.HSTAEN == 0) ) {
+				retcd = D_IM_R2Y_MACRO_BUSY;
+			}
+		}
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTMD.bit.HSTSEL = r2y_ctrl_hist->yyw_no;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTMD.bit.PIT_M  = r2y_ctrl_hist->sampling_pitch;
+
+		// HSTHSTA
+		img_left = r2y_ctrl_hist->histogram_area.img_left;
+		img_left = im_r2y_min( img_left, (USHORT)D_IM_R2Y_HSTHSTA_MAX );
+		img_left = im_r2y_max( img_left, (USHORT)D_IM_R2Y_HSTHSTA_MIN );
+
+		// HSTVSTA
+		img_top = r2y_ctrl_hist->histogram_area.img_top;
+		img_top = im_r2y_min( img_top, (USHORT)D_IM_R2Y_HSTVSTA_MAX );
+		img_top = im_r2y_max( img_top, (USHORT)D_IM_R2Y_HSTVSTA_MIN );
+
+		// HSTHSIZ
+		img_width = r2y_ctrl_hist->histogram_area.img_width;
+		img_width = im_r2y_min( img_width, (USHORT)D_IM_R2Y_HSTHSIZ_MAX );
+		img_width = im_r2y_max( img_width, (USHORT)D_IM_R2Y_HSTHSIZ_MIN );
+
+		// HSTVSIZ
+		img_lines = r2y_ctrl_hist->histogram_area.img_lines;
+		img_lines = im_r2y_min( img_lines, (USHORT)D_IM_R2Y_HSTVSIZ_MAX );
+		img_lines = im_r2y_max( img_lines, (USHORT)D_IM_R2Y_HSTVSIZ_MIN );
+
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTH.bit.HSTHSTA = img_left;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTH.bit.HSTHSIZ = img_width;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTV.bit.HSTVSTA = img_top;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTV.bit.HSTVSIZ = img_lines;
+		gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTMD.bit.HSTEN  = r2y_ctrl_hist->enable;
+
+		break;
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+	Im_R2Y_Dsb();
+
+	return retcd;
+}
+
+/* Get Histogram value
+ */
+INT32 Im_R2Y_Get_Histogram( UCHAR pipe_no, T_IM_R2Y_HISTOGRAM_STAT* const status, T_IM_R2Y_HISTOGRAM_ADDR* const dst_addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( status == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_Histogram error. status = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( dst_addr == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_Histogram error. dst_addr = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_Histogram error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	status->y_overflow = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTMD.bit.YHSOVF;
+	status->running_status = gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.HSTMD.bit.HSTSTS;
+	if( status->running_status == 0 ) {
+		Im_R2Y_On_Hclk( pipe_no );
+		im_r2y_copy_reg_to_sdram_ushort( dst_addr->y_buf,	// Read access only support Word-width. (Hardware specification.)
+										 gIM_Io_R2y_Tbl_Ptr[pipe_no]->HSTY.hword,
+										 D_IM_R2Y_TABLE_MAX_HISTOGRAM );
+		Im_R2Y_Off_Hclk( pipe_no );
+	}
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	if( status->running_status == 0 ) {
+		return D_DDIM_OK;
+	}
+	else {
+		return D_IM_R2Y_MACRO_BUSY;
+	}
+}
+
+/* Set Histogram ram access enable
+ */
+INT32 Im_R2Y_Set_HistogramAccessEnable( UCHAR pipe_no, UCHAR hist_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_HistogramAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_histogram_accen_ctrl,
+									 hist_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_HistogramAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Set a specific color extraction
+ */
+INT32 Im_R2Y_Set_Color_Extract( UCHAR pipe_no, const T_IM_R2Y_COLOR_EXTRACT* const r2y_color_extract )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_color_extract == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Set_Color_Extract error. r2y_color_extract = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_Color_Extract error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.PCEMD.bit.PCEEN = r2y_color_extract->extract_enable;
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.PCEXY, union io_r2y_pcexy, PCEX, r2y_color_extract->ref_axis_x );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.PCEXY, union io_r2y_pcexy, PCEY, r2y_color_extract->ref_axis_y );
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Set chroma scale value
+ */
+INT32 Im_R2Y_Set_Chroma( UCHAR pipe_no, const T_IM_R2Y_CHROMA_SCALE* const r2y_chroma_scale )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_chroma_scale == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Set_Chroma error. r2y_chroma_scale = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_Chroma error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.PCEC.bit.PCECOF = r2y_chroma_scale->chroma_offset;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.PCEC.bit.PCECGA = r2y_chroma_scale->chroma_gain;
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Set hue scale value
+ */
+INT32 Im_R2Y_Set_Hue( UCHAR pipe_no, const T_IM_R2Y_HUE_SCALE* const r2y_hue_scale )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_hue_scale == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Set_Hue error. r2y_hue_scale = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_Hue error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.PCEH.bit.PCEHOF = r2y_hue_scale->hue_offset;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.PCEH.bit.PCEHGA = r2y_hue_scale->hue_gain;
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Post-resize edge enhancement0 control
+ */
+INT32 Im_R2Y_Ctrl_PostResizeEdge0( UCHAR pipe_no, const T_IM_R2Y_POST_RESIZE0_PARAM* const r2y_ctrl_post_resize )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_post_resize == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_PostResizeEdge0 error. r2y_ctrl_post_resize = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_PostResizeEdge0 error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_ee0_ctrl( pipe_no, r2y_ctrl_post_resize );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CTL.bit.EE0EN = r2y_ctrl_post_resize->edge_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CTL.bit.EE0TC = r2y_ctrl_post_resize->gradation_enable;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0HPFK.bit.EE0HPFK0 = r2y_ctrl_post_resize->hpf_k[0];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK1, r2y_ctrl_post_resize->hpf_k[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK2, r2y_ctrl_post_resize->hpf_k[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK3, r2y_ctrl_post_resize->hpf_k[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK4, r2y_ctrl_post_resize->hpf_k[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0HPFK, union io_r2y_ee0hpfk, EE0HPFK5, r2y_ctrl_post_resize->hpf_k[5] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0NRLV.bit.EE0NRLV = r2y_ctrl_post_resize->strength;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPOF.bit.EE0CORPOF_0 = r2y_ctrl_post_resize->coring_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPOF.bit.EE0CORPOF_1 = r2y_ctrl_post_resize->coring_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPOF.bit.EE0CORPOF_2 = r2y_ctrl_post_resize->coring_p_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPOF.bit.EE0CORPOF_3 = r2y_ctrl_post_resize->coring_p_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPGA, union io_r2y_ee0corpga, EE0CORPGA_0, r2y_ctrl_post_resize->coring_p_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPGA, union io_r2y_ee0corpga, EE0CORPGA_1, r2y_ctrl_post_resize->coring_p_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPGA, union io_r2y_ee0corpga, EE0CORPGA_2, r2y_ctrl_post_resize->coring_p_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPGA, union io_r2y_ee0corpga, EE0CORPGA_3, r2y_ctrl_post_resize->coring_p_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPBD.bit.EE0CORPBD_1 = r2y_ctrl_post_resize->coring_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPBD.bit.EE0CORPBD_2 = r2y_ctrl_post_resize->coring_p_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORPBD.bit.EE0CORPBD_3 = r2y_ctrl_post_resize->coring_p_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMOF.bit.EE0CORMOF_0 = r2y_ctrl_post_resize->coring_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMOF.bit.EE0CORMOF_1 = r2y_ctrl_post_resize->coring_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMOF.bit.EE0CORMOF_2 = r2y_ctrl_post_resize->coring_m_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMOF.bit.EE0CORMOF_3 = r2y_ctrl_post_resize->coring_m_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMGA, union io_r2y_ee0cormga, EE0CORMGA_0, r2y_ctrl_post_resize->coring_m_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMGA, union io_r2y_ee0cormga, EE0CORMGA_1, r2y_ctrl_post_resize->coring_m_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMGA, union io_r2y_ee0cormga, EE0CORMGA_2, r2y_ctrl_post_resize->coring_m_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMGA, union io_r2y_ee0cormga, EE0CORMGA_3, r2y_ctrl_post_resize->coring_m_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMBD.bit.EE0CORMBD_1 = r2y_ctrl_post_resize->coring_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMBD.bit.EE0CORMBD_2 = r2y_ctrl_post_resize->coring_m_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CORMBD.bit.EE0CORMBD_3 = r2y_ctrl_post_resize->coring_m_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLSUP.bit.EE0SCLSUP = r2y_ctrl_post_resize->scale_reduct_coef;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_0 = r2y_ctrl_post_resize->scale_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_1 = r2y_ctrl_post_resize->scale_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_2 = r2y_ctrl_post_resize->scale_p_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_3 = r2y_ctrl_post_resize->scale_p_offset[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_4 = r2y_ctrl_post_resize->scale_p_offset[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_5 = r2y_ctrl_post_resize->scale_p_offset[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_6 = r2y_ctrl_post_resize->scale_p_offset[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_7 = r2y_ctrl_post_resize->scale_p_offset[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_8 = r2y_ctrl_post_resize->scale_p_offset[8];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPOF.bit.EE0SCLPOF_9 = r2y_ctrl_post_resize->scale_p_offset[9];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_0, r2y_ctrl_post_resize->scale_p_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_1, r2y_ctrl_post_resize->scale_p_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_2, r2y_ctrl_post_resize->scale_p_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_3, r2y_ctrl_post_resize->scale_p_gain[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_4, r2y_ctrl_post_resize->scale_p_gain[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_5, r2y_ctrl_post_resize->scale_p_gain[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_6, r2y_ctrl_post_resize->scale_p_gain[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_7, r2y_ctrl_post_resize->scale_p_gain[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_8, r2y_ctrl_post_resize->scale_p_gain[8] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPGA, union io_r2y_ee0sclpga, EE0SCLPGA_9, r2y_ctrl_post_resize->scale_p_gain[9] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_1 = r2y_ctrl_post_resize->scale_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_2 = r2y_ctrl_post_resize->scale_p_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_3 = r2y_ctrl_post_resize->scale_p_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_4 = r2y_ctrl_post_resize->scale_p_border[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_5 = r2y_ctrl_post_resize->scale_p_border[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_6 = r2y_ctrl_post_resize->scale_p_border[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_7 = r2y_ctrl_post_resize->scale_p_border[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_8 = r2y_ctrl_post_resize->scale_p_border[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLPBD.bit.EE0SCLPBD_9 = r2y_ctrl_post_resize->scale_p_border[8];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_0 = r2y_ctrl_post_resize->scale_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_1 = r2y_ctrl_post_resize->scale_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_2 = r2y_ctrl_post_resize->scale_m_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_3 = r2y_ctrl_post_resize->scale_m_offset[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_4 = r2y_ctrl_post_resize->scale_m_offset[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_5 = r2y_ctrl_post_resize->scale_m_offset[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_6 = r2y_ctrl_post_resize->scale_m_offset[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_7 = r2y_ctrl_post_resize->scale_m_offset[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_8 = r2y_ctrl_post_resize->scale_m_offset[8];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMOF.bit.EE0SCLMOF_9 = r2y_ctrl_post_resize->scale_m_offset[9];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_0, r2y_ctrl_post_resize->scale_m_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_1, r2y_ctrl_post_resize->scale_m_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_2, r2y_ctrl_post_resize->scale_m_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_3, r2y_ctrl_post_resize->scale_m_gain[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_4, r2y_ctrl_post_resize->scale_m_gain[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_5, r2y_ctrl_post_resize->scale_m_gain[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_6, r2y_ctrl_post_resize->scale_m_gain[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_7, r2y_ctrl_post_resize->scale_m_gain[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_8, r2y_ctrl_post_resize->scale_m_gain[8] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMGA, union io_r2y_ee0sclmga, EE0SCLMGA_9, r2y_ctrl_post_resize->scale_m_gain[9] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_1 = r2y_ctrl_post_resize->scale_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_2 = r2y_ctrl_post_resize->scale_m_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_3 = r2y_ctrl_post_resize->scale_m_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_4 = r2y_ctrl_post_resize->scale_m_border[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_5 = r2y_ctrl_post_resize->scale_m_border[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_6 = r2y_ctrl_post_resize->scale_m_border[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_7 = r2y_ctrl_post_resize->scale_m_border[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_8 = r2y_ctrl_post_resize->scale_m_border[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0SCLMBD.bit.EE0SCLMBD_9 = r2y_ctrl_post_resize->scale_m_border[8];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPOF.bit.EE0TONPOF_0 = r2y_ctrl_post_resize->gradation_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPOF.bit.EE0TONPOF_1 = r2y_ctrl_post_resize->gradation_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPOF.bit.EE0TONPOF_2 = r2y_ctrl_post_resize->gradation_p_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPOF.bit.EE0TONPOF_3 = r2y_ctrl_post_resize->gradation_p_offset[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPOF.bit.EE0TONPOF_4 = r2y_ctrl_post_resize->gradation_p_offset[4];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_0, r2y_ctrl_post_resize->gradation_p_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_1, r2y_ctrl_post_resize->gradation_p_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_2, r2y_ctrl_post_resize->gradation_p_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_3, r2y_ctrl_post_resize->gradation_p_gain[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPGA, union io_r2y_ee0tonpga, EE0TONPGA_4, r2y_ctrl_post_resize->gradation_p_gain[4] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPBD.bit.EE0TONPBD_1 = r2y_ctrl_post_resize->gradation_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPBD.bit.EE0TONPBD_2 = r2y_ctrl_post_resize->gradation_p_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPBD.bit.EE0TONPBD_3 = r2y_ctrl_post_resize->gradation_p_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONPBD.bit.EE0TONPBD_4 = r2y_ctrl_post_resize->gradation_p_border[3];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMOF.bit.EE0TONMOF_0 = r2y_ctrl_post_resize->gradation_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMOF.bit.EE0TONMOF_1 = r2y_ctrl_post_resize->gradation_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMOF.bit.EE0TONMOF_2 = r2y_ctrl_post_resize->gradation_m_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMOF.bit.EE0TONMOF_3 = r2y_ctrl_post_resize->gradation_m_offset[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMOF.bit.EE0TONMOF_4 = r2y_ctrl_post_resize->gradation_m_offset[4];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_0, r2y_ctrl_post_resize->gradation_m_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_1, r2y_ctrl_post_resize->gradation_m_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_2, r2y_ctrl_post_resize->gradation_m_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_3, r2y_ctrl_post_resize->gradation_m_gain[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMGA, union io_r2y_ee0tonmga, EE0TONMGA_4, r2y_ctrl_post_resize->gradation_m_gain[4] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMBD.bit.EE0TONMBD_1 = r2y_ctrl_post_resize->gradation_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMBD.bit.EE0TONMBD_2 = r2y_ctrl_post_resize->gradation_m_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMBD.bit.EE0TONMBD_3 = r2y_ctrl_post_resize->gradation_m_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0TONMBD.bit.EE0TONMBD_4 = r2y_ctrl_post_resize->gradation_m_border[3];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPPOF.bit.EE0CLPPOF_0 = r2y_ctrl_post_resize->level_clip_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPPOF.bit.EE0CLPPOF_1 = r2y_ctrl_post_resize->level_clip_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPPOF.bit.EE0CLPPOF_2 = r2y_ctrl_post_resize->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPPGA, union io_r2y_ee0clppga, EE0CLPPGA_0, r2y_ctrl_post_resize->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPPGA, union io_r2y_ee0clppga, EE0CLPPGA_1, r2y_ctrl_post_resize->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPPGA, union io_r2y_ee0clppga, EE0CLPPGA_2, r2y_ctrl_post_resize->level_clip_p_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPPBD.bit.EE0CLPPBD_1 = r2y_ctrl_post_resize->level_clip_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPPBD.bit.EE0CLPPBD_2 = r2y_ctrl_post_resize->level_clip_p_border[1];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPMOF.bit.EE0CLPMOF_0 = r2y_ctrl_post_resize->level_clip_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPMOF.bit.EE0CLPMOF_1 = r2y_ctrl_post_resize->level_clip_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPMOF.bit.EE0CLPMOF_2 = r2y_ctrl_post_resize->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPMGA, union io_r2y_ee0clpmga, EE0CLPMGA_0, r2y_ctrl_post_resize->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPMGA, union io_r2y_ee0clpmga, EE0CLPMGA_1, r2y_ctrl_post_resize->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPMGA, union io_r2y_ee0clpmga, EE0CLPMGA_2, r2y_ctrl_post_resize->level_clip_m_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPMBD.bit.EE0CLPMBD_1 = r2y_ctrl_post_resize->level_clip_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE0CLPMBD.bit.EE0CLPMBD_2 = r2y_ctrl_post_resize->level_clip_m_border[1];
+
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Post-resize edge enhancement1 control
+ */
+INT32 Im_R2Y_Ctrl_PostResizeEdge1( UCHAR pipe_no, const T_IM_R2Y_POST_RESIZE1_PARAM* const r2y_ctrl_post_resize )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_post_resize == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_PostResizeEdge1 error. r2y_ctrl_post_resize = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_PostResizeEdge1 error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_ee1_ctrl( pipe_no, r2y_ctrl_post_resize );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CTL.bit.EE1EN = r2y_ctrl_post_resize->edge_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CTL.bit.EE1TC = r2y_ctrl_post_resize->gradation_enable;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1HPFK.bit.EE1HPFK0 = r2y_ctrl_post_resize->hpf_k[0];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK1, r2y_ctrl_post_resize->hpf_k[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK2, r2y_ctrl_post_resize->hpf_k[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK3, r2y_ctrl_post_resize->hpf_k[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK4, r2y_ctrl_post_resize->hpf_k[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1HPFK, union io_r2y_ee1hpfk, EE1HPFK5, r2y_ctrl_post_resize->hpf_k[5] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1NRLV.bit.EE1NRLV = r2y_ctrl_post_resize->strength;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPOF.bit.EE1CORPOF_0 = r2y_ctrl_post_resize->coring_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPOF.bit.EE1CORPOF_1 = r2y_ctrl_post_resize->coring_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPOF.bit.EE1CORPOF_2 = r2y_ctrl_post_resize->coring_p_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPOF.bit.EE1CORPOF_3 = r2y_ctrl_post_resize->coring_p_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPGA, union io_r2y_ee1corpga, EE1CORPGA_0, r2y_ctrl_post_resize->coring_p_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPGA, union io_r2y_ee1corpga, EE1CORPGA_1, r2y_ctrl_post_resize->coring_p_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPGA, union io_r2y_ee1corpga, EE1CORPGA_2, r2y_ctrl_post_resize->coring_p_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPGA, union io_r2y_ee1corpga, EE1CORPGA_3, r2y_ctrl_post_resize->coring_p_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPBD.bit.EE1CORPBD_1 = r2y_ctrl_post_resize->coring_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPBD.bit.EE1CORPBD_2 = r2y_ctrl_post_resize->coring_p_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORPBD.bit.EE1CORPBD_3 = r2y_ctrl_post_resize->coring_p_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMOF.bit.EE1CORMOF_0 = r2y_ctrl_post_resize->coring_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMOF.bit.EE1CORMOF_1 = r2y_ctrl_post_resize->coring_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMOF.bit.EE1CORMOF_2 = r2y_ctrl_post_resize->coring_m_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMOF.bit.EE1CORMOF_3 = r2y_ctrl_post_resize->coring_m_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMGA, union io_r2y_ee1cormga, EE1CORMGA_0, r2y_ctrl_post_resize->coring_m_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMGA, union io_r2y_ee1cormga, EE1CORMGA_1, r2y_ctrl_post_resize->coring_m_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMGA, union io_r2y_ee1cormga, EE1CORMGA_2, r2y_ctrl_post_resize->coring_m_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMGA, union io_r2y_ee1cormga, EE1CORMGA_3, r2y_ctrl_post_resize->coring_m_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMBD.bit.EE1CORMBD_1 = r2y_ctrl_post_resize->coring_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMBD.bit.EE1CORMBD_2 = r2y_ctrl_post_resize->coring_m_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CORMBD.bit.EE1CORMBD_3 = r2y_ctrl_post_resize->coring_m_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLSUP.bit.EE1SCLSUP = r2y_ctrl_post_resize->scale_reduct_coef;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_0 = r2y_ctrl_post_resize->scale_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_1 = r2y_ctrl_post_resize->scale_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_2 = r2y_ctrl_post_resize->scale_p_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_3 = r2y_ctrl_post_resize->scale_p_offset[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_4 = r2y_ctrl_post_resize->scale_p_offset[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_5 = r2y_ctrl_post_resize->scale_p_offset[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_6 = r2y_ctrl_post_resize->scale_p_offset[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_7 = r2y_ctrl_post_resize->scale_p_offset[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_8 = r2y_ctrl_post_resize->scale_p_offset[8];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPOF.bit.EE1SCLPOF_9 = r2y_ctrl_post_resize->scale_p_offset[9];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_0, r2y_ctrl_post_resize->scale_p_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_1, r2y_ctrl_post_resize->scale_p_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_2, r2y_ctrl_post_resize->scale_p_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_3, r2y_ctrl_post_resize->scale_p_gain[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_4, r2y_ctrl_post_resize->scale_p_gain[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_5, r2y_ctrl_post_resize->scale_p_gain[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_6, r2y_ctrl_post_resize->scale_p_gain[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_7, r2y_ctrl_post_resize->scale_p_gain[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_8, r2y_ctrl_post_resize->scale_p_gain[8] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPGA, union io_r2y_ee1sclpga, EE1SCLPGA_9, r2y_ctrl_post_resize->scale_p_gain[9] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_1 = r2y_ctrl_post_resize->scale_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_2 = r2y_ctrl_post_resize->scale_p_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_3 = r2y_ctrl_post_resize->scale_p_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_4 = r2y_ctrl_post_resize->scale_p_border[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_5 = r2y_ctrl_post_resize->scale_p_border[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_6 = r2y_ctrl_post_resize->scale_p_border[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_7 = r2y_ctrl_post_resize->scale_p_border[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_8 = r2y_ctrl_post_resize->scale_p_border[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLPBD.bit.EE1SCLPBD_9 = r2y_ctrl_post_resize->scale_p_border[8];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_0 = r2y_ctrl_post_resize->scale_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_1 = r2y_ctrl_post_resize->scale_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_2 = r2y_ctrl_post_resize->scale_m_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_3 = r2y_ctrl_post_resize->scale_m_offset[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_4 = r2y_ctrl_post_resize->scale_m_offset[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_5 = r2y_ctrl_post_resize->scale_m_offset[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_6 = r2y_ctrl_post_resize->scale_m_offset[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_7 = r2y_ctrl_post_resize->scale_m_offset[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_8 = r2y_ctrl_post_resize->scale_m_offset[8];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMOF.bit.EE1SCLMOF_9 = r2y_ctrl_post_resize->scale_m_offset[9];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_0, r2y_ctrl_post_resize->scale_m_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_1, r2y_ctrl_post_resize->scale_m_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_2, r2y_ctrl_post_resize->scale_m_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_3, r2y_ctrl_post_resize->scale_m_gain[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_4, r2y_ctrl_post_resize->scale_m_gain[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_5, r2y_ctrl_post_resize->scale_m_gain[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_6, r2y_ctrl_post_resize->scale_m_gain[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_7, r2y_ctrl_post_resize->scale_m_gain[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_8, r2y_ctrl_post_resize->scale_m_gain[8] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMGA, union io_r2y_ee1sclmga, EE1SCLMGA_9, r2y_ctrl_post_resize->scale_m_gain[9] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_1 = r2y_ctrl_post_resize->scale_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_2 = r2y_ctrl_post_resize->scale_m_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_3 = r2y_ctrl_post_resize->scale_m_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_4 = r2y_ctrl_post_resize->scale_m_border[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_5 = r2y_ctrl_post_resize->scale_m_border[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_6 = r2y_ctrl_post_resize->scale_m_border[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_7 = r2y_ctrl_post_resize->scale_m_border[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_8 = r2y_ctrl_post_resize->scale_m_border[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1SCLMBD.bit.EE1SCLMBD_9 = r2y_ctrl_post_resize->scale_m_border[8];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPOF.bit.EE1TONPOF_0 = r2y_ctrl_post_resize->gradation_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPOF.bit.EE1TONPOF_1 = r2y_ctrl_post_resize->gradation_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPOF.bit.EE1TONPOF_2 = r2y_ctrl_post_resize->gradation_p_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPOF.bit.EE1TONPOF_3 = r2y_ctrl_post_resize->gradation_p_offset[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPOF.bit.EE1TONPOF_4 = r2y_ctrl_post_resize->gradation_p_offset[4];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_0, r2y_ctrl_post_resize->gradation_p_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_1, r2y_ctrl_post_resize->gradation_p_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_2, r2y_ctrl_post_resize->gradation_p_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_3, r2y_ctrl_post_resize->gradation_p_gain[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPGA, union io_r2y_ee1tonpga, EE1TONPGA_4, r2y_ctrl_post_resize->gradation_p_gain[4] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPBD.bit.EE1TONPBD_1 = r2y_ctrl_post_resize->gradation_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPBD.bit.EE1TONPBD_2 = r2y_ctrl_post_resize->gradation_p_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPBD.bit.EE1TONPBD_3 = r2y_ctrl_post_resize->gradation_p_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONPBD.bit.EE1TONPBD_4 = r2y_ctrl_post_resize->gradation_p_border[3];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMOF.bit.EE1TONMOF_0 = r2y_ctrl_post_resize->gradation_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMOF.bit.EE1TONMOF_1 = r2y_ctrl_post_resize->gradation_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMOF.bit.EE1TONMOF_2 = r2y_ctrl_post_resize->gradation_m_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMOF.bit.EE1TONMOF_3 = r2y_ctrl_post_resize->gradation_m_offset[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMOF.bit.EE1TONMOF_4 = r2y_ctrl_post_resize->gradation_m_offset[4];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_0, r2y_ctrl_post_resize->gradation_m_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_1, r2y_ctrl_post_resize->gradation_m_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_2, r2y_ctrl_post_resize->gradation_m_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_3, r2y_ctrl_post_resize->gradation_m_gain[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMGA, union io_r2y_ee1tonmga, EE1TONMGA_4, r2y_ctrl_post_resize->gradation_m_gain[4] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMBD.bit.EE1TONMBD_1 = r2y_ctrl_post_resize->gradation_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMBD.bit.EE1TONMBD_2 = r2y_ctrl_post_resize->gradation_m_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMBD.bit.EE1TONMBD_3 = r2y_ctrl_post_resize->gradation_m_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1TONMBD.bit.EE1TONMBD_4 = r2y_ctrl_post_resize->gradation_m_border[3];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPPOF.bit.EE1CLPPOF_0 = r2y_ctrl_post_resize->level_clip_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPPOF.bit.EE1CLPPOF_1 = r2y_ctrl_post_resize->level_clip_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPPOF.bit.EE1CLPPOF_2 = r2y_ctrl_post_resize->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPPGA, union io_r2y_ee1clppga, EE1CLPPGA_0, r2y_ctrl_post_resize->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPPGA, union io_r2y_ee1clppga, EE1CLPPGA_1, r2y_ctrl_post_resize->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPPGA, union io_r2y_ee1clppga, EE1CLPPGA_2, r2y_ctrl_post_resize->level_clip_p_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPPBD.bit.EE1CLPPBD_1 = r2y_ctrl_post_resize->level_clip_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPPBD.bit.EE1CLPPBD_2 = r2y_ctrl_post_resize->level_clip_p_border[1];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPMOF.bit.EE1CLPMOF_0 = r2y_ctrl_post_resize->level_clip_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPMOF.bit.EE1CLPMOF_1 = r2y_ctrl_post_resize->level_clip_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPMOF.bit.EE1CLPMOF_2 = r2y_ctrl_post_resize->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPMGA, union io_r2y_ee1clpmga, EE1CLPMGA_0, r2y_ctrl_post_resize->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPMGA, union io_r2y_ee1clpmga, EE1CLPMGA_1, r2y_ctrl_post_resize->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPMGA, union io_r2y_ee1clpmga, EE1CLPMGA_2, r2y_ctrl_post_resize->level_clip_m_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPMBD.bit.EE1CLPMBD_1 = r2y_ctrl_post_resize->level_clip_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->YYW.EE1CLPMBD.bit.EE1CLPMBD_2 = r2y_ctrl_post_resize->level_clip_m_border[1];
+
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set RGB Deknee table.
+ */
+INT32 Im_R2Y_Set_RGBDeknee_Table( UCHAR pipe_no, E_R2Y_DKN_RGBTBL tbl_type, const USHORT* const src_tbl )
+{
+#ifndef CO_R2Y_RDMA_ON
+	UINT32 loop_cnt;
+	volatile USHORT* dst_tbl;
+#endif	// CO_R2Y_RDMA_ON
+	INT32  ercd;
+
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_RGBDeknee_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_RGBDeknee_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_RGBDekneeAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_deknee_table( pipe_no, tbl_type, src_tbl );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+
+		switch( tbl_type ) {
+			case E_R2Y_DKN_RGBTBL_G:
+				dst_tbl = gIM_Io_R2y_Tbl_Ptr[pipe_no]->DKNTBLG.hword;
+				break;
+			case E_R2Y_DKN_RGBTBL_B:
+				dst_tbl = gIM_Io_R2y_Tbl_Ptr[pipe_no]->DKNTBLB.hword;
+				break;
+			default:	// E_R2Y_DKN_RGBTBL_R
+				dst_tbl = gIM_Io_R2y_Tbl_Ptr[pipe_no]->DKNTBLR.hword;
+				break;
+		}
+		for( loop_cnt = 0; loop_cnt < D_IM_R2Y_TABLE_MAX_RGB_DEKNEE; loop_cnt++ ) {
+			dst_tbl[loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_RGBDekneeAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+/* Set RGB Deknee access enable
+ */
+INT32 Im_R2Y_Set_RGBDekneeAccessEnable( UCHAR pipe_no, UCHAR access_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_RGBDekneeAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_rgb_deknee_accen_ctrl,
+									 access_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_RGBDekneeAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Offset Control
+ */
+INT32 Im_R2Y_Set_Offset( UCHAR pipe_no, const T_IM_R2Y_OFS* const ofs )
+{
+#ifdef CO_PARAM_CHECK
+	if( ofs == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Set_Offset error. ofs = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_Offset error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_offset_ctrl( pipe_no, ofs );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.OFST, union io_r2y_ofst, OFSTR, ofs->R );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.OFST, union io_r2y_ofst, OFSTG, ofs->G );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.OFST, union io_r2y_ofst, OFSTB, ofs->B );
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* WB Gain control
+ */
+INT32 Im_R2Y_Set_WB_Gain( UCHAR pipe_no, const T_IM_R2Y_RGB_COLOR* const rgb_color )
+{
+#ifdef CO_PARAM_CHECK
+	if(rgb_color == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_WB_Gain error. rgb_color = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_WB_Gain error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.WBGAR.bit.WBGAR = rgb_color->R;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.WBGAR.bit.WBGAG = rgb_color->G;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.WBGAR.bit.WBGAB = rgb_color->B;
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* WB Clip Level control
+ */
+INT32 Im_R2Y_Set_WB_Clip_Level( UCHAR pipe_no, const T_IM_R2Y_RGB_COLOR* const rgb_color )
+{
+#ifdef CO_PARAM_CHECK
+	if(rgb_color == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_WB_Clip_Level error. rgb_color = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_WB_Clip_Level error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_wb_clip_ctrl( pipe_no, rgb_color );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.WBLV.bit.WBLVR = rgb_color->R;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.WBLV.bit.WBLVG = rgb_color->G;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.OFG.WBLV.bit.WBLVB = rgb_color->B;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* CC0 Matrix Control
+ */
+INT32 Im_R2Y_Ctrl_CC0_Matrix( UCHAR pipe_no, const T_IM_R2Y_CTRL_CC0* const r2y_ctrl_cc )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_cc == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_CC0_Matrix error. r2y_ctrl_cc = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_CC0_Matrix error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_cc0_matrix_ctrl( pipe_no, r2y_ctrl_cc );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0CTL.bit.CC0DP = r2y_ctrl_cc->posi_dec;
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_0_0, r2y_ctrl_cc->cc_matrix[0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_0_1, r2y_ctrl_cc->cc_matrix[0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_0_2, r2y_ctrl_cc->cc_matrix[0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_1_0, r2y_ctrl_cc->cc_matrix[1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_1_1, r2y_ctrl_cc->cc_matrix[1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_1_2, r2y_ctrl_cc->cc_matrix[1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_2_0, r2y_ctrl_cc->cc_matrix[2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_2_1, r2y_ctrl_cc->cc_matrix[2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_2_2, r2y_ctrl_cc->cc_matrix[2][2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0YBOF.bit.CC0YBOF_0 = r2y_ctrl_cc->cybof[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0YBOF.bit.CC0YBOF_1 = r2y_ctrl_cc->cybof[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0YBOF.bit.CC0YBOF_2 = r2y_ctrl_cc->cybof[2];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0YBGA, union io_r2y_cc0ybga, CC0YBGA_0, r2y_ctrl_cc->cybga[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0YBGA, union io_r2y_cc0ybga, CC0YBGA_1, r2y_ctrl_cc->cybga[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0YBGA, union io_r2y_cc0ybga, CC0YBGA_2, r2y_ctrl_cc->cybga[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0YBBD.bit.CC0YBBD_1 = r2y_ctrl_cc->cybbd[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0YBBD.bit.CC0YBBD_2 = r2y_ctrl_cc->cybbd[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CCYC.bit.CCYC_0_0 = r2y_ctrl_cc->cyc[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CCYC.bit.CCYC_0_1 = r2y_ctrl_cc->cyc[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CCYC.bit.CCYC_0_2 = r2y_ctrl_cc->cyc[2];
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set CC0 Matrix coefficient
+ */
+INT32 Im_R2Y_Set_CC0_Matrix_Coefficient( UCHAR pipe_no, const SHORT* const cc0k )
+{
+#ifdef CO_PARAM_CHECK
+	if(cc0k == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_CC0_Matrix_Coefficient error. cc0k = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_CC0_Matrix_Coefficient error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_cc0_matrix_coefficient_ctrl( pipe_no, cc0k );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_0_0, cc0k[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_0_1, cc0k[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_0_2, cc0k[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_1_0, cc0k[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_1_1, cc0k[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_1_2, cc0k[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_2_0, cc0k[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_2_1, cc0k[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA0.CC0K, union io_r2y_cc0k, CC0K_2_2, cc0k[8] );
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Multi Axis Control
+ */
+INT32 Im_R2Y_Ctrl_Multi_Axis( UCHAR pipe_no, const T_IM_R2Y_CTRL_MULTI_AXIS* const r2y_ctrl_multi_axis )
+{
+#ifndef CO_R2Y_RDMA_ON
+	union io_r2y_mcid1 mcid1;
+	union io_r2y_mcid2 mcid2;
+	union io_r2y_mcid3 mcid3;
+	union io_r2y_mcid4 mcid4;
+#endif	// CO_R2Y_RDMA_ON
+
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_multi_axis == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Multi_Axis error. r2y_ctrl_multi_axis = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Multi_Axis error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_multi_axis_ctrl( pipe_no, r2y_ctrl_multi_axis );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	// MCYC10~MCYC22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_0_0, r2y_ctrl_multi_axis->cyc_coeff[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_0_1, r2y_ctrl_multi_axis->cyc_coeff[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_0_2, r2y_ctrl_multi_axis->cyc_coeff[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_1_0, r2y_ctrl_multi_axis->cyc_coeff[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_1_1, r2y_ctrl_multi_axis->cyc_coeff[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_1_2, r2y_ctrl_multi_axis->cyc_coeff[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_2_0, r2y_ctrl_multi_axis->cyc_coeff[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_2_1, r2y_ctrl_multi_axis->cyc_coeff[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYC, union io_r2y_mcyc, MCYC_2_2, r2y_ctrl_multi_axis->cyc_coeff[8] );
+
+	// MCB1A~MCB4D
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB1AB.bit.MCB1A = r2y_ctrl_multi_axis->boundary[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB1AB.bit.MCB1B = r2y_ctrl_multi_axis->boundary[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB1CD.bit.MCB1C = r2y_ctrl_multi_axis->boundary[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB1CD.bit.MCB1D = r2y_ctrl_multi_axis->boundary[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB2AB.bit.MCB2A = r2y_ctrl_multi_axis->boundary[4];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB2AB.bit.MCB2B = r2y_ctrl_multi_axis->boundary[5];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB2CD.bit.MCB2C = r2y_ctrl_multi_axis->boundary[6];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB2CD.bit.MCB2D = r2y_ctrl_multi_axis->boundary[7];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB3AB.bit.MCB3A = r2y_ctrl_multi_axis->boundary[8];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB3AB.bit.MCB3B = r2y_ctrl_multi_axis->boundary[9];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB3CD.bit.MCB3C = r2y_ctrl_multi_axis->boundary[10];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB3CD.bit.MCB3D = r2y_ctrl_multi_axis->boundary[11];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB4AB.bit.MCB4A = r2y_ctrl_multi_axis->boundary[12];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB4AB.bit.MCB4B = r2y_ctrl_multi_axis->boundary[13];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB4CD.bit.MCB4C = r2y_ctrl_multi_axis->boundary[14];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCB4CD.bit.MCB4D = r2y_ctrl_multi_axis->boundary[15];
+
+	// MCID1~MCID4
+	mcid1.word = 0UL;
+	mcid2.word = 0UL;
+	mcid3.word = 0UL;
+	mcid4.word = 0UL;
+	mcid1.bit.MCID1A = r2y_ctrl_multi_axis->area_index[0][0];
+	mcid1.bit.MCID1B = r2y_ctrl_multi_axis->area_index[0][1];
+	mcid1.bit.MCID1C = r2y_ctrl_multi_axis->area_index[0][2];
+	mcid1.bit.MCID1D = r2y_ctrl_multi_axis->area_index[0][3];
+	mcid1.bit.MCID1E = r2y_ctrl_multi_axis->area_index[0][4];
+	mcid2.bit.MCID2A = r2y_ctrl_multi_axis->area_index[1][0];
+	mcid2.bit.MCID2B = r2y_ctrl_multi_axis->area_index[1][1];
+	mcid2.bit.MCID2C = r2y_ctrl_multi_axis->area_index[1][2];
+	mcid2.bit.MCID2D = r2y_ctrl_multi_axis->area_index[1][3];
+	mcid2.bit.MCID2E = r2y_ctrl_multi_axis->area_index[1][4];
+	mcid3.bit.MCID3A = r2y_ctrl_multi_axis->area_index[2][0];
+	mcid3.bit.MCID3B = r2y_ctrl_multi_axis->area_index[2][1];
+	mcid3.bit.MCID3C = r2y_ctrl_multi_axis->area_index[2][2];
+	mcid3.bit.MCID3D = r2y_ctrl_multi_axis->area_index[2][3];
+	mcid3.bit.MCID3E = r2y_ctrl_multi_axis->area_index[2][4];
+	mcid4.bit.MCID4A = r2y_ctrl_multi_axis->area_index[3][0];
+	mcid4.bit.MCID4B = r2y_ctrl_multi_axis->area_index[3][1];
+	mcid4.bit.MCID4C = r2y_ctrl_multi_axis->area_index[3][2];
+	mcid4.bit.MCID4D = r2y_ctrl_multi_axis->area_index[3][3];
+	mcid4.bit.MCID4E = r2y_ctrl_multi_axis->area_index[3][4];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCID1.word = mcid1.word;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCID2.word = mcid2.word;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCID3.word = mcid3.word;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCID4.word = mcid4.word;
+
+	// MCKA_0_00~MCKA_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_a_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_a_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_a_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_a_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_a_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_a_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_a_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_a_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKA.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_a_k[4][2][2] );
+
+	// MCKB_0_00~MCKB_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_b_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_b_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_b_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_b_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_b_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_b_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_b_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_b_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKB.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_b_k[4][2][2] );
+
+	// MCKC_0_00~MCKC_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_c_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_c_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_c_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_c_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_c_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_c_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_c_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_c_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKC.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_c_k[4][2][2] );
+
+	// MCKD_0_00~MCKD_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_d_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_d_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_d_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_d_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_d_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_d_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_d_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_d_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKD.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_d_k[4][2][2] );
+
+	// MCKE_0_00~MCKE_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_e_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_e_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_e_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_e_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_e_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_e_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_e_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_e_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKE.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_e_k[4][2][2] );
+
+	// MCKF_0_00~MCKF_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_f_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_f_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_f_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_f_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_f_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_f_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_f_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_f_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKF.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_f_k[4][2][2] );
+
+	// MCKG_0_00~MCKG_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_g_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_g_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_g_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_g_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_g_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_g_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_g_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_g_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKG.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_g_k[4][2][2] );
+
+	// MCKH_0_00~MCKH_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_h_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_h_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_h_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_h_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_h_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_h_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_h_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_h_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKH.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_h_k[4][2][2] );
+
+	// MCKI_0_00~MCKI_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_i_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_i_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_i_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_i_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_i_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_i_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_i_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_i_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKI.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_i_k[4][2][2] );
+
+	// MCKJ_0_00~MCKJ_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_j_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_j_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_j_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_j_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_j_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_j_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_j_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_j_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKJ.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_j_k[4][2][2] );
+
+	// MCKK_0_00~MCKK_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_k_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_k_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_k_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_k_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_k_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_k_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_k_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_k_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKK.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_k_k[4][2][2] );
+
+	// MCKL_0_00~MCKL_4_22
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[0][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[0][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_0, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[0][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[1][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[1][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_1, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[1][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[2][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[2][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_2, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[2][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[3][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[3][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_3, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[3][2][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_0_0, r2y_ctrl_multi_axis->area_l_k[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_0_1, r2y_ctrl_multi_axis->area_l_k[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_0_2, r2y_ctrl_multi_axis->area_l_k[4][0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_1_0, r2y_ctrl_multi_axis->area_l_k[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_1_1, r2y_ctrl_multi_axis->area_l_k[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_1_2, r2y_ctrl_multi_axis->area_l_k[4][1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_2_0, r2y_ctrl_multi_axis->area_l_k[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_2_1, r2y_ctrl_multi_axis->area_l_k[4][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCKL.MCK_4, union io_r2y_mck_x, MCK_2_2, r2y_ctrl_multi_axis->area_l_k[4][2][2] );
+
+	// MCLA_0_00~MCLA_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_a_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_a_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_a_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_a_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_a_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLA.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_a_l[4][2][1] );
+
+	// MCLB_0_00~MCLB_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_b_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_b_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_b_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_b_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_b_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLB.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_b_l[4][2][1] );
+
+	// MCLC_0_00~MCLC_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_c_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_c_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_c_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_c_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_c_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLC.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_c_l[4][2][1] );
+
+	// MCLD_0_00~MCLD_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_d_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_d_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_d_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_d_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_d_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLD.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_d_l[4][2][1] );
+
+	// MCLE_0_00~MCLE_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_e_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_e_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_e_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_e_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_e_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLE.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_e_l[4][2][1] );
+
+	// MCLF_0_00~MCLF_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_f_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_f_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_f_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_f_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_f_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLF.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_f_l[4][2][1] );
+
+	// MCLG_0_00~MCLG_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_g_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_g_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_g_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_g_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_g_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLG.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_g_l[4][2][1] );
+
+	// MCLH_0_00~MCLH_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_h_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_h_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_h_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_h_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_h_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLH.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_h_l[4][2][1] );
+
+	// MCLI_0_00~MCLI_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_i_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_i_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_i_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_i_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_i_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLI.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_i_l[4][2][1] );
+
+	// MCLJ_0_00~MCLJ_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_j_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_j_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_j_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_j_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_j_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLJ.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_j_l[4][2][1] );
+
+	// MCLK_0_00~MCLK_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_k_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_k_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_k_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_k_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_k_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLK.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_k_l[4][2][1] );
+
+	// MCLL_0_00~MCLL_4_21
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_0, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[0][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_0, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[0][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_0, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[0][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_0, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[0][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_0, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[0][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_0, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[0][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_1, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[1][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_1, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[1][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_1, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[1][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_1, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[1][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_1, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[1][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_1, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[1][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_2, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[2][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_2, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[2][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_2, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[2][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_2, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[2][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_2, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[2][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_2, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[2][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_3, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[3][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_3, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[3][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_3, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[3][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_3, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[3][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_3, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[3][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_3, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[3][2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_4, union io_r2y_mcl_x, MCL_0_0, r2y_ctrl_multi_axis->area_l_l[4][0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_4, union io_r2y_mcl_x, MCL_0_1, r2y_ctrl_multi_axis->area_l_l[4][0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_4, union io_r2y_mcl_x, MCL_1_0, r2y_ctrl_multi_axis->area_l_l[4][1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_4, union io_r2y_mcl_x, MCL_1_1, r2y_ctrl_multi_axis->area_l_l[4][1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_4, union io_r2y_mcl_x, MCL_2_0, r2y_ctrl_multi_axis->area_l_l[4][2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCLL.MCL_4, union io_r2y_mcl_x, MCL_2_1, r2y_ctrl_multi_axis->area_l_l[4][2][1] );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBALP.bit.MCYCBALP = r2y_ctrl_multi_axis->cyc_alpha_blend;
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBGA, union io_r2y_mcycbga, MCYCBGA_1, r2y_ctrl_multi_axis->cyc_blend_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBGA, union io_r2y_mcycbga, MCYCBGA_2, r2y_ctrl_multi_axis->cyc_blend_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBGA, union io_r2y_mcycbga, MCYCBGA_3, r2y_ctrl_multi_axis->cyc_blend_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBGA, union io_r2y_mcycbga, MCYCBGA_4, r2y_ctrl_multi_axis->cyc_blend_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBBD.bit.MCYCBBD_1 = r2y_ctrl_multi_axis->cyc_blend_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBBD.bit.MCYCBBD_2 = r2y_ctrl_multi_axis->cyc_blend_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBBD.bit.MCYCBBD_3 = r2y_ctrl_multi_axis->cyc_blend_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCYCBBD.bit.MCYCBBD_4 = r2y_ctrl_multi_axis->cyc_blend_border[3];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABALP.bit.MCBABALP = r2y_ctrl_multi_axis->cba_alpha_blend;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABOF.bit.MCBABOF_0 = r2y_ctrl_multi_axis->cba_blend_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABOF.bit.MCBABOF_1 = r2y_ctrl_multi_axis->cba_blend_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABOF.bit.MCBABOF_2 = r2y_ctrl_multi_axis->cba_blend_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABOF.bit.MCBABOF_3 = r2y_ctrl_multi_axis->cba_blend_offset[3];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABGA, union io_r2y_mcbabga, MCBABGA_0, r2y_ctrl_multi_axis->cba_blend_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABGA, union io_r2y_mcbabga, MCBABGA_1, r2y_ctrl_multi_axis->cba_blend_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABGA, union io_r2y_mcbabga, MCBABGA_2, r2y_ctrl_multi_axis->cba_blend_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABGA, union io_r2y_mcbabga, MCBABGA_3, r2y_ctrl_multi_axis->cba_blend_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABBD.bit.MCBABBD_1 = r2y_ctrl_multi_axis->cba_blend_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABBD.bit.MCBABBD_2 = r2y_ctrl_multi_axis->cba_blend_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MCC.MCBABBD.bit.MCBABBD_3 = r2y_ctrl_multi_axis->cba_blend_border[2];
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* RGB Offset before TC control
+ */
+INT32 Im_R2Y_Ctrl_BeforeTone_Offset( UCHAR pipe_no, const T_IM_R2Y_TCOF* const r2y_ctrl_btc_offset )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_btc_offset == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_BeforeTone_Offset error. r2y_ctrl_btc_offset = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_BeforeTone_Offset error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_btc_ctrl_offset( pipe_no, r2y_ctrl_btc_offset );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCOF, union io_r2y_tcof, TCOFR, r2y_ctrl_btc_offset->R );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCOF, union io_r2y_tcof, TCOFG, r2y_ctrl_btc_offset->G );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCOF, union io_r2y_tcof, TCOFB, r2y_ctrl_btc_offset->B );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCOF, union io_r2y_tcof, TCOFYB, r2y_ctrl_btc_offset->Yb );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Luminance Evaluation before TC control
+ */
+INT32 Im_R2Y_Ctrl_BeforeTone_Tct( UCHAR pipe_no, const T_IM_R2Y_TCT* const r2y_ctrl_btc_tct )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_btc_tct == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_BeforeTone_Tct error. r2y_ctrl_btc_tct = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_BeforeTone_Tct error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_btc_ctrl_tct( pipe_no, r2y_ctrl_btc_tct );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCTCTL.bit.TCTEN   = r2y_ctrl_btc_tct->tct_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCTSTA.bit.TCTHSTA = r2y_ctrl_btc_tct->start_x;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCTSTA.bit.TCTVSTA = r2y_ctrl_btc_tct->start_y;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCTB.bit.TCTBHSIZ  = r2y_ctrl_btc_tct->block_hsiz;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCTB.bit.TCTBVSIZ  = r2y_ctrl_btc_tct->block_vsiz;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCTB.bit.TCTBHNUM  = r2y_ctrl_btc_tct->block_hnum;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCTB.bit.TCTBVNUM  = r2y_ctrl_btc_tct->block_vnum;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Histogram before TC control
+ */
+INT32 Im_R2Y_Ctrl_BeforeTone_Tchs( UCHAR pipe_no, const T_IM_R2Y_TCHS* const r2y_ctrl_btc_tchs )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_btc_tchs == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_BeforeTone_Tchs error. r2y_ctrl_btc_tchs = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_BeforeTone_Tchs error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_btc_ctrl_tchs( pipe_no, r2y_ctrl_btc_tchs );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSCTL.bit.TCHSEN    = r2y_ctrl_btc_tchs->hist_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSCTL.bit.TCHSHCYC  = r2y_ctrl_btc_tchs->sampling_hcyc;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSCTL.bit.TCHSVCYC  = r2y_ctrl_btc_tchs->sampling_vcyc;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSCTL.bit.TCHSRGBMD = r2y_ctrl_btc_tchs->histogram_mode;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSCTL.bit.TCHSMN    = r2y_ctrl_btc_tchs->hist_minus_mode;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSSTA.bit.TCHSHSTA  = r2y_ctrl_btc_tchs->tchs_window.img_left;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSSTA.bit.TCHSVSTA  = r2y_ctrl_btc_tchs->tchs_window.img_top;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSSIZ.bit.TCHSHSIZ  = r2y_ctrl_btc_tchs->tchs_window.img_width;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHSSIZ.bit.TCHSVSIZ  = r2y_ctrl_btc_tchs->tchs_window.img_lines;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set Luminance evaluation table access enable
+ */
+INT32 Im_R2Y_Set_LuminanceEvaluationTblAccessEnable( UCHAR pipe_no, UCHAR tct_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_LuminanceEvaluationTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_tct_tbl_accen_ctrl,
+									 tct_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_LuminanceEvaluationTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Set BTC histogram table access enable
+ */
+INT32 Im_R2Y_Set_BTC_HistogramTblAccessEnable( UCHAR pipe_no, UCHAR hist_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_BTC_HistogramTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_btc_histogram_tbl_accen_ctrl,
+									 hist_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_BTCHistogramTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Tone Control
+ */
+INT32 Im_R2Y_Ctrl_Tone( UCHAR pipe_no, const T_IM_R2Y_CTRL_TONE* const r2y_ctrl_tone )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_tone == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Tone error. r2y_ctrl_tone = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Tone error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_tone_ctrl( pipe_no, r2y_ctrl_tone );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCEN     = r2y_ctrl_tone->tone_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCYBEN   = r2y_ctrl_tone->tone_yb_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCBLEN   = r2y_ctrl_tone->table_blend_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCRES    = r2y_ctrl_tone->table_resol;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCTBL    = r2y_ctrl_tone->table_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCYOUT   = r2y_ctrl_tone->ytc_out;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCINTBIT = r2y_ctrl_tone->int_bit;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCTL.bit.TCBLND   = r2y_ctrl_tone->table_blend_ratio;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCYC.bit.TCYC_0_0 = r2y_ctrl_tone->yc_matrix[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCYC.bit.TCYC_0_1 = r2y_ctrl_tone->yc_matrix[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCYC.bit.TCYC_0_2 = r2y_ctrl_tone->yc_matrix[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCEP.bit.TCEP_0 = r2y_ctrl_tone->table_endp[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCEP.bit.TCEP_1 = r2y_ctrl_tone->table_endp[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCEP.bit.TCEP_2 = r2y_ctrl_tone->table_endp[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCEP.bit.TCEP_3 = r2y_ctrl_tone->table_endp[3];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCLPR.bit.TCCLPRP = r2y_ctrl_tone->clip_p_r;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCLPR.bit.TCCLPRM = r2y_ctrl_tone->clip_m_r;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCLPG.bit.TCCLPGP = r2y_ctrl_tone->clip_p_g;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCLPG.bit.TCCLPGM = r2y_ctrl_tone->clip_m_g;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCLPB.bit.TCCLPBP = r2y_ctrl_tone->clip_p_b;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.TC.TCCLPB.bit.TCCLPBM = r2y_ctrl_tone->clip_m_b;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set Tone control table access enable
+ */
+INT32 Im_R2Y_Set_ToneControlTblAccessEnable( UCHAR pipe_no, UCHAR tc_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_ToneControlTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_tone_control_tbl_accen_ctrl,
+									 tc_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_ToneControlTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Is Tone Control active
+ */
+INT32 Im_R2Y_Is_Act_Tone( UCHAR pipe_no, UCHAR* const active_status )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Is_Act_Tone error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	*active_status = (gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YFLAG.bit.TCACT != 0)?(D_IM_R2Y_ENABLE_ON):(D_IM_R2Y_ENABLE_OFF);
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Gamma Correction control
+ */
+INT32 Im_R2Y_Ctrl_Gamma( UCHAR pipe_no, const T_IM_R2Y_CTRL_GAMMA* const r2y_ctrl_gamma )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_gamma == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Gamma error. r2y_ctrl_gamma = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Gamma error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_gamma_ctrl( pipe_no, r2y_ctrl_gamma );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.GAM.GMCTL.bit.GMEN  = r2y_ctrl_gamma->gamma_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.GAM.GMCTL.bit.GMMD  = r2y_ctrl_gamma->gamma_mode;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.GAM.GMCTL.bit.GAMSW = r2y_ctrl_gamma->gamma_yb_tbl_simul;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set Gamma table access enable
+ */
+INT32 Im_R2Y_Set_GammaTblAccessEnable( UCHAR pipe_no, UCHAR acc_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_GammaTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_gamma_tbl_accen_ctrl,
+									 acc_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_GammaTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Set Gamma Yb table access enable
+ */
+INT32 Im_R2Y_Set_GammaYbTblAccessEnable( UCHAR pipe_no, UCHAR acc_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_GammaYbTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_gamma_yb_tbl_accen_ctrl,
+									 acc_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_GammaYbTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Is Gamma Control active
+ */
+INT32 Im_R2Y_Is_Act_Gamma( UCHAR pipe_no, UCHAR* const active_status )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Is_Act_Gamma error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	*active_status = (gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YFLAG.bit.GAMACT != 0)?(D_IM_R2Y_ENABLE_ON):(D_IM_R2Y_ENABLE_OFF);
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* CC1 Matrix Control
+ */
+INT32 Im_R2Y_Ctrl_CC1_Matrix( UCHAR pipe_no, const T_IM_R2Y_CTRL_CC1* const r2y_ctrl_cc )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_cc == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_CC1_Matrix error. r2y_ctrl_cc = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_CC1_Matrix error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_cc1_matrix_ctrl( pipe_no, r2y_ctrl_cc );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1CTL.bit.CC1DP = r2y_ctrl_cc->posi_dec;
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_0_0, r2y_ctrl_cc->cc_matrix[0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_0_1, r2y_ctrl_cc->cc_matrix[0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_0_2, r2y_ctrl_cc->cc_matrix[0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_1_0, r2y_ctrl_cc->cc_matrix[1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_1_1, r2y_ctrl_cc->cc_matrix[1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_1_2, r2y_ctrl_cc->cc_matrix[1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_2_0, r2y_ctrl_cc->cc_matrix[2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_2_1, r2y_ctrl_cc->cc_matrix[2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_2_2, r2y_ctrl_cc->cc_matrix[2][2] );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1CLPR.bit.CC1CLPRP = r2y_ctrl_cc->clip_p_r;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1CLPR.bit.CC1CLPRM = r2y_ctrl_cc->clip_m_r;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1CLPG.bit.CC1CLPGP = r2y_ctrl_cc->clip_p_g;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1CLPG.bit.CC1CLPGM = r2y_ctrl_cc->clip_m_g;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1CLPB.bit.CC1CLPBP = r2y_ctrl_cc->clip_p_b;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1CLPB.bit.CC1CLPBM = r2y_ctrl_cc->clip_m_b;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set CC1 Matrix coefficient
+ */
+INT32 Im_R2Y_Set_CC1_Matrix_Coefficient( UCHAR pipe_no, const SHORT* const cc1k )
+{
+#ifdef CO_PARAM_CHECK
+	if(cc1k == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_CC1_Matrix_Coefficient error. cc1k = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_CC1_Matrix_Coefficient error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_cc1_matrix_coefficient_ctrl( pipe_no, cc1k );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_0_0, cc1k[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_0_1, cc1k[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_0_2, cc1k[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_1_0, cc1k[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_1_1, cc1k[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_1_2, cc1k[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_2_0, cc1k[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_2_1, cc1k[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CCA1.CC1K, union io_r2y_cc1k, CC1K_2_2, cc1k[8] );
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* YC Convert control
+ */
+INT32 Im_R2Y_Ctrl_Yc_Convert( UCHAR pipe_no, const T_IM_R2Y_CTRL_YCC* const r2y_ctrl_ycc )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_ycc == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Yc_Convert error. r2y_ctrl_ycc = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Yc_Convert error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_yc_convert_ctrl( pipe_no, r2y_ctrl_ycc );
+#else	// CO_R2Y_RDMA_ON
+	// It sets it to the register at once.
+	Im_R2Y_On_Pclk( pipe_no );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_0_0, r2y_ctrl_ycc->yc_coeff[0][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_0_1, r2y_ctrl_ycc->yc_coeff[0][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_0_2, r2y_ctrl_ycc->yc_coeff[0][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_1_0, r2y_ctrl_ycc->yc_coeff[1][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_1_1, r2y_ctrl_ycc->yc_coeff[1][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_1_2, r2y_ctrl_ycc->yc_coeff[1][2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_2_0, r2y_ctrl_ycc->yc_coeff[2][0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_2_1, r2y_ctrl_ycc->yc_coeff[2][1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YC, union io_r2y_yc, YC_2_2, r2y_ctrl_ycc->yc_coeff[2][2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YBLEND.bit.YYBLND = r2y_ctrl_ycc->y_blend_ratio;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YC.YBLEND.bit.YBBLND = r2y_ctrl_ycc->yb_blend_ratio;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Y(Luminance) Noise Reduction control
+ */
+INT32 Im_R2Y_Ctrl_Ynr( UCHAR pipe_no, const T_IM_R2Y_CTRL_YNR* const r2y_ctrl_ynr )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_ynr == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Ynr error. r2y_ctrl_ynr = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Ynr error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_ynr_ctrl( pipe_no, r2y_ctrl_ynr );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRCTL.bit.NRMD    = r2y_ctrl_ynr->nr_mode;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRCTL.bit.NRBLEND = r2y_ctrl_ynr->blend_ratio;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NROF.bit.NROF_0   = r2y_ctrl_ynr->offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NROF.bit.NROF_1   = r2y_ctrl_ynr->offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NROF.bit.NROF_2   = r2y_ctrl_ynr->offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NROF.bit.NROF_3   = r2y_ctrl_ynr->offset[3];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRGA, union io_r2y_nrga, NRGA_0, r2y_ctrl_ynr->gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRGA, union io_r2y_nrga, NRGA_1, r2y_ctrl_ynr->gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRGA, union io_r2y_nrga, NRGA_2, r2y_ctrl_ynr->gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRGA, union io_r2y_nrga, NRGA_3, r2y_ctrl_ynr->gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRBD.bit.NRBD_1 = r2y_ctrl_ynr->border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRBD.bit.NRBD_2 = r2y_ctrl_ynr->border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YNR.NRBD.bit.NRBD_3 = r2y_ctrl_ynr->border[2];
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* High/Medium frequency edge enhancement common control
+ */
+INT32 Im_R2Y_Ctrl_Edge_NoiseReduction( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_CMN* const r2y_ctrl_edge_cmn )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_edge_cmn == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Edge_NoiseReduction error. r2y_ctrl_edge_cmn = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Edge_NoiseReduction error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_eenr_ctrl( pipe_no, r2y_ctrl_edge_cmn );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGSM.EGSMCTL.bit.EGSMT    = r2y_ctrl_edge_cmn->reduction_mode;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGSM.EGSMTT.bit.EGSMTTH   = r2y_ctrl_edge_cmn->threshold;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGSM.EGSMTT.bit.EGSMTTXGA = r2y_ctrl_edge_cmn->texture_gain;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* High frequency Edge emphasis control
+ */
+INT32 Im_R2Y_Ctrl_HighEdge( UCHAR pipe_no, const T_IM_R2Y_CTRL_HEDGE* const r2y_ctrl_hedge )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_hedge == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_HighEdge error. r2y_ctrl_hedge = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_HighEdge error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_high_edge_ctrl( pipe_no, r2y_ctrl_hedge );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EGHWEN     = r2y_ctrl_hedge->edge_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EGHWMP     = r2y_ctrl_hedge->scale_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EGHWTC     = r2y_ctrl_hedge->table_clip_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EGHWSCLRES = r2y_ctrl_hedge->scale_table_resol;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EGHWSCLTBL = r2y_ctrl_hedge->scale_table_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EGHWTCRES  = r2y_ctrl_hedge->gradation_table_resol;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EGHWTCTBL  = r2y_ctrl_hedge->gradation_table_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCTL.bit.EGHWNRLV   = r2y_ctrl_hedge->nr_level;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWHPFK.bit.EGHWHPFK0 = r2y_ctrl_hedge->hpf_k[0];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK1, r2y_ctrl_hedge->hpf_k[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK2, r2y_ctrl_hedge->hpf_k[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK3, r2y_ctrl_hedge->hpf_k[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK4, r2y_ctrl_hedge->hpf_k[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWHPFK, union io_r2y_eghwhpfk, EGHWHPFK5, r2y_ctrl_hedge->hpf_k[5] );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPOF.bit.EGHWCORPOF_0 = r2y_ctrl_hedge->corp_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPOF.bit.EGHWCORPOF_1 = r2y_ctrl_hedge->corp_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPOF.bit.EGHWCORPOF_2 = r2y_ctrl_hedge->corp_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPOF.bit.EGHWCORPOF_3 = r2y_ctrl_hedge->corp_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPGA, union io_r2y_eghwcorpga, EGHWCORPGA_0, r2y_ctrl_hedge->corp_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPGA, union io_r2y_eghwcorpga, EGHWCORPGA_1, r2y_ctrl_hedge->corp_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPGA, union io_r2y_eghwcorpga, EGHWCORPGA_2, r2y_ctrl_hedge->corp_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPGA, union io_r2y_eghwcorpga, EGHWCORPGA_3, r2y_ctrl_hedge->corp_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPBD.bit.EGHWCORPBD_1 = r2y_ctrl_hedge->corp_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPBD.bit.EGHWCORPBD_2 = r2y_ctrl_hedge->corp_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORPBD.bit.EGHWCORPBD_3 = r2y_ctrl_hedge->corp_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMOF.bit.EGHWCORMOF_0 = r2y_ctrl_hedge->corm_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMOF.bit.EGHWCORMOF_1 = r2y_ctrl_hedge->corm_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMOF.bit.EGHWCORMOF_2 = r2y_ctrl_hedge->corm_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMOF.bit.EGHWCORMOF_3 = r2y_ctrl_hedge->corm_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMGA, union io_r2y_eghwcormga, EGHWCORMGA_0, r2y_ctrl_hedge->corm_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMGA, union io_r2y_eghwcormga, EGHWCORMGA_1, r2y_ctrl_hedge->corm_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMGA, union io_r2y_eghwcormga, EGHWCORMGA_2, r2y_ctrl_hedge->corm_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMGA, union io_r2y_eghwcormga, EGHWCORMGA_3, r2y_ctrl_hedge->corm_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMBD.bit.EGHWCORMBD_1 = r2y_ctrl_hedge->corm_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMBD.bit.EGHWCORMBD_2 = r2y_ctrl_hedge->corm_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCORMBD.bit.EGHWCORMBD_3 = r2y_ctrl_hedge->corm_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWSCLSUP.bit.EGHWSCLSUP = r2y_ctrl_hedge->sup_scl;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPPOF.bit.EGHWCLPPOF_0 = r2y_ctrl_hedge->level_clip_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPPOF.bit.EGHWCLPPOF_1 = r2y_ctrl_hedge->level_clip_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPPOF.bit.EGHWCLPPOF_2 = r2y_ctrl_hedge->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPPGA, union io_r2y_eghwclppga, EGHWCLPPGA_0, r2y_ctrl_hedge->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPPGA, union io_r2y_eghwclppga, EGHWCLPPGA_1, r2y_ctrl_hedge->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPPGA, union io_r2y_eghwclppga, EGHWCLPPGA_2, r2y_ctrl_hedge->level_clip_p_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPPBD.bit.EGHWCLPPBD_1 = r2y_ctrl_hedge->level_clip_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPPBD.bit.EGHWCLPPBD_2 = r2y_ctrl_hedge->level_clip_p_border[1];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPMOF.bit.EGHWCLPMOF_0 = r2y_ctrl_hedge->level_clip_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPMOF.bit.EGHWCLPMOF_1 = r2y_ctrl_hedge->level_clip_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPMOF.bit.EGHWCLPMOF_2 = r2y_ctrl_hedge->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPMGA, union io_r2y_eghwclpmga, EGHWCLPMGA_0, r2y_ctrl_hedge->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPMGA, union io_r2y_eghwclpmga, EGHWCLPMGA_1, r2y_ctrl_hedge->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPMGA, union io_r2y_eghwclpmga, EGHWCLPMGA_2, r2y_ctrl_hedge->level_clip_m_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPMBD.bit.EGHWCLPMBD_1 = r2y_ctrl_hedge->level_clip_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGHW.EGHWCLPMBD.bit.EGHWCLPMBD_2 = r2y_ctrl_hedge->level_clip_m_border[1];
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set High Edge scale table access enable
+ */
+INT32 Im_R2Y_Set_HighEdgeSclTblAccessEnable( UCHAR pipe_no, UCHAR scl_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_HighEdgeSclTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_high_edge_scl_tbl_accen_ctrl,
+									 scl_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_HighEdgeSclTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Set High Edge step table access enable
+ */
+INT32 Im_R2Y_Set_HighEdgeStepTblAccessEnable( UCHAR pipe_no, UCHAR step_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_HighEdgeStepTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_high_edge_step_tbl_accen_ctrl,
+									 step_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_HighEdgeStepTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Medium frequency Edge emphasis control
+ */
+INT32 Im_R2Y_Ctrl_MediumEdge( UCHAR pipe_no, const T_IM_R2Y_CTRL_MEDGE* const r2y_ctrl_medge )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_medge == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_MediumEdge error. r2y_ctrl_medge = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_MediumEdge error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_medium_edge_ctrl( pipe_no, r2y_ctrl_medge );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EGMWEN     = r2y_ctrl_medge->edge_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EGMWMP     = r2y_ctrl_medge->scale_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EGMWTC     = r2y_ctrl_medge->table_clip_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EGMWSCLRES = r2y_ctrl_medge->scale_table_resol;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EGMWSCLTBL = r2y_ctrl_medge->scale_table_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EGMWTCRES  = r2y_ctrl_medge->gradation_table_resol;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EGMWTCTBL  = r2y_ctrl_medge->gradation_table_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCTL.bit.EGMWNRLV   = r2y_ctrl_medge->nr_level;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWHPFK.bit.EGMWHPFK0 = r2y_ctrl_medge->hpf_k[0];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK1, r2y_ctrl_medge->hpf_k[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK2, r2y_ctrl_medge->hpf_k[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK3, r2y_ctrl_medge->hpf_k[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK4, r2y_ctrl_medge->hpf_k[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWHPFK, union io_r2y_egmwhpfk, EGMWHPFK5, r2y_ctrl_medge->hpf_k[5] );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPOF.bit.EGMWCORPOF_0 = r2y_ctrl_medge->corp_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPOF.bit.EGMWCORPOF_1 = r2y_ctrl_medge->corp_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPOF.bit.EGMWCORPOF_2 = r2y_ctrl_medge->corp_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPOF.bit.EGMWCORPOF_3 = r2y_ctrl_medge->corp_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPGA, union io_r2y_egmwcorpga, EGMWCORPGA_0, r2y_ctrl_medge->corp_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPGA, union io_r2y_egmwcorpga, EGMWCORPGA_1, r2y_ctrl_medge->corp_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPGA, union io_r2y_egmwcorpga, EGMWCORPGA_2, r2y_ctrl_medge->corp_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPGA, union io_r2y_egmwcorpga, EGMWCORPGA_3, r2y_ctrl_medge->corp_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPBD.bit.EGMWCORPBD_1 = r2y_ctrl_medge->corp_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPBD.bit.EGMWCORPBD_2 = r2y_ctrl_medge->corp_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORPBD.bit.EGMWCORPBD_3 = r2y_ctrl_medge->corp_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMOF.bit.EGMWCORMOF_0 = r2y_ctrl_medge->corm_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMOF.bit.EGMWCORMOF_1 = r2y_ctrl_medge->corm_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMOF.bit.EGMWCORMOF_2 = r2y_ctrl_medge->corm_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMOF.bit.EGMWCORMOF_3 = r2y_ctrl_medge->corm_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMGA, union io_r2y_egmwcormga, EGMWCORMGA_0, r2y_ctrl_medge->corm_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMGA, union io_r2y_egmwcormga, EGMWCORMGA_1, r2y_ctrl_medge->corm_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMGA, union io_r2y_egmwcormga, EGMWCORMGA_2, r2y_ctrl_medge->corm_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMGA, union io_r2y_egmwcormga, EGMWCORMGA_3, r2y_ctrl_medge->corm_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMBD.bit.EGMWCORMBD_1 = r2y_ctrl_medge->corm_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMBD.bit.EGMWCORMBD_2 = r2y_ctrl_medge->corm_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCORMBD.bit.EGMWCORMBD_3 = r2y_ctrl_medge->corm_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWSCLSUP.bit.EGMWSCLSUP = r2y_ctrl_medge->sup_scl;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPPOF.bit.EGMWCLPPOF_0 = r2y_ctrl_medge->level_clip_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPPOF.bit.EGMWCLPPOF_1 = r2y_ctrl_medge->level_clip_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPPOF.bit.EGMWCLPPOF_2 = r2y_ctrl_medge->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPPGA, union io_r2y_egmwclppga, EGMWCLPPGA_0, r2y_ctrl_medge->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPPGA, union io_r2y_egmwclppga, EGMWCLPPGA_1, r2y_ctrl_medge->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPPGA, union io_r2y_egmwclppga, EGMWCLPPGA_2, r2y_ctrl_medge->level_clip_p_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPPBD.bit.EGMWCLPPBD_1 = r2y_ctrl_medge->level_clip_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPPBD.bit.EGMWCLPPBD_2 = r2y_ctrl_medge->level_clip_p_border[1];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPMOF.bit.EGMWCLPMOF_0 = r2y_ctrl_medge->level_clip_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPMOF.bit.EGMWCLPMOF_1 = r2y_ctrl_medge->level_clip_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPMOF.bit.EGMWCLPMOF_2 = r2y_ctrl_medge->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPMGA, union io_r2y_egmwclpmga, EGMWCLPMGA_0, r2y_ctrl_medge->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPMGA, union io_r2y_egmwclpmga, EGMWCLPMGA_1, r2y_ctrl_medge->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPMGA, union io_r2y_egmwclpmga, EGMWCLPMGA_2, r2y_ctrl_medge->level_clip_m_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPMBD.bit.EGMWCLPMBD_1 = r2y_ctrl_medge->level_clip_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGMW.EGMWCLPMBD.bit.EGMWCLPMBD_2 = r2y_ctrl_medge->level_clip_m_border[1];
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set Medium Edge scale table access enable
+ */
+INT32 Im_R2Y_Set_MediumEdgeSclTblAccessEnable( UCHAR pipe_no, UCHAR scl_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_MediumEdgeSclTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_medium_edge_scl_tbl_accen_ctrl,
+									 scl_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_MediumEdgeSclTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Set Medium Edge step table access enable
+ */
+INT32 Im_R2Y_Set_MediumEdgeStepTblAccessEnable( UCHAR pipe_no, UCHAR step_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_MediumEdgeStepTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_medium_edge_step_tbl_accen_ctrl,
+									 step_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_MediumEdgeStepTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Low frequency Edge emphasis control
+ */
+INT32 Im_R2Y_Ctrl_LowEdge( UCHAR pipe_no, const T_IM_R2Y_CTRL_LEDGE* const r2y_ctrl_ledge )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_ledge == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_LowEdge error. r2y_ctrl_ledge = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_LowEdge error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_low_edge_ctrl( pipe_no, r2y_ctrl_ledge );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.EGLWEN     = r2y_ctrl_ledge->edge_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.EGLWMP     = r2y_ctrl_ledge->scale_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.EGLWTC     = r2y_ctrl_ledge->table_clip_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.EGLWSCLRES = r2y_ctrl_ledge->scale_table_resol;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.EGLWSCLTBL = r2y_ctrl_ledge->scale_table_select;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.EGLWTCRES  = r2y_ctrl_ledge->gradation_table_resol;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCTL.bit.EGLWTCTBL  = r2y_ctrl_ledge->gradation_table_select;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK.bit.EGLWHPFK0 = r2y_ctrl_ledge->hpf_k[0];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK1, r2y_ctrl_ledge->hpf_k[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK2, r2y_ctrl_ledge->hpf_k[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK3, r2y_ctrl_ledge->hpf_k[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK4, r2y_ctrl_ledge->hpf_k[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK5, r2y_ctrl_ledge->hpf_k[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK6, r2y_ctrl_ledge->hpf_k[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK7, r2y_ctrl_ledge->hpf_k[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK8, r2y_ctrl_ledge->hpf_k[8] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWHPFK, union io_r2y_eglwhpfk, EGLWHPFK9, r2y_ctrl_ledge->hpf_k[9] );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPOF.bit.EGLWCORPOF_0 = r2y_ctrl_ledge->corp_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPOF.bit.EGLWCORPOF_1 = r2y_ctrl_ledge->corp_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPOF.bit.EGLWCORPOF_2 = r2y_ctrl_ledge->corp_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPOF.bit.EGLWCORPOF_3 = r2y_ctrl_ledge->corp_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPGA, union io_r2y_eglwcorpga, EGLWCORPGA_0, r2y_ctrl_ledge->corp_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPGA, union io_r2y_eglwcorpga, EGLWCORPGA_1, r2y_ctrl_ledge->corp_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPGA, union io_r2y_eglwcorpga, EGLWCORPGA_2, r2y_ctrl_ledge->corp_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPGA, union io_r2y_eglwcorpga, EGLWCORPGA_3, r2y_ctrl_ledge->corp_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPBD.bit.EGLWCORPBD_1 = r2y_ctrl_ledge->corp_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPBD.bit.EGLWCORPBD_2 = r2y_ctrl_ledge->corp_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORPBD.bit.EGLWCORPBD_3 = r2y_ctrl_ledge->corp_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMOF.bit.EGLWCORMOF_0 = r2y_ctrl_ledge->corm_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMOF.bit.EGLWCORMOF_1 = r2y_ctrl_ledge->corm_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMOF.bit.EGLWCORMOF_2 = r2y_ctrl_ledge->corm_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMOF.bit.EGLWCORMOF_3 = r2y_ctrl_ledge->corm_offset[3];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMGA, union io_r2y_eglwcormga, EGLWCORMGA_0, r2y_ctrl_ledge->corm_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMGA, union io_r2y_eglwcormga, EGLWCORMGA_1, r2y_ctrl_ledge->corm_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMGA, union io_r2y_eglwcormga, EGLWCORMGA_2, r2y_ctrl_ledge->corm_gain[2] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMGA, union io_r2y_eglwcormga, EGLWCORMGA_3, r2y_ctrl_ledge->corm_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMBD.bit.EGLWCORMBD_1 = r2y_ctrl_ledge->corm_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMBD.bit.EGLWCORMBD_2 = r2y_ctrl_ledge->corm_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCORMBD.bit.EGLWCORMBD_3 = r2y_ctrl_ledge->corm_border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWSCLSUP.bit.EGLWSCLSUP = r2y_ctrl_ledge->sup_scl;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPPOF.bit.EGLWCLPPOF_0 = r2y_ctrl_ledge->level_clip_p_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPPOF.bit.EGLWCLPPOF_1 = r2y_ctrl_ledge->level_clip_p_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPPOF.bit.EGLWCLPPOF_2 = r2y_ctrl_ledge->level_clip_p_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPPGA, union io_r2y_eglwclppga, EGLWCLPPGA_0, r2y_ctrl_ledge->level_clip_p_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPPGA, union io_r2y_eglwclppga, EGLWCLPPGA_1, r2y_ctrl_ledge->level_clip_p_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPPGA, union io_r2y_eglwclppga, EGLWCLPPGA_2, r2y_ctrl_ledge->level_clip_p_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPPBD.bit.EGLWCLPPBD_1 = r2y_ctrl_ledge->level_clip_p_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPPBD.bit.EGLWCLPPBD_2 = r2y_ctrl_ledge->level_clip_p_border[1];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPMOF.bit.EGLWCLPMOF_0 = r2y_ctrl_ledge->level_clip_m_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPMOF.bit.EGLWCLPMOF_1 = r2y_ctrl_ledge->level_clip_m_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPMOF.bit.EGLWCLPMOF_2 = r2y_ctrl_ledge->level_clip_m_offset[2];
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPMGA, union io_r2y_eglwclpmga, EGLWCLPMGA_0, r2y_ctrl_ledge->level_clip_m_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPMGA, union io_r2y_eglwclpmga, EGLWCLPMGA_1, r2y_ctrl_ledge->level_clip_m_gain[1] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPMGA, union io_r2y_eglwclpmga, EGLWCLPMGA_2, r2y_ctrl_ledge->level_clip_m_gain[2] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPMBD.bit.EGLWCLPMBD_1 = r2y_ctrl_ledge->level_clip_m_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGLW.EGLWCLPMBD.bit.EGLWCLPMBD_2 = r2y_ctrl_ledge->level_clip_m_border[1];
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set Low Edge scale table access enable
+ */
+INT32 Im_R2Y_Set_LowEdgeSclTblAccessEnable( UCHAR pipe_no, UCHAR scl_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_LowEdgeSclTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_low_edge_scl_tbl_accen_ctrl,
+									 scl_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_LowEdgeSclTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Set Low Edge step table access enable
+ */
+INT32 Im_R2Y_Set_LowEdgeStepTblAccessEnable( UCHAR pipe_no, UCHAR step_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_LowEdgeStepTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_low_edge_step_tbl_accen_ctrl,
+									 step_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_LowEdgeStepTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Is Post filter active
+ */
+INT32 Im_R2Y_Is_Act_PostFilter( UCHAR pipe_no, UCHAR* const active_status )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Is_Act_PostFilter error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	*active_status = (gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YFLAG.bit.YCFACT != 0)?(D_IM_R2Y_ENABLE_ON):(D_IM_R2Y_ENABLE_OFF);
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Edge dot noise correction control
+ */
+INT32 Im_R2Y_Ctrl_EdgeDotNoise( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_DOT_NOISE* const r2y_ctrl_edge_dot )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_edge_dot == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_EdgeDotNoise error. r2y_ctrl_edge_dot = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_EdgeDotNoise error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_edge_dot_noise_ctrl( pipe_no, r2y_ctrl_edge_dot );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTCTL.bit.EGDTHW     = r2y_ctrl_edge_dot->hf_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTCTL.bit.EGDTMW     = r2y_ctrl_edge_dot->mf_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTHWTH.bit.EGDTHWTHP = r2y_ctrl_edge_dot->hf_p_threshold;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTHWTH.bit.EGDTHWTHM = r2y_ctrl_edge_dot->hf_m_threshold;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTHWK.bit.EGDTHWKP   = r2y_ctrl_edge_dot->hf_p_coef;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTHWK.bit.EGDTHWKM   = r2y_ctrl_edge_dot->hf_m_coef;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTMWTH.bit.EGDTMWTHP = r2y_ctrl_edge_dot->mf_p_threshold;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTMWTH.bit.EGDTMWTHM = r2y_ctrl_edge_dot->mf_m_threshold;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTMWK.bit.EGDTMWKP   = r2y_ctrl_edge_dot->mf_p_coef;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGDT.EGDTMWK.bit.EGDTMWKM   = r2y_ctrl_edge_dot->mf_m_coef;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Map scale control
+ */
+INT32 Im_R2Y_Ctrl_MapScl( UCHAR pipe_no, const T_IM_R2Y_CTRL_MAPSCL* const r2y_ctrl_mapscl )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_mapscl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_MapScl error. r2y_ctrl_mapscl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_MapScl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSIZ.bit.EGMPSIZH        = r2y_ctrl_mapscl->block_size_h;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSIZ.bit.EGMPSIZV        = r2y_ctrl_mapscl->block_size_v;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSIZHINV.bit.EGMPINVH    = r2y_ctrl_mapscl->recip_multipli_h;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSIZHINV.bit.EGMPINVSFTH = r2y_ctrl_mapscl->recip_multipli_shift_h;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSIZVINV.bit.EGMPINVV    = r2y_ctrl_mapscl->recip_multipli_v;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSIZVINV.bit.EGMPINVSFTV = r2y_ctrl_mapscl->recip_multipli_shift_v;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSTAPH.bit.EGMPSTABH     = r2y_ctrl_mapscl->block_start_h;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSTAPH.bit.EGMPSTACH     = r2y_ctrl_mapscl->block_start_coord_h;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSTAPV.bit.EGMPSTABV     = r2y_ctrl_mapscl->block_start_v;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.MAPSCL.EGMPSTAPV.bit.EGMPSTACV     = r2y_ctrl_mapscl->block_start_coord_v;
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return D_DDIM_OK;
+}
+
+/* Set Map scale table access enable
+ */
+INT32 Im_R2Y_Set_MapSclTblAccessEnable( UCHAR pipe_no, UCHAR acc_enable, UCHAR wait_enable )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_MapSclTblAccessEnable error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	return im_r2y_set_access_enable( pipe_no,
+									 &gim_r2y_map_scl_tbl_accen_ctrl,
+									 acc_enable,
+									 wait_enable,
+									 M_IM_R2Y_ASSETION_MSG( "Im_R2Y_Set_MapSclTblAccessEnable error. Macro busy\n" )
+									 );
+}
+
+/* Edge emphasis blend control
+ */
+INT32 Im_R2Y_Ctrl_EdgeBlend( UCHAR pipe_no, const T_IM_R2Y_CTRL_EDGE_BLEND* const r2y_ctrl_edge_blend )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_edge_blend == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_EdgeBlend error. r2y_ctrl_edge_blend = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_EdgeBlend error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_edge_blend_ctrl( pipe_no, r2y_ctrl_edge_blend );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPCTL.bit.EGCMPS = r2y_ctrl_edge_blend->blend_type;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBD.bit.EGCMPBD_1 = r2y_ctrl_edge_blend->border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBD.bit.EGCMPBD_2 = r2y_ctrl_edge_blend->border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBD.bit.EGCMPBD_3 = r2y_ctrl_edge_blend->border[2];
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPALPOF.bit.EGCMPALPOF_0 = r2y_ctrl_edge_blend->alpha_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPALPOF.bit.EGCMPALPOF_1 = r2y_ctrl_edge_blend->alpha_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPALPOF.bit.EGCMPALPOF_2 = r2y_ctrl_edge_blend->alpha_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPALPOF.bit.EGCMPALPOF_3 = r2y_ctrl_edge_blend->alpha_offset[3];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPALPGA, union io_r2y_egcmpalpga, EGCMPALPGA_0, r2y_ctrl_edge_blend->alpha_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPALPGA, union io_r2y_egcmpalpga, EGCMPALPGA_1, r2y_ctrl_edge_blend->alpha_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPALPGA, union io_r2y_egcmpalpga, EGCMPALPGA_2, r2y_ctrl_edge_blend->alpha_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPALPGA, union io_r2y_egcmpalpga, EGCMPALPGA_3, r2y_ctrl_edge_blend->alpha_gain[3] );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBTAOF.bit.EGCMPBTAOF_0 = r2y_ctrl_edge_blend->beta_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBTAOF.bit.EGCMPBTAOF_1 = r2y_ctrl_edge_blend->beta_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBTAOF.bit.EGCMPBTAOF_2 = r2y_ctrl_edge_blend->beta_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBTAOF.bit.EGCMPBTAOF_3 = r2y_ctrl_edge_blend->beta_offset[3];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBTAGA, union io_r2y_egcmpbtaga, EGCMPBTAGA_0, r2y_ctrl_edge_blend->beta_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBTAGA, union io_r2y_egcmpbtaga, EGCMPBTAGA_1, r2y_ctrl_edge_blend->beta_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBTAGA, union io_r2y_egcmpbtaga, EGCMPBTAGA_2, r2y_ctrl_edge_blend->beta_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPBTAGA, union io_r2y_egcmpbtaga, EGCMPBTAGA_3, r2y_ctrl_edge_blend->beta_gain[3] );
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPCLP.bit.EGCMPCLPP = r2y_ctrl_edge_blend->level_clip_p;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCMP.EGCMPCLP.bit.EGCMPCLPM = r2y_ctrl_edge_blend->level_clip_m;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Chroma referenced edge and texture adjustment control
+ */
+INT32 Im_R2Y_Ctrl_CRefEdgeTextureAdjCommon( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_EDGE_TEXTURE_ADJ_COMMON* const r2y_ctrl_c_ref_edge_texture_adj_common )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_c_ref_edge_texture_adj_common == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_CRefEdgeTextureAdjCommon error. r2y_ctrl_c_ref_edge_texture_adj_common = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_CRefEdgeTextureAdjCommon error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_crv_ctrl( pipe_no, r2y_ctrl_c_ref_edge_texture_adj_common );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CRV.CRVAF, union io_r2y_crvaf, CRVAFX1, r2y_ctrl_c_ref_edge_texture_adj_common->cb_a_focus1_pos );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CRV.CRVAF, union io_r2y_crvaf, CRVAFY1, r2y_ctrl_c_ref_edge_texture_adj_common->cr_a_focus1_pos );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CRV.CRVAF, union io_r2y_crvaf, CRVAFX2, r2y_ctrl_c_ref_edge_texture_adj_common->cb_a_focus2_pos );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CRV.CRVAF, union io_r2y_crvaf, CRVAFY2, r2y_ctrl_c_ref_edge_texture_adj_common->cr_a_focus2_pos );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CRV.CRVBF, union io_r2y_crvbf, CRVBFX1, r2y_ctrl_c_ref_edge_texture_adj_common->cb_b_focus1_pos );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CRV.CRVBF, union io_r2y_crvbf, CRVBFY1, r2y_ctrl_c_ref_edge_texture_adj_common->cr_b_focus1_pos );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CRV.CRVBF, union io_r2y_crvbf, CRVBFX2, r2y_ctrl_c_ref_edge_texture_adj_common->cb_b_focus2_pos );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CRV.CRVBF, union io_r2y_crvbf, CRVBFY2, r2y_ctrl_c_ref_edge_texture_adj_common->cr_b_focus2_pos );
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Chroma referenced edge adjustment control
+ */
+INT32 Im_R2Y_Ctrl_CRefEdgeAdj( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_EDGE_ADJ* const r2y_ctrl_c_ref_edge_adj )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_c_ref_edge_adj == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_CRefEdgeAdj error. r2y_ctrl_c_ref_edge_adj = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_CRefEdgeAdj error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_egcrv_ctrl( pipe_no, r2y_ctrl_c_ref_edge_adj );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVCTL.bit.EGCRAE   = r2y_ctrl_c_ref_edge_adj->area_a_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVCTL.bit.EGCRBE   = r2y_ctrl_c_ref_edge_adj->area_b_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVCTL.bit.EGCRVMRG = r2y_ctrl_c_ref_edge_adj->merge_method;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVASCLOF.bit.EGCRVASCLOF1 = r2y_ctrl_c_ref_edge_adj->area_a_scale_offset;
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVASCLGA, union io_r2y_egcrvasclga, EGCRVASCLGA_0, r2y_ctrl_c_ref_edge_adj->area_a_scale_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVASCLGA, union io_r2y_egcrvasclga, EGCRVASCLGA_1, r2y_ctrl_c_ref_edge_adj->area_a_scale_gain[1] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVASCLBD.bit.EGCRVASCLBD1 = r2y_ctrl_c_ref_edge_adj->area_a_scale_border;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVASCLCP.bit.EGCRVASCLCPL = r2y_ctrl_c_ref_edge_adj->area_a_scale_clip_lo;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVASCLCP.bit.EGCRVASCLCPH = r2y_ctrl_c_ref_edge_adj->area_a_scale_clip_hi;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYASCLGA.bit.EGYASCLGA0     = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_gain_p;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYASCLGA.bit.EGYASCLGA1     = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_gain_m;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYASCLBD.bit.EGYASCLBD_0    = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYASCLBD.bit.EGYASCLBD_1    = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYASCLCLP.bit.EGYASCLCLPL   = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_clip_lo;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYASCLCLP.bit.EGYASCLCLPH   = r2y_ctrl_c_ref_edge_adj->area_a_y_scale_clip_hi;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVBSCLOF.bit.EGCRVBSCLOF1 = r2y_ctrl_c_ref_edge_adj->area_b_scale_offset;
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVBSCLGA, union io_r2y_egcrvbsclga, EGCRVBSCLGA_0, r2y_ctrl_c_ref_edge_adj->area_b_scale_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVBSCLGA, union io_r2y_egcrvbsclga, EGCRVBSCLGA_1, r2y_ctrl_c_ref_edge_adj->area_b_scale_gain[1] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVBSCLBD.bit.EGCRVBSCLBD1 = r2y_ctrl_c_ref_edge_adj->area_b_scale_border;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVBSCLCP.bit.EGCRVBSCLCPL = r2y_ctrl_c_ref_edge_adj->area_b_scale_clip_lo;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVBSCLCP.bit.EGCRVBSCLCPH = r2y_ctrl_c_ref_edge_adj->area_b_scale_clip_hi;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYBSCLGA.bit.EGYBSCLGA0     = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_gain_p;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYBSCLGA.bit.EGYBSCLGA1     = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_gain_m;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYBSCLBD.bit.EGYBSCLBD_0    = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYBSCLBD.bit.EGYBSCLBD_1    = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYBSCLCLP.bit.EGYBSCLCLPL   = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_clip_lo;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGYBSCLCLP.bit.EGYBSCLCLPH   = r2y_ctrl_c_ref_edge_adj->area_b_y_scale_clip_hi;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVCLP.bit.EGCRVCLPP = r2y_ctrl_c_ref_edge_adj->level_clip_p;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.EGCRV.EGCRVCLP.bit.EGCRVCLPM = r2y_ctrl_c_ref_edge_adj->level_clip_m;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Chroma referenced luminance blend control
+ */
+INT32 Im_R2Y_Ctrl_CRefYbBlend( UCHAR pipe_no, const T_IM_R2Y_CTRL_C_REF_YB_BLEND* const r2y_ctrl_c_ref_yb_blend )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_c_ref_yb_blend == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_CRefYbBlend error. r2y_ctrl_c_ref_yb_blend = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_CRefYbBlend error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_ybcrv_ctrl( pipe_no, r2y_ctrl_c_ref_yb_blend );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVCTL.bit.YBCRAE = r2y_ctrl_c_ref_yb_blend->area_a_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVCTL.bit.YBCRBE = r2y_ctrl_c_ref_yb_blend->area_b_enable;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVAALPOF.bit.YBCRVAALPOF1 = r2y_ctrl_c_ref_yb_blend->area_a_offset;
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVAALPGA, union io_r2y_ybcrvaalpga, YBCRVAALPGA_0, r2y_ctrl_c_ref_yb_blend->area_a_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVAALPGA, union io_r2y_ybcrvaalpga, YBCRVAALPGA_1, r2y_ctrl_c_ref_yb_blend->area_a_gain[1] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVAALPBD.bit.YBCRVAALPBD1 = r2y_ctrl_c_ref_yb_blend->area_a_border;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVAALPCP.bit.YBCRVAALPCPL = r2y_ctrl_c_ref_yb_blend->area_a_scale_clip_lo;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVAALPCP.bit.YBCRVAALPCPH = r2y_ctrl_c_ref_yb_blend->area_a_scale_clip_hi;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYAALPGA.bit.YBYAALPGA0     = r2y_ctrl_c_ref_yb_blend->area_a_correct_gain_p;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYAALPGA.bit.YBYAALPGA1     = r2y_ctrl_c_ref_yb_blend->area_a_correct_gain_m;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYAALPBD.bit.YBYAALPBD_0    = r2y_ctrl_c_ref_yb_blend->area_a_correct_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYAALPBD.bit.YBYAALPBD_1    = r2y_ctrl_c_ref_yb_blend->area_a_correct_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYAALPCLP.bit.YBYAALPCLPL   = r2y_ctrl_c_ref_yb_blend->area_a_correct_clip_lo;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYAALPCLP.bit.YBYAALPCLPH   = r2y_ctrl_c_ref_yb_blend->area_a_correct_clip_hi;
+
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVBALPOF.bit.YBCRVBALPOF1 = r2y_ctrl_c_ref_yb_blend->area_b_offset;
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVBALPGA, union io_r2y_ybcrvbalpga, YBCRVBALPGA_0, r2y_ctrl_c_ref_yb_blend->area_b_gain[0] );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVBALPGA, union io_r2y_ybcrvbalpga, YBCRVBALPGA_1, r2y_ctrl_c_ref_yb_blend->area_b_gain[1] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVBALPBD.bit.YBCRVBALPBD1 = r2y_ctrl_c_ref_yb_blend->area_b_border;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVBALPCP.bit.YBCRVBALPCPL = r2y_ctrl_c_ref_yb_blend->area_b_scale_clip_lo;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBCRVBALPCP.bit.YBCRVBALPCPH = r2y_ctrl_c_ref_yb_blend->area_b_scale_clip_hi;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYBALPGA.bit.YBYBALPGA0     = r2y_ctrl_c_ref_yb_blend->area_b_correct_gain_p;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYBALPGA.bit.YBYBALPGA1     = r2y_ctrl_c_ref_yb_blend->area_b_correct_gain_m;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYBALPBD.bit.YBYBALPBD_0    = r2y_ctrl_c_ref_yb_blend->area_b_correct_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYBALPBD.bit.YBYBALPBD_1    = r2y_ctrl_c_ref_yb_blend->area_b_correct_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYBALPCLP.bit.YBYBALPCLPL   = r2y_ctrl_c_ref_yb_blend->area_b_correct_clip_lo;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.YBCRV.YBYBALPCLP.bit.YBYBALPCLPH   = r2y_ctrl_c_ref_yb_blend->area_b_correct_clip_hi;
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Color Noise Reduction(LPF) control
+ */
+INT32 Im_R2Y_Ctrl_Color_NR( UCHAR pipe_no, const T_IM_R2Y_CTRL_CLPF* const r2y_ctrl_clpf )
+{
+#ifdef CO_PARAM_CHECK
+	if( r2y_ctrl_clpf == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Color_NR error. r2y_ctrl_clpf = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Color_NR error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_color_nr_ctrl( pipe_no, r2y_ctrl_clpf );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFCTL.bit.CLPFEN = r2y_ctrl_clpf->clpf_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFCTL.bit.CLPFYA = r2y_ctrl_clpf->interlock_blend_enable;
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_0, r2y_ctrl_clpf->lpf_k[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_1, r2y_ctrl_clpf->lpf_k[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_2, r2y_ctrl_clpf->lpf_k[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_3, r2y_ctrl_clpf->lpf_k[3] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_4, r2y_ctrl_clpf->lpf_k[4] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_5, r2y_ctrl_clpf->lpf_k[5] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_6, r2y_ctrl_clpf->lpf_k[6] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_7, r2y_ctrl_clpf->lpf_k[7] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFK, union io_r2y_clpfk, CLPFK_8, r2y_ctrl_clpf->lpf_k[8] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFOF.bit.CLPFOF_0 = r2y_ctrl_clpf->lpf_ib_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFOF.bit.CLPFOF_1 = r2y_ctrl_clpf->lpf_ib_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFOF.bit.CLPFOF_2 = r2y_ctrl_clpf->lpf_ib_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFOF.bit.CLPFOF_3 = r2y_ctrl_clpf->lpf_ib_offset[3];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFGA, union io_r2y_clpfga, CLPFGA_0, r2y_ctrl_clpf->lpf_ib_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFGA, union io_r2y_clpfga, CLPFGA_1, r2y_ctrl_clpf->lpf_ib_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFGA, union io_r2y_clpfga, CLPFGA_2, r2y_ctrl_clpf->lpf_ib_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFGA, union io_r2y_clpfga, CLPFGA_3, r2y_ctrl_clpf->lpf_ib_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFBD.bit.CLPFBD_1 = r2y_ctrl_clpf->lpf_ib_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFBD.bit.CLPFBD_2 = r2y_ctrl_clpf->lpf_ib_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CLPF.CLPFBD.bit.CLPFBD_3 = r2y_ctrl_clpf->lpf_ib_border[2];
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Chroma suppress control
+ */
+INT32 Im_R2Y_Ctrl_Chroma_Suppress( UCHAR pipe_no, const T_IM_R2Y_CTRL_CS* const r2y_ctrl_cs )
+{
+#ifdef CO_PARAM_CHECK
+	if(r2y_ctrl_cs == NULL) {
+		Ddim_Assertion(("Im_R2Y_Ctrl_Chroma_Suppress error. r2y_ctrl_cs = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Ctrl_Chroma_Suppress error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+#ifdef CO_R2Y_RDMA_ON
+	im_r2y_set_rdma_val_chroma_suppress_ctrl( pipe_no, r2y_ctrl_cs );
+#else	// CO_R2Y_RDMA_ON
+	Im_R2Y_On_Pclk( pipe_no );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYCTL.bit.CSYEN  = r2y_ctrl_cs->csy_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYCTL.bit.CSYKY  = r2y_ctrl_cs->csy_mix_ratio;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYCTL.bit.CSYTBL = r2y_ctrl_cs->csy_select_table;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYOF.bit.CSYOF_0 = r2y_ctrl_cs->csy_offset[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYOF.bit.CSYOF_1 = r2y_ctrl_cs->csy_offset[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYOF.bit.CSYOF_2 = r2y_ctrl_cs->csy_offset[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYOF.bit.CSYOF_3 = r2y_ctrl_cs->csy_offset[3];
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYGA, union io_r2y_csyga, CSYGA_0, r2y_ctrl_cs->csy_gain[0] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYGA, union io_r2y_csyga, CSYGA_1, r2y_ctrl_cs->csy_gain[1] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYGA, union io_r2y_csyga, CSYGA_2, r2y_ctrl_cs->csy_gain[2] );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYGA, union io_r2y_csyga, CSYGA_3, r2y_ctrl_cs->csy_gain[3] );
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYBD.bit.CSYBD_1 = r2y_ctrl_cs->csy_border[0];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYBD.bit.CSYBD_2 = r2y_ctrl_cs->csy_border[1];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CSYBD.bit.CSYBD_3 = r2y_ctrl_cs->csy_border[2];
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.YCRVFX.bit.YRV    = r2y_ctrl_cs->y_rev_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.YCRVFX.bit.CRV    = r2y_ctrl_cs->c_rev_enable;
+	gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.YCRVFX.bit.CFIXEN = r2y_ctrl_cs->c_fixed_enable;
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CFIX, union io_r2y_cfix, CFIXB, r2y_ctrl_cs->cb_fixed );
+	im_r2y_set_reg_signed( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.CFIX, union io_r2y_cfix, CFIXR, r2y_ctrl_cs->cr_fixed );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.YCOF, union io_r2y_ycof, YOF, r2y_ctrl_cs->y_offset );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.YCOF, union io_r2y_ycof, COFB, r2y_ctrl_cs->cb_offset );
+	im_r2y_set_reg_signed_a( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CSP.YCOF, union io_r2y_ycof, COFR, r2y_ctrl_cs->cr_offset );
+	Im_R2Y_Off_Pclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+	return D_DDIM_OK;
+}
+
+/* Set Tone control table
+ */
+INT32 Im_R2Y_Set_Tone_Control_Table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+#ifndef CO_R2Y_RDMA_ON
+	UINT32 loop_cnt;
+#endif	// CO_R2Y_RDMA_ON
+	INT32  ercd;
+
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_Tone_Control_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( write_ofs_num >= D_IM_R2Y_TABLE_MAX_TONE ) {
+		Ddim_Assertion(("Im_R2Y_Set_Tone_Control_Table error. write_ofs_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (write_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_TONE ) {
+		Ddim_Assertion(("Im_R2Y_Set_Tone_Control_Table error. write_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_Tone_Control_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_ToneControlTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_tone_ctrl_table( pipe_no, src_tbl, write_ofs_num, array_num );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			gIM_Io_R2y_Tbl_Ptr[pipe_no]->TC.hword[write_ofs_num + loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_ToneControlTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+/* Get Tone control Table
+ */
+INT32 Im_R2Y_Get_Tone_Control_Table( UCHAR pipe_no, USHORT* const dst_tbl, USHORT read_ofs_num, USHORT array_num )
+{
+	INT32  ercd;
+
+#ifdef CO_PARAM_CHECK
+	if(dst_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Get_Tone_Control_Table error. dst_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( read_ofs_num >= D_IM_R2Y_TABLE_MAX_TONE ) {
+		Ddim_Assertion(("Im_R2Y_Get_Tone_Control_Table error. read_ofs_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (read_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_TONE ) {
+		Ddim_Assertion(("Im_R2Y_Get_Tone_Control_Table error. read_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_Tone_Control_Table error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	Im_R2Y_On_Hclk( pipe_no );
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_ToneControlTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		im_r2y_copy_reg_to_sdram_ushort( dst_tbl,	// Read access only support Word-width. (Hardware specification.)
+										 &gIM_Io_R2y_Tbl_Ptr[pipe_no]->TC.hword[im_r2y_rounddown_2(read_ofs_num)],
+										 array_num );
+
+		ercd = Im_R2Y_Set_ToneControlTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	Im_R2Y_Off_Hclk( pipe_no );
+
+	return ercd;
+}
+
+/* Get Luminance evaluation
+ */
+INT32 Im_R2Y_Get_LuminanceEvaluation_BeforeTone( UCHAR pipe_no, UINT32* const dst_addr, USHORT array_num )
+{
+	UINT32 loop_cnt;
+	INT32 ercd;
+
+#ifdef CO_PARAM_CHECK
+	if(dst_addr == NULL) {
+		Ddim_Assertion(("Im_R2Y_Get_LuminanceEvaluation_BeforeTone error. dst_addr = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_LuminanceEvaluation_BeforeTone error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	if( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YFLAG.bit.TCTACT != 0 ){
+		return D_IM_R2Y_MACRO_BUSY;
+	}
+
+	Im_R2Y_On_Hclk( pipe_no );
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_LuminanceEvaluationTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			dst_addr[loop_cnt] = gIM_Io_R2y_Tbl_Ptr[pipe_no]->TCTDATA.word[loop_cnt];
+		}
+
+		ercd = Im_R2Y_Set_LuminanceEvaluationTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	Im_R2Y_Off_Hclk( pipe_no );
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return ercd;
+}
+
+/* Get BTC Histogram value
+ */
+INT32 Im_R2Y_Get_Histogram_BeforeTone( UCHAR pipe_no, E_R2Y_BTC_HIST_RGBTBL data_type, T_IM_R2Y_TCHS_FLG* const overflow_flg, USHORT* const dst_addr )
+{
+	INT32 ercd;
+
+#ifdef CO_PARAM_CHECK
+	if( dst_addr == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_Histogram_BeforeTone error. dst_addr = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( overflow_flg == NULL ) {
+		Ddim_Assertion(("Im_R2Y_Get_Histogram_BeforeTone error. overflow_flg = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( data_type >= E_R2Y_BTC_HIST_RGBTBL_MAX ) {
+		Ddim_Assertion(("Im_R2Y_Get_Histogram_BeforeTone error. data_type >= MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no >= D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_Histogram_BeforeTone error. pipe_no>=D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif	// CO_PARAM_CHECK
+
+	Im_R2Y_On_Pclk( pipe_no );
+
+	if( gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.CNTL.R2YFLAG.bit.TCHACT != 0 ){
+		return D_IM_R2Y_MACRO_BUSY;
+	}
+
+	Im_R2Y_On_Hclk( pipe_no );
+
+	while( 1 ) {
+		overflow_flg->Y = gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHOV.bit.TCHYOV;
+		overflow_flg->R = gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHOV.bit.TCHROV;
+		overflow_flg->G = gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHOV.bit.TCHGOV;
+		overflow_flg->B = gIM_Io_R2y_Reg_Ptr[pipe_no]->F_R2Y.BTC.TCHOV.bit.TCHBOV;
+
+		ercd = Im_R2Y_Set_BTC_HistogramTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		switch( data_type ){
+			case E_R2Y_BTC_HIST_RGBTBL_R:
+				im_r2y_copy_reg_to_sdram_ushort( dst_addr,	// Read access only support Word-width. (Hardware specification.)
+												 gIM_Io_R2y_Tbl_Ptr[pipe_no]->TCHSRDATA.hword,
+												 D_IM_R2Y_TABLE_MAX_BTC_HISTOGRAM_RGB );
+				break;
+			case E_R2Y_BTC_HIST_RGBTBL_G:
+				im_r2y_copy_reg_to_sdram_ushort( dst_addr,	// Read access only support Word-width. (Hardware specification.)
+												 gIM_Io_R2y_Tbl_Ptr[pipe_no]->TCHSGDATA.hword,
+												 D_IM_R2Y_TABLE_MAX_BTC_HISTOGRAM_RGB );
+				break;
+			case E_R2Y_BTC_HIST_RGBTBL_B:
+				im_r2y_copy_reg_to_sdram_ushort( dst_addr,	// Read access only support Word-width. (Hardware specification.)
+												 gIM_Io_R2y_Tbl_Ptr[pipe_no]->TCHSBDATA.hword,
+												 D_IM_R2Y_TABLE_MAX_BTC_HISTOGRAM_RGB );
+				break;
+//			case E_R2Y_BTC_HIST_RGBTBL_Y:
+			default:
+				im_r2y_copy_reg_to_sdram_ushort( dst_addr,	// Read access only support Word-width. (Hardware specification.)
+												 gIM_Io_R2y_Tbl_Ptr[pipe_no]->TCHSYDATA.hword,
+												 D_IM_R2Y_TABLE_MAX_BTC_HISTOGRAM_Y );
+				break;
+		}
+
+		ercd = Im_R2Y_Set_BTC_HistogramTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	Im_R2Y_Off_Hclk( pipe_no );
+	Im_R2Y_Off_Pclk( pipe_no );
+
+	return ercd;
+}
+
+/* Set Gamma Table
+ */
+INT32 Im_R2Y_Set_Gamma_Table( UCHAR pipe_no, UCHAR tbl_index, const USHORT* const src_full_tbl, const ULLONG* const src_diff_tbl )
+{
+	volatile USHORT* dst_full_table = NULL;
+	volatile ULLONG* dst_diff_table = NULL;
+	UINT32 loopcnt;
+	UCHAR loop_sta, loop_end;
+	INT32 ercd;
+	INT32 ercd2;
+	UCHAR act_status;
+
+#ifdef CO_PARAM_CHECK
+	if(src_full_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_Gamma_Table error. src_full_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if(src_diff_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_Gamma_Table error. src_diff_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( tbl_index > 4 ){
+		Ddim_Assertion(("Im_R2Y_Set_Gamma_Table error. tbl_index > 4\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_Gamma_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loopcnt = loop_sta; loopcnt <= loop_end; loopcnt++ ){
+		Im_R2Y_Is_Act_Gamma( loopcnt, &act_status );
+		if( act_status != D_IM_R2Y_ENABLE_OFF ) {
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	ercd = Im_R2Y_Set_GammaTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+	if( ercd != D_DDIM_OK ) {
+		return ercd;
+	}
+	while( 1 ) {
+		switch (tbl_index) {
+			case 0:	// RGB common
+				dst_full_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMRGBFL.hword;
+				dst_diff_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMRGBDF.dword;
+				break;
+			case 1:	// R-Gamma
+				dst_full_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMRFL.hword;
+				dst_diff_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMRDF.dword;
+				break;
+			case 2:	// G-Gamma
+				dst_full_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMGFL.hword;
+				dst_diff_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMGDF.dword;
+				break;
+			case 3:	// B-Gamma
+				dst_full_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMBFL.hword;
+				dst_diff_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMBDF.dword;
+				break;
+			case 4:	// Yb-Gamma
+				dst_full_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMYBFL.hword;
+				dst_diff_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->GMYBDF.dword;
+				break;
+			default:
+				ercd = D_IM_R2Y_PARAM_ERROR;
+				break;
+		}
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		// for PG-Relief
+		if( (dst_full_table == NULL) || (dst_diff_table == NULL) ) {
+			break;
+		}
+
+		ercd = Im_R2Y_Set_GammaYbTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_gammma_diff_table( pipe_no, tbl_index, src_diff_tbl );
+		im_r2y_set_rdma_val_gammma_full_table( pipe_no, tbl_index, src_full_tbl );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+		for( loopcnt = 0; loopcnt < D_IM_R2Y_TABLE_MAX_GAMMA; loopcnt++ ) {
+			dst_full_table[loopcnt] = src_full_tbl[loopcnt];
+			dst_diff_table[loopcnt] = src_diff_tbl[loopcnt];
+		}
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_GammaYbTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+		break;
+	}
+
+	ercd2 = Im_R2Y_Set_GammaTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+	if( ercd2 != D_DDIM_OK ) {
+		return ercd2;
+	}
+
+	return ercd;
+}
+
+/* Set High Edge emphasis scaling Table
+ */
+INT32 Im_R2Y_Set_HighEdge_Scale_Table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	UINT32 loop_cnt;
+	UCHAR loop_sta, loop_end;
+	INT32 ercd;
+	UCHAR act_status;
+
+	// Start status check in R2Y core part
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_HighEdge_Scale_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (write_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_EDGE_SCALE_HI ) {
+		Ddim_Assertion(("Im_R2Y_Set_HighEdge_Scale_Table error. write_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_HighEdge_Scale_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		Im_R2Y_Is_Act_PostFilter( loop_cnt, &act_status );
+		if( act_status != D_IM_R2Y_ENABLE_OFF ) {
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_HighEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_hedge_scale_table( pipe_no, src_tbl, write_ofs_num, array_num );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			gIM_Io_R2y_Tbl_Ptr[pipe_no]->EGHWSCL.byte[write_ofs_num + loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_HighEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+/* Set High Edge emphasis stepping Table
+ */
+INT32 Im_R2Y_Set_HighEdge_Step_Table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	UINT32 loop_cnt;
+	UCHAR loop_sta, loop_end;
+	INT32 ercd;
+	UCHAR act_status;
+
+	// Start status check in R2Y core part
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_HighEdge_Step_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (write_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_EDGE_TC_HI ) {
+		Ddim_Assertion(("Im_R2Y_Set_HighEdge_Step_Table error. write_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_HighEdge_Step_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		Im_R2Y_Is_Act_PostFilter( loop_cnt, &act_status );
+		if( act_status != D_IM_R2Y_ENABLE_OFF ) {
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_HighEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_hedge_step_table( pipe_no, src_tbl, write_ofs_num, array_num );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			gIM_Io_R2y_Tbl_Ptr[pipe_no]->EGHWTON.hword[write_ofs_num + loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_HighEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+/* Set Medium Edge emphasis scaling Table
+ */
+INT32 Im_R2Y_Set_MediumEdge_Scale_Table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	UINT32 loop_cnt;
+	UCHAR loop_sta, loop_end;
+	INT32 ercd;
+	UCHAR act_status;
+
+	// Start status check in R2Y core part
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_MediumEdge_Scale_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (write_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_EDGE_SCALE_MEDIUM ) {
+		Ddim_Assertion(("Im_R2Y_Set_MediumEdge_Scale_Table error. write_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_MediumEdge_Scale_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		Im_R2Y_Is_Act_PostFilter( loop_cnt, &act_status );
+		if( act_status != D_IM_R2Y_ENABLE_OFF ) {
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_MediumEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_medge_scale_table( pipe_no, src_tbl, write_ofs_num, array_num );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			gIM_Io_R2y_Tbl_Ptr[pipe_no]->EGMWSCL.byte[write_ofs_num + loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_MediumEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+/* Set Medium Edge emphasis stepping Table
+ */
+INT32 Im_R2Y_Set_MediumEdge_Step_Table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	UINT32 loop_cnt;
+	UCHAR loop_sta, loop_end;
+	INT32 ercd;
+	UCHAR act_status;
+
+	// Start status check in R2Y core part
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_MediumEdge_Step_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (write_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_EDGE_TC_MEDIUM ) {
+		Ddim_Assertion(("Im_R2Y_Set_MediumEdge_Step_Table error. write_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_MediumEdge_Step_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		Im_R2Y_Is_Act_PostFilter( loop_cnt, &act_status );
+		if( act_status != D_IM_R2Y_ENABLE_OFF ) {
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_MediumEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_medge_step_table( pipe_no, src_tbl, write_ofs_num, array_num );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			gIM_Io_R2y_Tbl_Ptr[pipe_no]->EGMWTON.hword[write_ofs_num + loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_MediumEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+/* Set Low Edge emphasis scaling Table
+ */
+INT32 Im_R2Y_Set_LowEdge_Scale_Table( UCHAR pipe_no, const UCHAR* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	UINT32 loop_cnt;
+	UCHAR loop_sta, loop_end;
+	INT32 ercd;
+	UCHAR act_status;
+
+	// Start status check in R2Y core part
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_LowEdge_Scale_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (write_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_EDGE_SCALE_LO ) {
+		Ddim_Assertion(("Im_R2Y_Set_LowEdge_Scale_Table error. write_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_LowEdge_Scale_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		Im_R2Y_Is_Act_PostFilter( loop_cnt, &act_status );
+		if( act_status != D_IM_R2Y_ENABLE_OFF ) {
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_LowEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_ledge_scale_table( pipe_no, src_tbl, write_ofs_num, array_num );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			gIM_Io_R2y_Tbl_Ptr[pipe_no]->EGLWSCL.byte[write_ofs_num + loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_LowEdgeSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+/* Set Low Edge emphasis stepping Table
+ */
+INT32 Im_R2Y_Set_LowEdge_Step_Table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+	UINT32 loop_cnt;
+	UCHAR loop_sta, loop_end;
+	INT32 ercd;
+	UCHAR act_status;
+
+	// Start status check in R2Y core part
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_LowEdge_Step_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (write_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_EDGE_TC_LO ) {
+		Ddim_Assertion(("Im_R2Y_Set_LowEdge_Step_Table error. write_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_LowEdge_Step_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		Im_R2Y_Is_Act_PostFilter( loop_cnt, &act_status );
+		if( act_status != D_IM_R2Y_ENABLE_OFF ) {
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_LowEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_ledge_step_table( pipe_no, src_tbl, write_ofs_num, array_num );
+#else	// CO_R2Y_RDMA_ON
+		Im_R2Y_On_Hclk( pipe_no );
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			gIM_Io_R2y_Tbl_Ptr[pipe_no]->EGLWTON.hword[write_ofs_num + loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_LowEdgeStepTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+/* Set Map Scale Table
+ */
+INT32 Im_R2Y_Set_MapScl_Table( UCHAR pipe_no, const USHORT* const src_tbl, USHORT write_ofs_num, USHORT array_num )
+{
+#ifndef CO_R2Y_RDMA_ON
+	volatile USHORT* dst_table;
+#endif	// CO_R2Y_RDMA_ON
+	UINT32 loop_cnt;
+	UCHAR loop_sta, loop_end;
+	INT32 ercd;
+	UCHAR act_status;
+
+	// Start status check in R2Y core part
+#ifdef CO_PARAM_CHECK
+	if(src_tbl == NULL) {
+		Ddim_Assertion(("Im_R2Y_Set_MapScl_Table error. src_tbl = NULL\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( (write_ofs_num + array_num) > D_IM_R2Y_TABLE_MAX_MAPSCL ) {
+		Ddim_Assertion(("Im_R2Y_Set_MapScl_Table error. write_ofs_num + array_num > MAX\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Set_MapScl_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	im_r2y_get_loop_val( pipe_no, &loop_sta, &loop_end );
+
+	for( loop_cnt = loop_sta; loop_cnt <= loop_end; loop_cnt++ ){
+		Im_R2Y_Is_Act_PostFilter( loop_cnt, &act_status );
+		if( act_status != D_IM_R2Y_ENABLE_OFF ) {
+			return D_IM_R2Y_MACRO_BUSY;
+		}
+	}
+
+	while( 1 ) {
+		ercd = Im_R2Y_Set_MapSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_ON, D_IM_R2Y_WAIT_ON );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+#ifdef CO_R2Y_RDMA_ON
+		im_r2y_set_rdma_val_map_scale_table( pipe_no, src_tbl, write_ofs_num, array_num );
+#else	// CO_R2Y_RDMA_ON
+		dst_table = gIM_Io_R2y_Tbl_Ptr[pipe_no]->EGMPSCL.hword[0];
+
+		Im_R2Y_On_Hclk( pipe_no );
+
+		for( loop_cnt = 0; loop_cnt < array_num; loop_cnt++ ) {
+			dst_table[write_ofs_num + loop_cnt] = src_tbl[loop_cnt];
+		}
+
+		Im_R2Y_Off_Hclk( pipe_no );
+#endif	// CO_R2Y_RDMA_ON
+
+		ercd = Im_R2Y_Set_MapSclTblAccessEnable( pipe_no, D_IM_R2Y_ENABLE_OFF, D_IM_R2Y_WAIT_OFF );
+		if( ercd != D_DDIM_OK ) {
+			break;
+		}
+
+		ercd = D_DDIM_OK;
+		break;
+	}
+
+	return ercd;
+}
+
+#ifdef IM_R2Y_STATUS_PRINT
+VOID Im_R2Y_Print_Status( VOID )
+{
+	UINT32 loopcnt;
+	UINT32 loopcnt2;
+	UINT32 loopcnt3;
+
+	for( loopcnt3 = 0; loopcnt3 < 2; loopcnt3++ ) {
+		Ddim_Print(( "PIPE%u:\n", loopcnt3+1 ));
+		Ddim_Print(( "\tOutput pixs[%u]:\n", loopcnt3 ));
+		Ddim_Print(( "\t\tYYW0 x=%u, y=%u\n", im_r2y_calc_yyw0_out_width(loopcnt3), im_r2y_calc_yyw0_out_lines(loopcnt3) ));
+		Ddim_Print(( "\t\tYYW0a x=%u, y=%u\n", im_r2y_calc_yyw0a_out_width(loopcnt3), im_r2y_calc_yyw0a_out_lines(loopcnt3) ));
+		Ddim_Print(( "\t\tYYW1 x=%u, y=%u\n", im_r2y_calc_yyw1_out_width(loopcnt3), im_r2y_calc_yyw1_out_lines(loopcnt3) ));
+		Ddim_Print(( "\t\tYYW2 x=%u, y=%u\n", im_r2y_calc_yyw2_out_width(loopcnt3), im_r2y_calc_yyw2_out_lines(loopcnt3) ));
+		Ddim_Print(( "\tgIM_R2Y_State[%u]:\n", loopcnt3 ));
+		Ddim_Print(( "\t\twas_started = %u\n", gIM_R2Y_State[loopcnt3].was_started ));
+		Ddim_Print(( "\t\tvideo_photo_mode = %u\n", gIM_R2Y_State[loopcnt3].video_photo_mode ));
+		Ddim_Print(( "\t\tbusy_state = %u\n", gIM_R2Y_State[loopcnt3].busy_state ));
+		Ddim_Print(( "\t\tycf_bypass = %u\n", gIM_R2Y_State[loopcnt3].ycf_bypass ));
+		Ddim_Print(( "\t\tycf_padding = %u\n", gIM_R2Y_State[loopcnt3].ycf_padding ));
+		Ddim_Print(( "\t\tmcc_select = %u\n", gIM_R2Y_State[loopcnt3].mcc_select ));
+		Ddim_Print(( "\t\tmcc_bit_shift = %u\n", gIM_R2Y_State[loopcnt3].mcc_bit_shift ));
+		Ddim_Print(( "\t\tpix_avg_reduct_mode[0] = %u\n", gIM_R2Y_State[loopcnt3].pix_avg_reduct_mode[0] ));
+		Ddim_Print(( "\t\tpix_avg_reduct_mode[1] = %u\n", gIM_R2Y_State[loopcnt3].pix_avg_reduct_mode[1] ));
+		Ddim_Print(( "\t\tpix_avg_reduct_mode[2] = %u\n", gIM_R2Y_State[loopcnt3].pix_avg_reduct_mode[2] ));
+		Ddim_Print(( "\t\tpix_avg_reduct_en[0] = %u\n", gIM_R2Y_State[loopcnt3].pix_avg_reduct_en[0] ));
+		Ddim_Print(( "\t\tpix_avg_reduct_en[1] = %u\n", gIM_R2Y_State[loopcnt3].pix_avg_reduct_en[1] ));
+		Ddim_Print(( "\t\tpix_avg_reduct_en[2] = %u\n", gIM_R2Y_State[loopcnt3].pix_avg_reduct_en[2] ));
+		Ddim_Print(( "\t\toutput_mode_0a = %u\n", gIM_R2Y_State[loopcnt3].output_mode_0a ));
+		Ddim_Print(( "\t\tint_status = %u\n", gIM_R2Y_State[loopcnt3].int_status ));
+		Ddim_Print(( "\t\tr2y_user_handler = 0x%x\n", (UINT32)gIM_R2Y_State[loopcnt3].r2y_user_handler ));
+		Ddim_Print(( "\t\tuser_param = 0x%x\n", (UINT32)gIM_R2Y_State[loopcnt3].user_param ));
+		Ddim_Print(( "\t\tinput_dtype = %u\n", gIM_R2Y_State[loopcnt3].input_dtype ));
+		Ddim_Print(( "\t\tin_addr[0] = 0x%x\n", (UINT32)gIM_R2Y_State[loopcnt3].in_addr[D_IM_R2Y_PORT_0] ));
+		Ddim_Print(( "\t\tin_addr[1] = 0x%x\n", (UINT32)gIM_R2Y_State[loopcnt3].in_addr[D_IM_R2Y_PORT_1] ));
+		Ddim_Print(( "\t\tin_addr[2] = 0x%x\n", (UINT32)gIM_R2Y_State[loopcnt3].in_addr[D_IM_R2Y_PORT_2] ));
+		Ddim_Print(( "\t\tinput_global = %u\n", gIM_R2Y_State[loopcnt3].input_global ));
+		Ddim_Print(( "\t\ttop_offset[0] = %u\n", gIM_R2Y_State[loopcnt3].top_offset[D_IM_R2Y_PORT_0] ));
+		Ddim_Print(( "\t\ttop_offset[1] = %u\n", gIM_R2Y_State[loopcnt3].top_offset[D_IM_R2Y_PORT_1] ));
+		Ddim_Print(( "\t\ttop_offset[2] = %u\n", gIM_R2Y_State[loopcnt3].top_offset[D_IM_R2Y_PORT_2] ));
+		Ddim_Print(( "\t\tyyw_enable[0] = %u\n", gIM_R2Y_State[loopcnt3].yyw_enable[D_IM_R2Y_YYW_CH_0] ));
+		Ddim_Print(( "\t\tyyw_enable[1] = %u\n", gIM_R2Y_State[loopcnt3].yyw_enable[D_IM_R2Y_YYW_CH_1] ));
+		Ddim_Print(( "\t\tyyw_enable[2] = %u\n", gIM_R2Y_State[loopcnt3].yyw_enable[D_IM_R2Y_YYW_CH_2] ));
+		Ddim_Print(( "\t\tyyw_rect_valid = %u\n", gIM_R2Y_State[loopcnt3].yyw_rect_valid ));
+		Ddim_Print(( "\t\tyyw_width[0] = %u\n", gIM_R2Y_State[loopcnt3].yyw_width[D_IM_R2Y_YYW_CH_0] ));
+		Ddim_Print(( "\t\tyyw_width[1] = %u\n", gIM_R2Y_State[loopcnt3].yyw_width[D_IM_R2Y_YYW_CH_1] ));
+		Ddim_Print(( "\t\tyyw_width[2] = %u\n", gIM_R2Y_State[loopcnt3].yyw_width[D_IM_R2Y_YYW_CH_2] ));
+		Ddim_Print(( "\t\tyyw_lines[0] = %u\n", gIM_R2Y_State[loopcnt3].yyw_lines[D_IM_R2Y_YYW_CH_0] ));
+		Ddim_Print(( "\t\tyyw_lines[1] = %u\n", gIM_R2Y_State[loopcnt3].yyw_lines[D_IM_R2Y_YYW_CH_1] ));
+		Ddim_Print(( "\t\tyyw_lines[2] = %u\n", gIM_R2Y_State[loopcnt3].yyw_lines[D_IM_R2Y_YYW_CH_2] ));
+		Ddim_Print(( "\t\tring_pixs_info.pad_enable = %u\n", gIM_R2Y_State[loopcnt3].ring_pixs_info.pad_enable ));
+		Ddim_Print(( "\t\tring_pixs_info.ring_pixs = %u\n", gIM_R2Y_State[loopcnt3].ring_pixs_info.ring_pixs ));
+		Ddim_Print(( "\t\tring_pixs_info.pad_pixs = %u\n", gIM_R2Y_State[loopcnt3].ring_pixs_info.pad_pixs ));
+		Ddim_Print(( "\t\tring_pixs_info.ref_pixs = %u\n", gIM_R2Y_State[loopcnt3].ring_pixs_info.ref_pixs ));
+		Ddim_Print(( "\t\tinput_size.img_top = %u\n", gIM_R2Y_State[loopcnt3].input_size.img_top ));
+		Ddim_Print(( "\t\tinput_size.img_left = %u\n", gIM_R2Y_State[loopcnt3].input_size.img_left ));
+		Ddim_Print(( "\t\tinput_size.img_width = %u\n", gIM_R2Y_State[loopcnt3].input_size.img_width ));
+		Ddim_Print(( "\t\tinput_size.img_lines = %u\n", gIM_R2Y_State[loopcnt3].input_size.img_lines ));
+		Ddim_Print(( "\t\ttrim[0].trimming_enable = %u\n", gIM_R2Y_State[loopcnt3].trim[0].trimming_enable ));
+		Ddim_Print(( "\t\ttrim[0].trim_window.img_top = %u\n", gIM_R2Y_State[loopcnt3].trim[0].trim_window.img_top ));
+		Ddim_Print(( "\t\ttrim[0].trim_window.img_left = %u\n", gIM_R2Y_State[loopcnt3].trim[0].trim_window.img_left ));
+		Ddim_Print(( "\t\ttrim[0].trim_window.img_width = %u\n", gIM_R2Y_State[loopcnt3].trim[0].trim_window.img_width ));
+		Ddim_Print(( "\t\ttrim[0].trim_window.img_lines = %u\n", gIM_R2Y_State[loopcnt3].trim[0].trim_window.img_lines ));
+		Ddim_Print(( "\t\ttrim[1].trimming_enable = %u\n", gIM_R2Y_State[loopcnt3].trim[1].trimming_enable ));
+		Ddim_Print(( "\t\ttrim[1].trim_window.img_top = %u\n", gIM_R2Y_State[loopcnt3].trim[1].trim_window.img_top ));
+		Ddim_Print(( "\t\ttrim[1].trim_window.img_left = %u\n", gIM_R2Y_State[loopcnt3].trim[1].trim_window.img_left ));
+		Ddim_Print(( "\t\ttrim[1].trim_window.img_width = %u\n", gIM_R2Y_State[loopcnt3].trim[1].trim_window.img_width ));
+		Ddim_Print(( "\t\ttrim[1].trim_window.img_lines = %u\n", gIM_R2Y_State[loopcnt3].trim[1].trim_window.img_lines ));
+		Ddim_Print(( "\t\ttrim[2].trimming_enable = %u\n", gIM_R2Y_State[loopcnt3].trim[2].trimming_enable ));
+		Ddim_Print(( "\t\ttrim[2].trim_window.img_top = %u\n", gIM_R2Y_State[loopcnt3].trim[2].trim_window.img_top ));
+		Ddim_Print(( "\t\ttrim[2].trim_window.img_left = %u\n", gIM_R2Y_State[loopcnt3].trim[2].trim_window.img_left ));
+		Ddim_Print(( "\t\ttrim[2].trim_window.img_width = %u\n", gIM_R2Y_State[loopcnt3].trim[2].trim_window.img_width ));
+		Ddim_Print(( "\t\ttrim[2].trim_window.img_lines = %u\n", gIM_R2Y_State[loopcnt3].trim[2].trim_window.img_lines ));
+		Ddim_Print(( "\t\ttrim_ext.trimming_enable_b = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trimming_enable_b ));
+		Ddim_Print(( "\t\ttrim_ext.trimming_enable_c = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trimming_enable_c ));
+		Ddim_Print(( "\t\ttrim_ext.trim_window_b.img_top = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trim_window_b.img_top ));
+		Ddim_Print(( "\t\ttrim_ext.trim_window_b.img_left = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trim_window_b.img_left ));
+		Ddim_Print(( "\t\ttrim_ext.trim_window_b.img_width = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trim_window_b.img_width ));
+		Ddim_Print(( "\t\ttrim_ext.trim_window_b.img_lines = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trim_window_b.img_lines ));
+		Ddim_Print(( "\t\ttrim_ext.trim_window_c.img_top = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trim_window_c.img_top ));
+		Ddim_Print(( "\t\ttrim_ext.trim_window_c.img_left = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trim_window_c.img_left ));
+		Ddim_Print(( "\t\ttrim_ext.trim_window_c.img_width = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trim_window_c.img_width ));
+		Ddim_Print(( "\t\ttrim_ext.trim_window_c.img_lines = %u\n", gIM_R2Y_State[loopcnt3].trim_ext.trim_window_c.img_lines ));
+
+		for( loopcnt2 = 0; loopcnt2 < D_IM_R2Y_YYW_CH_MAX; loopcnt2++ ) {
+			Ddim_Print(( "\tgIM_R2Y_Out_Mng[%u]:\n", loopcnt2 ));
+			Ddim_Print(( "\t\tlatest_idx = %u\n", gIM_R2Y_Out_Mng[loopcnt3][loopcnt2].latest_idx ));
+			Ddim_Print(( "\t\tbank_initial_position = %u\n", gIM_R2Y_Out_Mng[loopcnt3][loopcnt2].bank_info.bank_initial_position ));
+			Ddim_Print(( "\t\tuse_bank_num = %u\n", gIM_R2Y_Out_Mng[loopcnt3][loopcnt2].bank_info.use_bank_num ));
+			for( loopcnt = 0; loopcnt < D_IM_R2Y_YYW_BANK_MAX; loopcnt++ ) {
+				Ddim_Print(( "\t\tBankNum = %u\n", loopcnt ));
+				Ddim_Print(( "\t\t\tout_addr[Y]  = 0x%x\n", (UINT32)gIM_R2Y_Out_Mng[loopcnt3][loopcnt2].bank_info.output_addr[loopcnt].ycc.addr_Y ));
+				Ddim_Print(( "\t\t\tout_addr[Cb] = 0x%x\n", (UINT32)gIM_R2Y_Out_Mng[loopcnt3][loopcnt2].bank_info.output_addr[loopcnt].ycc.addr_Cb ));
+				Ddim_Print(( "\t\t\tout_addr[Cr] = 0x%x\n", (UINT32)gIM_R2Y_Out_Mng[loopcnt3][loopcnt2].bank_info.output_addr[loopcnt].ycc.addr_Cr ));
+			}
+		}
+
+		Ddim_Print(( "\tgIM_R2Y_yyra_ofs_info:\n" ));
+		Ddim_Print(( "\t\tofs_x_pixs[%u] = %u\n", loopcnt2, gIM_R2Y_yyra_ofs_info[loopcnt3].ofs_x_pixs ));
+		Ddim_Print(( "\t\tofs_y_pixs[%u] = %u\n", loopcnt2, gIM_R2Y_yyra_ofs_info[loopcnt3].ofs_y_pixs ));
+		Ddim_Print(( "\t\tofs_bytes[%u] = %lu\n", loopcnt2, gIM_R2Y_yyra_ofs_info[loopcnt3].ofs_bytes ));
+	}
+}
+
+VOID Im_R2Y_Print_ClockStatus( VOID )
+{
+#ifdef CO_ACT_R2Y_CLOCK
+	Ddim_Print(( "R2Y1CK=%u\n", IO_CHIPTOP.CLKSTOP11.bit.R2Y1CK ));
+	Ddim_Print(( "\tgIM_R2Y_Clk_Ctrl_Cnt[0]      = %u\n", gIM_R2Y_Clk_Ctrl_Cnt[0] ));
+	Ddim_Print(( "\tgIM_R2Y_Clk_Ctrl_Disable[0]  = %u\n", gIM_R2Y_Clk_Ctrl_Disable[0] ));
+	Ddim_Print(( "R2Y2CK=%u\n", IO_CHIPTOP.CLKSTOP13.bit.R2Y2CK ));
+	Ddim_Print(( "\tgIM_R2Y_Clk_Ctrl_Cnt[1]      = %u\n", gIM_R2Y_Clk_Ctrl_Cnt[1] ));
+	Ddim_Print(( "\tgIM_R2Y_Clk_Ctrl_Disable[1]  = %u\n", gIM_R2Y_Clk_Ctrl_Disable[1] ));
+#endif	// CO_ACT_R2Y_CLOCK
+#ifdef CO_ACT_R2Y_HCLOCK
+	Ddim_Print(( "R2Y1HCLK=%u\n", IO_CHIPTOP.CLKSTOP11.bit.R2Y1AH ));
+	Ddim_Print(( "\tgIM_R2Y_Hclk_Ctrl_Cnt[0]     = %u\n", gIM_R2Y_Hclk_Ctrl_Cnt[0] ));
+	Ddim_Print(( "\tgIM_R2Y_Hclk_Ctrl_Disable[0] = %u\n", gIM_R2Y_Hclk_Ctrl_Disable[0] ));
+	Ddim_Print(( "R2Y2HCLK=%u\n", IO_CHIPTOP.CLKSTOP13.bit.R2Y2AH ));
+	Ddim_Print(( "\tgIM_R2Y_Hclk_Ctrl_Cnt[1]     = %u\n", gIM_R2Y_Hclk_Ctrl_Cnt[1] ));
+	Ddim_Print(( "\tgIM_R2Y_Hclk_Ctrl_Disable[1] = %u\n", gIM_R2Y_Hclk_Ctrl_Disable[1] ));
+#endif	// CO_ACT_R2Y_HCLOCK
+#ifdef CO_ACT_R2Y_PCLOCK
+	Ddim_Print(( "R2Y1PCLK=%u\n", IO_CHIPTOP.CLKSTOP11.bit.R2Y1AP ));
+	Ddim_Print(( "\tgIM_R2Y_Pclk_Ctrl_Cnt[0]     = %u\n", gIM_R2Y_Pclk_Ctrl_Cnt[0] ));
+	Ddim_Print(( "\tgIM_R2Y_Pclk_Ctrl_Disable[0] = %u\n", gIM_R2Y_Pclk_Ctrl_Disable[0] ));
+	Ddim_Print(( "R2Y2PCLK=%u\n", IO_CHIPTOP.CLKSTOP13.bit.R2Y2AP ));
+	Ddim_Print(( "\tgIM_R2Y_Pclk_Ctrl_Cnt[1]     = %u\n", gIM_R2Y_Pclk_Ctrl_Cnt[1] ));
+	Ddim_Print(( "\tgIM_R2Y_Pclk_Ctrl_Disable[1] = %u\n", gIM_R2Y_Pclk_Ctrl_Disable[1] ));
+#endif	// CO_ACT_R2Y_PCLOCK
+#ifdef CO_ACT_R2Y_ICLOCK
+	Ddim_Print(( "R2Y1ICLK=%u\n", IO_CHIPTOP.CLKSTOP11.bit.R2Y1AX ));
+	Ddim_Print(( "\tgIM_R2Y_Iclk_Ctrl_Cnt[0]     = %u\n", gIM_R2Y_Iclk_Ctrl_Cnt[0] ));
+	Ddim_Print(( "\tgIM_R2Y_Iclk_Ctrl_Disable[0] = %u\n", gIM_R2Y_Iclk_Ctrl_Disable[0] ));
+	Ddim_Print(( "R2Y2ICLK=%u\n", IO_CHIPTOP.CLKSTOP13.bit.R2Y2AX ));
+	Ddim_Print(( "\tgIM_R2Y_Iclk_Ctrl_Cnt[1]     = %u\n", gIM_R2Y_Iclk_Ctrl_Cnt[1] ));
+	Ddim_Print(( "\tgIM_R2Y_Iclk_Ctrl_Disable[1] = %u\n", gIM_R2Y_Iclk_Ctrl_Disable[1] ));
+#endif	// CO_ACT_R2Y_ICLOCK
+	Ddim_Print(( "\n" ));
+}
+
+VOID Im_R2Y_Print_AccEnStatus( VOID )
+{
+	UINT32 loopcnt;
+
+	Im_R2Y_On_Pclk( D_IM_R2Y_PIPE12 );
+	for( loopcnt = 0; loopcnt < 2; loopcnt++ ) {
+		Ddim_Print(( "PIPE%x\n", loopcnt+1 ));
+		Ddim_Print(( "YYRAEN_RGB_DEKNEE = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YYRAEN_RGB_DEKNEE ));
+		Ddim_Print(( "YYRAEN_YYR = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YYRAEN_YYR ));
+		Ddim_Print(( "YW0AEN_YYW0 = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0 ));
+		Ddim_Print(( "YW0AEN_YYW0_BICUBIC = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0_BICUBIC ));
+		Ddim_Print(( "YW0AEN_YYW0_EDGE = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0_EDGE ));
+		Ddim_Print(( "YW0AEN_YYW0A = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YW0AEN_YYW0A ));
+		Ddim_Print(( "YW1AEN_YYW1 = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1 ));
+		Ddim_Print(( "YW1AEN_YYW1_BICUBIC = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1_BICUBIC ));
+		Ddim_Print(( "YW1AEN_YYW1_EDGE = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YW1AEN_YYW1_EDGE ));
+		Ddim_Print(( "YW2AEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.YW2AEN ));
+		Ddim_Print(( "HSTAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->R2Y_CMN.RAMAEN.bit.HSTAEN ));
+
+		Ddim_Print(( "TCTAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.BTC.TCTCTL.bit.TCTAEN ));
+		Ddim_Print(( "TCHAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.BTC.TCHSCTL.bit.TCHAEN ));
+		Ddim_Print(( "TCAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.TC.TCCTL.bit.TCAEN ));
+		Ddim_Print(( "GMAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.GAM.GMCTL.bit.GMAEN ));
+		Ddim_Print(( "GMYAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.GAM.GMCTL.bit.GMYAEN ));
+		Ddim_Print(( "EHSAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.EGHW.EGHWCTL.bit.EHSAEN ));
+		Ddim_Print(( "EHTAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.EGHW.EGHWCTL.bit.EHTAEN ));
+		Ddim_Print(( "EMSAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.EGMW.EGMWCTL.bit.EMSAEN ));
+		Ddim_Print(( "EMTAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.EGMW.EGMWCTL.bit.EMTAEN ));
+		Ddim_Print(( "ELSAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.EGLW.EGLWCTL.bit.ELSAEN ));
+		Ddim_Print(( "ELTAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.EGLW.EGLWCTL.bit.ELTAEN ));
+		Ddim_Print(( "EMPAEN = 0x%x\n", gIM_Io_R2y_Reg_Ptr[loopcnt]->F_R2Y.MAPSCL.EGMPCTL.bit.EMPAEN ));
+	}
+	Im_R2Y_Off_Pclk( D_IM_R2Y_PIPE12 );
+}
+#endif
+
+#ifdef CO_DDIM_UTILITY_USE
+//---------------------- utility section -------------------------------
+// Nothing Special
+//---------------------- colabo  section -------------------------------
+INT32 Im_R2Y_Get_RdmaAddr_EE0_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EE0_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EE0_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EE0_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EE1_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EE1_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EE1_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EE1_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_Deknee_Table( UCHAR pipe_no, E_R2Y_DKN_RGBTBL tbl_type, const T_IM_R2Y_CTRL_RDMA_DEKNEE_TBL_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( tbl_type >= E_R2Y_DKN_RGBTBL_MAX ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_Deknee_Table error. tbl_type>=E_R2Y_DKN_RGBTBL_MAX\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_Deknee_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	switch( tbl_type ){
+		case E_R2Y_DKN_RGBTBL_R:
+			*addr = &(gIM_R2Y_Deknee_Tbl_R_Addr[pipe_no]);
+			break;
+		case E_R2Y_DKN_RGBTBL_G:
+			*addr = &(gIM_R2Y_Deknee_Tbl_G_Addr[pipe_no]);
+			break;
+		case E_R2Y_DKN_RGBTBL_B:
+			*addr = &(gIM_R2Y_Deknee_Tbl_B_Addr[pipe_no]);
+			break;
+		default:
+			break;
+	}
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_Offset_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_OFST_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_Offset_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_OFST_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_WB_Clip_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_WB_CLIP_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_WB_Clip_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_WB_CLIP_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_CC0_Matrix_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_CC0_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_CC0_Matrix_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_CC0_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_CC0_Matrix_Coefficient_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_CC0_COEF_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_CC0_Matrix_Coefficient_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_CC0_COEF_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_Multi_Axis_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_MCYC_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_Multi_Axis_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_MCYC_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_BeforeTone_Offset_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_BTC_TCOF_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_BeforeTone_Offset_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_BTC_TCOF_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_BeforeTone_Tct_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_BTC_TCT_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_BeforeTone_Tct_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_BTC_TCT_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_BeforeTone_Tchs_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_BTC_TCHS_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_BeforeTone_Tchs_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_BTC_TCHS_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_Tone_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_TONE_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_Tone_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_TONE_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_Gamma_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_GAMMA_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_Gamma_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_GAMMA_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_CC1_Matrix_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_CC1_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_CC1_Matrix_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_CC1_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_CC1_Matrix_Coefficient_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_CC1_COEF_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_CC1_Matrix_Coefficient_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_CC1_COEF_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_YCC_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_YCC_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_YCC_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_YCC_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_YNR_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_YNR_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_YNR_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_YNR_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EENR_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EENR_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EENR_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EENR_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGHW_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EGHW_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGHW_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EGHW_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGMW_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EGMW_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGMW_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EGMW_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGLW_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EGLW_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGLW_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EGLW_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGDT_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EGDT_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGDT_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EGDT_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGCMP_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EGCMP_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGCMP_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EGCMP_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_CRV_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_CRV_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_CRV_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_CRV_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGCRV_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EGCRV_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGCRV_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EGCRV_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_YBCRV_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_YBCRV_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_YBCRV_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_YBCRV_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_CLPF_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_CLPF_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_CLPF_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_CLPF_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_CSP_Cntl( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_CSP_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_CSP_Cntl error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_CSP_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_Tone_Table( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_TONE_TBL_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_Tone_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_TONE_Tbl_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_GMDF_Table( UCHAR pipe_no, UCHAR tbl_index, const T_IM_R2Y_CTRL_RDMA_GMDF_TBL_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( tbl_index > 4 ){
+		Ddim_Assertion(("Im_R2Y_Get_RdmaAddr_GMDF_Table error. tbl_index > 4\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_GMDF_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	switch( tbl_index ){
+		case 0:
+			*addr = &(gIM_R2Y_GMRGBDF_Tbl_Addr[pipe_no]);
+			break;
+		case 1:
+			*addr = &(gIM_R2Y_GMRDF_Tbl_Addr[pipe_no]);
+			break;
+		case 2:
+			*addr = &(gIM_R2Y_GMGDF_Tbl_Addr[pipe_no]);
+			break;
+		case 3:
+			*addr = &(gIM_R2Y_GMBDF_Tbl_Addr[pipe_no]);
+			break;
+		case 4:
+			*addr = &(gIM_R2Y_GMYBDF_Tbl_Addr[pipe_no]);
+			break;
+		default:
+			break;
+	}
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_GMFL_Table( UCHAR pipe_no, UCHAR tbl_index, const T_IM_R2Y_CTRL_RDMA_GMFL_TBL_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( tbl_index > 4 ){
+		Ddim_Assertion(("Im_R2Y_Get_RdmaAddr_GMFL_Table error. tbl_index > 4\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_GMFL_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	switch( tbl_index ){
+		case 0:
+			*addr = &(gIM_R2Y_GMRGBFL_Tbl_Addr[pipe_no]);
+			break;
+		case 1:
+			*addr = &(gIM_R2Y_GMRFL_Tbl_Addr[pipe_no]);
+			break;
+		case 2:
+			*addr = &(gIM_R2Y_GMGFL_Tbl_Addr[pipe_no]);
+			break;
+		case 3:
+			*addr = &(gIM_R2Y_GMBFL_Tbl_Addr[pipe_no]);
+			break;
+		case 4:
+			*addr = &(gIM_R2Y_GMYBFL_Tbl_Addr[pipe_no]);
+			break;
+		default:
+			break;
+	}
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGWSCL_Table( UCHAR pipe_no, UCHAR tbl_index, const T_IM_R2Y_CTRL_RDMA_EGWSCL_TBL_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( tbl_index > 2 ){
+		Ddim_Assertion(("Im_R2Y_Get_RdmaAddr_EGWSCL_Table error. tbl_index > 2\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGWSCL_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	switch( tbl_index ){
+		case 0:
+			*addr = &(gIM_R2Y_EGHWSCL_Tbl_Addr[pipe_no]);
+			break;
+		case 1:
+			*addr = &(gIM_R2Y_EGMWSCL_Tbl_Addr[pipe_no]);
+			break;
+		case 2:
+			*addr = &(gIM_R2Y_EGLWSCL_Tbl_Addr[pipe_no]);
+			break;
+		default:
+			break;
+	}
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGWTON_Table( UCHAR pipe_no, UCHAR tbl_index, const T_IM_R2Y_CTRL_RDMA_EGWTON_TBL_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( tbl_index > 2 ){
+		Ddim_Assertion(("Im_R2Y_Get_RdmaAddr_EGWTON_Table error. tbl_index > 2\n"));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGWTON_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	switch( tbl_index ){
+		case 0:
+			*addr = &(gIM_R2Y_EGHWTON_Tbl_Addr[pipe_no]);
+			break;
+		case 1:
+			*addr = &(gIM_R2Y_EGMWTON_Tbl_Addr[pipe_no]);
+			break;
+		case 2:
+			*addr = &(gIM_R2Y_EGLWTON_Tbl_Addr[pipe_no]);
+			break;
+		default:
+			break;
+	}
+
+	return D_DDIM_OK;
+}
+
+INT32 Im_R2Y_Get_RdmaAddr_EGMPSCL_Table( UCHAR pipe_no, const T_IM_R2Y_CTRL_RDMA_EGMPSCL_TBL_ADDR** addr )
+{
+#ifdef CO_PARAM_CHECK
+	if( pipe_no > D_IM_R2Y_PIPE12 ){
+		Ddim_Assertion(( "Im_R2Y_Get_RdmaAddr_EGMPSCL_Table error. pipe_no>D_IM_R2Y_PIPE12\n" ));
+		return D_IM_R2Y_PARAM_ERROR;
+	}
+#endif
+
+	*addr = &(gIM_R2Y_EGMPSCL_Tbl_Addr[pipe_no]);
+
+	return D_DDIM_OK;
+}
+#endif	// CO_DDIM_UTILITY_USE
+

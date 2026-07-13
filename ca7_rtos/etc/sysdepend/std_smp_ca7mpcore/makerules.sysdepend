@@ -1,0 +1,266 @@
+#
+# ----------------------------------------------------------------------
+#     SMP T-Kernel
+#
+#     Copyright (C) 2007-2010 Ken Sakamura. All Rights Reserved.
+#     SMP T-Kernel is distributed under the T-License for SMP T-Kernel.
+# ----------------------------------------------------------------------
+#
+#     Version:   1.00.01
+#     Released by T-Engine Forum(http://www.t-engine.org) at 2010/02/19.
+#
+# ----------------------------------------------------------------------
+#
+
+#
+#	makerules
+#		for GNU make
+#
+#	default rules - system-dependent (NAVIENGINE)
+#
+#	MACHINE	target CPU
+#		smp_naviengine : T-Engine/NAVIENGINE(ARM11MPCORE)
+#
+#	TETYPE	target T-Engine type
+#		std	: standard T-Engine
+#
+#	GNUarm	GNU development tool for ARM
+#
+
+ifndef GNUarm
+$(error GNUarm is not set)
+endif
+# command path
+PATH = .
+ifneq ($(filter "$(origin GNUarm)", $(TOOL_ORIGIN)), )
+  PATH := $(PATH):$(GNUarm)/bin
+endif
+ifneq ($(filter "$(origin GNUs)", $(TOOL_ORIGIN)), )
+  PATH := $(PATH):$(GNUs)/bin
+endif
+ifneq ($(filter Linux-%, $(CROSS_ARCH)), )
+  PATH := $(PATH):/usr/local/bin:/bin:/usr/bin
+endif
+ifeq ("$(shell echo $(OS))", "Windows_NT")
+  PATH := $(PATH):/usr/local/bin:/bin:/usr/bin
+endif
+
+# ----- T-Engine/CA7MPCORE ---------------------------------
+
+# GCC environment
+TARGET_ARCH =
+
+# target type
+_CPUTYPE_FLAGS    = -march=armv7-a
+_CPUTYPE_FLAGS_AS = -marmv7-a
+_TE_SYSTEM_NAME_ = STD_SMP_CA7MPCORE
+
+ifeq ($(ENABLE_NEON), yes)
+_CPUTYPE_FLAGS += -mfpu=neon -mfloat-abi=hard -DENABLE_NEON
+_CPUTYPE_FLAGS_AS += -mfpu=neon -mfloat-abi=hard -DENABLE_NEON
+else
+_CPUTYPE_FLAGS += -mfloat-abi=soft
+_CPUTYPE_FLAGS_AS += -mno-fpu -mfloat-abi=soft
+endif
+
+
+# code set
+_CODESET_FLAGS = -mthumb-interwork
+
+### build option ###
+CFLAGS += -D__SMP__ -fno-builtin -ffreestanding
+CPPFLAGS +=
+ASFLAGS += -D__SMP__ -fno-builtin -ffreestanding
+LDFLAGS +=
+
+##ifeq ($(PLATFORM), PLATFORM_SUN7I_A20)
+CFLAGS += -DPLATFORM_SUN7I_A20 -mtune=cortex-a7
+ASFLAGS += -DPLATFORM_SUN7I_A20 -mtune=cortex-a7
+##endif
+##ifeq ($(PLATFORM), PLATFORM_ZYNQ)
+##CFLAGS += -DPLATFORM_ZYNQ -mtune=cortex-a9
+##ASFLAGS += -DPLATFORM_ZYNQ -mtune=cortex-a9
+## #BD:=$(shell cygpath -ma $(BD))
+##endif
+
+ifeq "$(OS)" "Windows_NT"
+BD := $(shell cygpath -m $(BD))
+endif
+
+HEADER         = $(BD)/include
+
+ifeq ($(PLATFORM), PLATFORM_RPI2)
+_CPUTYPE_FLAGS =
+_CPUTYPE_FLAGS_AS =
+CFLAGS += -DPLATFORM_RPI2 -mcpu=cortex-a7 -g
+ASFLAGS += -DPLATFORM_RPI2 -mcpu=cortex-a7 
+HEADER  += $(BD)/kernel/sysdepend/device/std_smp_ca7mpcore
+endif
+
+### C  ###
+CC := $(GNUarm)gcc
+OUTPUT_OPTION = -o $@
+ifeq ($(mode), debug)
+  CFLAGS += -g3 -O0
+  CPPFLAGS += $(HEADER:%=-I%) -D$(_TE_SYSTEM_NAME_)
+  #-DDEBUG
+else
+##########  CFLAGS += -O2
+  CFLAGS          += -marm
+  CFLAGS          += -Ofast
+  CPPFLAGS += $(HEADER:%=-I%) -D$(_TE_SYSTEM_NAME_)
+endif
+
+ifeq ($(USE_NEWLIB), yes)
+  CFLAGS += -DUSE_NEWLIB=1
+endif
+
+CFLAGS += $(_CPUTYPE_FLAGS) $(_CODESET_FLAGS) -mstructure-size-boundary=8 -ffreestanding -fsigned-char
+
+CFLAGS_WARNING      = -Wall
+#-Wno-error=unused-but-set-variable
+CFLAGS_WARNING_FULL = -pedantic -W -Wall
+
+COMPILE.c = $(CC) $(TARGET_ARCH) $(CFLAGS) $(CPPFLAGS) -c
+LINK.c = $(CC) $(TARGET_ARCH) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
+
+%.o: %.c
+	$(Q)echo compiling $@ ...;
+	$(Q)$(COMPILE.c) $< $(OUTPUT_OPTION)
+
+%.s: %.c
+	$(CC) $(TARGET_ARCH) $(CFLAGS) $(CPPFLAGS) -S $<
+
+%.i: %.c
+	$(CC) $(TARGET_ARCH) $(CFLAGS) $(CPPFLAGS) -E $< $(OUTPUT_OPTION)
+
+### C++ ###
+CXX := $(GNUarm)gcc
+CXXFLAGS = $(CFLAGS)
+
+COMPILE.cc = $(CXX) $(TARGET_ARCH) $(CXXFLAGS) $(CPPFLAGS) -c
+LINK.cc = $(CXX) $(TARGET_ARCH) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS)
+
+%.o: %.cc
+	$(COMPILE.cc) $< $(OUTPUT_OPTION)
+
+%.s: %.cc
+	$(CXX) $(TARGET_ARCH) $(CXXFLAGS) $(CPPFLAGS) -S $<
+
+%.i: %.cc
+	$(CXX) $(TARGET_ARCH) $(CXXFLAGS) $(CPPFLAGS) -E $< $(OUTPUT_OPTION)
+
+### asm ###
+AS = $(GNUarm)as
+ifeq ($(mode), debug)
+  ASFLAGS += -g3
+else
+  ASFLAGS +=
+endif
+
+ASFLAGS += $(_CPUTYPE_FLAGS) $(_CODESET_FLAGS)
+ASFLAGS.s = $(_CPUTYPE_FLAGS_AS) $(_CODESET_FLAGS)
+
+COMPILE.S = $(CC) $(TARGET_ARCH) $(ASFLAGS) $(CPPFLAGS) -c
+COMPILE.s = $(AS) $(ASFLAGS.s)
+
+%.o: %.S
+	$(Q)echo assembling $@ ...;
+	$(Q)$(COMPILE.S) $< $(OUTPUT_OPTION)
+
+%.o: %.s
+	$(Q)echo assembling $@ ...;
+	$(Q)$(COMPILE.s) $< $(OUTPUT_OPTION)
+
+%.i: %.S
+	$(CC) $(TARGET_ARCH) $(ASFLAGS) $(CPPFLAGS) -E $< $(OUTPUT_OPTION)
+
+### linker ###
+LD = $(GNUarm)ld
+ifeq ($(mode), debug)
+  LDFLAGS += $(LIBDIR:%=-L%)
+else
+  LDFLAGS += $(LIBDIR:%=-L%)
+endif
+
+LDFLAGS += $(_CPUTYPE_FLAGS) $(_CODESET_FLAGS)
+
+LIBDIR = $(COMMONLIB)
+LOADLIBES =
+LDOBJS =
+LDLIBS =
+
+# additional linker option
+ifneq ($(filter sl, $(options)), )
+  LDFLAGS2 = -static
+else
+  # no effect
+  LDFLAGS2 = -static
+endif
+LDFLAGS3 = -static -T $(COMMONLIB)/static.lnk
+START_ADR =
+
+# create executable
+LINK.o = $(CC) $(TARGET_ARCH) $(LDFLAGS) $(LDFLAGS2) $(START_ADR)
+
+# link objects
+# notice : "LINK_R.o" is only used to build the kernel . Not used to build the sdk. Therefore, the option is "nostdlib".
+###ifeq ($(USE_NEWLIB), yes)
+###  LINK_R.o = $(CC) $(TARGET_ARCH) $(LDFLAGS) -r -nostartfiles
+###else
+  LINK_R.o = $(CC) $(TARGET_ARCH) $(LDFLAGS) -r -nostdlib 
+###endif
+
+# link objects and libraries
+LINK_A.o = $(CC) $(TARGET_ARCH) $(LDFLAGS) -r
+
+%: %.o
+	$(LINK.o) $(LDOBJS) $^ $(LOADLIBES) $(LDLIBS) $(OUTPUT_OPTION)
+
+%.out: %.o
+	$(LINK.o) $(LDOBJS) $^ $(LOADLIBES) $(LDLIBS) $(OUTPUT_OPTION)
+
+
+### library ###
+AR = $(GNUarm)ar
+ARFLAGS = -rv
+RANLIB = $(GNUarm)ranlib
+
+(%): %
+	$(AR) $(ARFLAGS) $@ $%
+
+### create name list ###
+NM = $(GNUarm)nm
+NMFLAGS = -n
+
+%.map: %
+	$(NM) $(NMFLAGS) $< > $@
+
+%.map: %.out
+	$(NM) $(NMFLAGS) $< > $@
+
+%.map: %.abs
+	$(NM) $(NMFLAGS) $< > $@
+
+%.map: %.dll
+	$(NM) $(NMFLAGS) $< > $@
+
+
+### other ###
+ifndef CPP
+  CPP = $(GNUarm)cpp
+endif
+STRIP = $(GNUarm)strip --strip-unneeded
+
+OBJCOPY = $(GNUarm)objcopy
+OUTPUT_BIN = -O binary
+
+MKTKSVC=mktksvc
+MKTDSVC=mktdsvc
+MKIFLIB=mkiflib
+
+RM	= rm -f
+CP	= cp
+TOUCH = touch
+BKCOPY = $(BD)/etc/backup_copy -t
+FixPath = $1

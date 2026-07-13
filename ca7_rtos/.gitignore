@@ -1,0 +1,16 @@
+.git1
+*.o
+*.d
+*.axf
+*.bin
+*.txt
+*.a
+*.objs
+*.map
+target/cpu_tkernel/basefw/fj/system/src/bf_compile_info_update.c
+target/cpu_tkernel/basefw/lib/BaseFW.a
+target/cpu_tkernel/project/bin/MILB_SDK.axf
+target/cpu_tkernel/project/bin/MILB_SDK.bin
+target/cpu_tkernel/project/bin/MILB_SDK.map
+target/log.txt
+*.vscode
