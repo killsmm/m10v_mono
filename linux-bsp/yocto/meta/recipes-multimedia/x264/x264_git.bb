@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f"
 
 DEPENDS = "yasm-native"
 
-SRC_URI = "git://git.videolan.org/x264.git \
+SRC_URI = "git://code.videolan.org/videolan/x264.git;protocol=https;branch=master \
            file://don-t-default-to-cortex-a9-with-neon.patch \
            "
 
@@ -50,4 +50,3 @@ do_install() {
 
 # PIC can't be enabled for few BSP's
 INSANE_SKIP_${PN}_append = " textrel"
-
